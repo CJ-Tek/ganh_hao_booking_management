@@ -1,0 +1,24 @@
+.floorMapCanvas {
+  height: 520px;
+  border-radius: 12px;
+  position: relative;
+  background-image: var(--floor-background-image, none);
+  background-size: cover;
+  background-position: center;
+  background-color: #f1f3f5;
+  overflow: hidden;
+}
+
+.tableCard {
+  position: absolute;
+  left: var(--table-left);
+  top: var(--table-top);
+  width: 100px;
+  height: 60px;
+  border-radius: 10px;
+  border: 2px solid #0c61a4;
+  background-color: #fff;
+  padding: 6px;
+  cursor: grab;
+  user-select: none;
+}
