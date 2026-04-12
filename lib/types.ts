@@ -36,6 +36,20 @@ export interface DiningTable {
   positionY: number;
 }
 
+export interface FloorLayoutTemplateTableItem {
+  tableId: string;
+  name: string;
+  seats: number;
+  status: TableStatus;
+  positionX: number;
+  positionY: number;
+}
+
+export interface FloorLayoutTemplateSummary {
+  name: string;
+  updatedAt: string;
+}
+
 export interface Customer {
   id: string;
   fullName: string;

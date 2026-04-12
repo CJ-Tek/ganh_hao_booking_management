@@ -3,8 +3,9 @@
   border-radius: 12px;
   position: relative;
   background-image: var(--floor-background-image, none);
-  background-size: cover;
-  background-position: center;
+  background-size: var(--floor-background-size, 100%);
+  background-position: var(--floor-background-position-x, 50%) var(--floor-background-position-y, 50%);
+  background-repeat: no-repeat;
   background-color: #f1f3f5;
   overflow: hidden;
 }
@@ -19,6 +20,46 @@
   border: 2px solid #0c61a4;
   background-color: #fff;
   padding: 6px;
-  cursor: grab;
   user-select: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tableCardEdit {
+  cursor: grab;
+}
+
+.tableCardView {
+  cursor: pointer;
+}
+
+.toolbarRow {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.areaSelect {
+  min-width: 360px;
+  flex: 1;
+}
+
+.sliderControl {
+  min-width: 220px;
+}
+
+.templateNameInput {
+  min-width: 220px;
+}
+
+.templateSelect {
+  min-width: 280px;
+}
+
+.tableNameInput {
+  min-width: 220px;
+}
+
+.tableSelect {
+  min-width: 200px;
 }

@@ -15,10 +15,16 @@ import {
   checkInBookingInSupabase,
   createBookingInSupabase,
   fetchSnapshot,
+  getLastSelectedFloorLayoutTemplateInSupabase,
   isSupabaseEnabled,
+  listFloorLayoutTemplatesInSupabase,
   loginWithSupabase,
   markNotificationReadInSupabase,
+  applyFloorLayoutTemplateInSupabase,
+  saveFloorLayoutTemplateInSupabase,
+  setLastSelectedFloorLayoutTemplateInSupabase,
   setFloorBackgroundInSupabase,
+  deleteTableInSupabase,
   updateBookingStatusInSupabase,
   updateTablePositionInSupabase,
   updateTableStatusInSupabase,
@@ -29,6 +35,7 @@ import {
   AppUser,
   BookingStatus,
   DiningTable,
+  FloorLayoutTemplateSummary,
   Role,
   TableStatus,
 } from "@/lib/types";
@@ -62,10 +69,25 @@ interface AppContextValue {
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   checkInBooking: (bookingId: string) => Promise<void>;
   upsertTable: (table: Omit<DiningTable, "id"> & { id?: string }) => Promise<void>;
+  deleteTable: (tableId: string) => Promise<void>;
   updateTableStatus: (tableId: string, status: TableStatus) => Promise<void>;
   moveTable: (tableId: string, x: number, y: number) => void;
   persistTablePosition: (tableId: string) => Promise<void>;
   setFloorBackground: (areaId: string, imageDataUrl: string) => Promise<void>;
+  listFloorLayoutTemplates: (areaId: string) => Promise<FloorLayoutTemplateSummary[]>;
+  saveFloorLayoutTemplate: (input: {
+    areaId: string;
+    name: string;
+    backgroundImageDataUrl?: string;
+    backgroundScale: number;
+    tables: DiningTable[];
+  }) => Promise<void>;
+  applyFloorLayoutTemplate: (
+    areaId: string,
+    name: string
+  ) => Promise<{ backgroundScale: number; tableIds: string[] } | null>;
+  getLastSelectedFloorLayoutTemplate: (areaId: string) => Promise<string | null>;
+  setLastSelectedFloorLayoutTemplate: (areaId: string, templateName: string | null) => Promise<void>;
   addArea: (branchId: string, name: string, capacity: number) => Promise<void>;
   addUser: (payload: {
     username: string;
@@ -220,6 +242,14 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     await reload();
   };
 
+  const deleteTable = async (tableId: string) => {
+    if (!hasSupabase) {
+      return;
+    }
+    await deleteTableInSupabase(tableId);
+    await reload();
+  };
+
   const moveTable = (tableId: string, x: number, y: number) => {
     setState((prev) => ({
       ...prev,
@@ -246,6 +276,65 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }
     await setFloorBackgroundInSupabase(currentUser.id, areaId, imageDataUrl);
     await reload();
+  };
+
+  const listFloorLayoutTemplates = async (areaId: string): Promise<FloorLayoutTemplateSummary[]> => {
+    if (!hasSupabase) {
+      return [];
+    }
+    return listFloorLayoutTemplatesInSupabase(areaId);
+  };
+
+  const saveFloorLayoutTemplate = async (input: {
+    areaId: string;
+    name: string;
+    backgroundImageDataUrl?: string;
+    backgroundScale: number;
+    tables: DiningTable[];
+  }) => {
+    if (!hasSupabase || !currentUser) {
+      return;
+    }
+    await saveFloorLayoutTemplateInSupabase({
+      areaId: input.areaId,
+      name: input.name,
+      createdByUserId: currentUser.id,
+      backgroundImageDataUrl: input.backgroundImageDataUrl,
+      backgroundScale: input.backgroundScale,
+      tables: input.tables,
+    });
+  };
+
+  const applyFloorLayoutTemplate = async (areaId: string, name: string) => {
+    if (!hasSupabase || !currentUser) {
+      return null;
+    }
+    const result = await applyFloorLayoutTemplateInSupabase({
+      areaId,
+      name,
+      userId: currentUser.id,
+    });
+    if (result) {
+      await reload();
+    }
+    return result;
+  };
+
+  const getLastSelectedFloorLayoutTemplate = async (areaId: string) => {
+    if (!hasSupabase || !currentUser) {
+      return null;
+    }
+    return getLastSelectedFloorLayoutTemplateInSupabase(currentUser.id, areaId);
+  };
+
+  const setLastSelectedFloorLayoutTemplate = async (
+    areaId: string,
+    templateName: string | null
+  ) => {
+    if (!hasSupabase || !currentUser) {
+      return;
+    }
+    await setLastSelectedFloorLayoutTemplateInSupabase(currentUser.id, areaId, templateName);
   };
 
   const addArea = async (branchId: string, name: string, capacity: number) => {
@@ -298,10 +387,16 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     updateBookingStatus,
     checkInBooking,
     upsertTable,
+    deleteTable,
     updateTableStatus,
     moveTable,
     persistTablePosition,
     setFloorBackground,
+    listFloorLayoutTemplates,
+    saveFloorLayoutTemplate,
+    applyFloorLayoutTemplate,
+    getLastSelectedFloorLayoutTemplate,
+    setLastSelectedFloorLayoutTemplate,
     addArea,
     addUser,
     markNotificationRead,
