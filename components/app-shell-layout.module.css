@@ -4,8 +4,30 @@
   right: -3px;
 }
 
+.headerRoot {
+  min-width: 0;
+}
+
+.brandCopy {
+  min-width: 0;
+}
+
+.branchSelect {
+  width: 230px;
+}
+
 .notificationItem {
   border: 1px solid #e9ecef;
   border-radius: 8px;
   cursor: pointer;
+}
+
+@media (max-width: 48em) {
+  .brandCopy {
+    display: none;
+  }
+
+  .branchSelect {
+    width: 120px;
+  }
 }

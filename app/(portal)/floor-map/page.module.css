@@ -10,6 +10,10 @@
   overflow: hidden;
 }
 
+.floorMapCanvasEdit {
+  touch-action: none;
+}
+
 .tableCard {
   position: absolute;
   left: var(--table-left);
@@ -40,26 +44,44 @@
 }
 
 .areaSelect {
-  min-width: 360px;
+  min-width: 260px;
   flex: 1;
 }
 
 .sliderControl {
-  min-width: 220px;
+  min-width: 180px;
 }
 
 .templateNameInput {
-  min-width: 220px;
+  min-width: 180px;
 }
 
 .templateSelect {
-  min-width: 280px;
-}
-
-.tableNameInput {
   min-width: 220px;
 }
 
+.tableNameInput {
+  min-width: 180px;
+}
+
 .tableSelect {
-  min-width: 200px;
+  min-width: 180px;
+}
+
+@media (max-width: 62em) {
+  .floorMapCanvas {
+    height: 440px;
+  }
+}
+
+@media (max-width: 48em) {
+  .floorMapCanvas {
+    height: 340px;
+  }
+
+  .tableCard {
+    width: 92px;
+    height: 56px;
+    padding: 4px;
+  }
 }

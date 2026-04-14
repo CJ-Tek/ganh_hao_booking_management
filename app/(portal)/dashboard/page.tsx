@@ -3,7 +3,6 @@
 import dayjs from "dayjs";
 import {
   Badge,
-  Card,
   Grid,
   Group,
   RingProgress,
@@ -13,6 +12,7 @@ import {
   Text,
   Title,
 } from "@mantine/core";
+import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusLabel, tableStatusLabel } from "@/lib/display";
 
@@ -39,41 +39,41 @@ export default function DashboardPage() {
     <Stack>
       <Group justify="space-between">
         <div>
-          <Title order={2}>Dashboard tổng quan</Title>
+          <PortalPageTitle>Dashboard tổng quan</PortalPageTitle>
           <Text c="dimmed">Chi nhánh đang theo dõi: {branchNames.join(", ")}</Text>
         </div>
       </Group>
 
       <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
-        <Card withBorder>
+        <PortalSectionCard>
           <Text size="sm" c="dimmed">
             Tổng booking
           </Text>
           <Title order={2}>{branchBookings.length}</Title>
-        </Card>
-        <Card withBorder>
+        </PortalSectionCard>
+        <PortalSectionCard>
           <Text size="sm" c="dimmed">
             Booking check-in
           </Text>
           <Title order={2}>{checkedInCount}</Title>
-        </Card>
-        <Card withBorder>
+        </PortalSectionCard>
+        <PortalSectionCard>
           <Text size="sm" c="dimmed">
             Bàn đang phục vụ
           </Text>
           <Title order={2}>{statusCounts.occupied}</Title>
-        </Card>
-        <Card withBorder>
+        </PortalSectionCard>
+        <PortalSectionCard>
           <Text size="sm" c="dimmed">
             Bàn trống
           </Text>
           <Title order={2}>{statusCounts.available}</Title>
-        </Card>
+        </PortalSectionCard>
       </SimpleGrid>
 
       <Grid>
         <Grid.Col span={{ base: 12, lg: 4 }}>
-          <Card withBorder h="100%">
+          <PortalSectionCard h="100%">
             <Text fw={600}>Tỷ lệ bàn có khách</Text>
             <Group mt="lg" justify="center">
               <RingProgress
@@ -103,39 +103,41 @@ export default function DashboardPage() {
                 </Group>
               ))}
             </Stack>
-          </Card>
+          </PortalSectionCard>
         </Grid.Col>
         <Grid.Col span={{ base: 12, lg: 8 }}>
-          <Card withBorder>
+          <PortalSectionCard>
             <Text fw={600} mb="sm">
               Lịch sử booking theo nhân viên
             </Text>
-            <Table striped highlightOnHover>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Mã</Table.Th>
-                  <Table.Th>Giờ đặt</Table.Th>
-                  <Table.Th>Người tạo</Table.Th>
-                  <Table.Th>Trạng thái</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {branchBookings.slice(0, 8).map((booking) => {
-                  const user = state.users.find((item) => item.id === booking.createdByUserId);
-                  return (
-                    <Table.Tr key={booking.id}>
-                      <Table.Td>{booking.id}</Table.Td>
-                      <Table.Td>{dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY")}</Table.Td>
-                      <Table.Td>{user?.fullName ?? "Không rõ"}</Table.Td>
-                      <Table.Td>
-                        <Badge variant="light">{bookingStatusLabel[booking.status]}</Badge>
-                      </Table.Td>
-                    </Table.Tr>
-                  );
-                })}
-              </Table.Tbody>
-            </Table>
-          </Card>
+            <Table.ScrollContainer minWidth={620}>
+              <Table striped highlightOnHover>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Mã</Table.Th>
+                    <Table.Th>Giờ đặt</Table.Th>
+                    <Table.Th>Người tạo</Table.Th>
+                    <Table.Th>Trạng thái</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {branchBookings.slice(0, 8).map((booking) => {
+                    const user = state.users.find((item) => item.id === booking.createdByUserId);
+                    return (
+                      <Table.Tr key={booking.id}>
+                        <Table.Td>{booking.id}</Table.Td>
+                        <Table.Td>{dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY")}</Table.Td>
+                        <Table.Td>{user?.fullName ?? "Không rõ"}</Table.Td>
+                        <Table.Td>
+                          <Badge variant="light">{bookingStatusLabel[booking.status]}</Badge>
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          </PortalSectionCard>
         </Grid.Col>
       </Grid>
     </Stack>

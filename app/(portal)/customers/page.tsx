@@ -2,16 +2,17 @@
 
 import dayjs from "dayjs";
 import {
-  Card,
+  Badge,
   Drawer,
   Group,
+  ScrollArea,
   Stack,
   Text,
   TextInput,
-  Title,
 } from "@mantine/core";
 import { DataTable } from "mantine-datatable";
 import { useMemo, useState } from "react";
+import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { Customer } from "@/lib/types";
 
@@ -44,32 +45,62 @@ export default function CustomersPage() {
 
   return (
     <Stack>
-      <Title order={2}>Quản lý khách hàng</Title>
-      <Card withBorder>
+      <PortalPageTitle>Quản lý khách hàng</PortalPageTitle>
+      <PortalStickyPanel>
         <TextInput
           placeholder="Tìm theo tên hoặc số điện thoại"
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}
         />
-      </Card>
-      <Card withBorder>
-        <DataTable
-          withTableBorder
-          records={customerStats}
-          onRowClick={({ record }) => setSelectedCustomer(record)}
-          columns={[
-            { accessor: "fullName", title: "Khách hàng" },
-            { accessor: "phone", title: "Điện thoại" },
-            { accessor: "bookingCount", title: "Số booking" },
-            {
-              accessor: "latestBooking",
-              title: "Booking gần nhất",
-              render: (row) =>
-                row.latestBooking ? dayjs(row.latestBooking).format("DD/MM/YYYY HH:mm") : "-",
-            },
-          ]}
-        />
-      </Card>
+      </PortalStickyPanel>
+      <PortalSectionCard>
+        <Stack hiddenFrom="sm" gap="sm">
+          {customerStats.length === 0 ? (
+            <PortalSectionCard p="sm">
+              <Text c="dimmed" size="sm">
+                Không tìm thấy khách hàng phù hợp.
+              </Text>
+            </PortalSectionCard>
+          ) : (
+            customerStats.map((customer) => (
+              <PortalSectionCard p="sm" key={customer.id} onClick={() => setSelectedCustomer(customer)}>
+                <Group justify="space-between" mb={6}>
+                  <Text fw={700}>{customer.fullName}</Text>
+                  <Badge variant="light">{customer.bookingCount} booking</Badge>
+                </Group>
+                <Stack gap={4}>
+                  <Text size="sm">Điện thoại: {customer.phone}</Text>
+                  <Text size="sm" c="dimmed">
+                    Gần nhất:{" "}
+                    {customer.latestBooking ? dayjs(customer.latestBooking).format("DD/MM/YYYY HH:mm") : "-"}
+                  </Text>
+                </Stack>
+              </PortalSectionCard>
+            ))
+          )}
+        </Stack>
+
+        <ScrollArea type="auto" visibleFrom="sm">
+          <DataTable
+            minHeight={260}
+            withTableBorder
+            records={customerStats}
+            noRecordsText="Không tìm thấy khách hàng phù hợp."
+            onRowClick={({ record }) => setSelectedCustomer(record)}
+            columns={[
+              { accessor: "fullName", title: "Khách hàng" },
+              { accessor: "phone", title: "Điện thoại" },
+              { accessor: "bookingCount", title: "Số booking" },
+              {
+                accessor: "latestBooking",
+                title: "Booking gần nhất",
+                render: (row) =>
+                  row.latestBooking ? dayjs(row.latestBooking).format("DD/MM/YYYY HH:mm") : "-",
+              },
+            ]}
+          />
+        </ScrollArea>
+      </PortalSectionCard>
 
       <Drawer
         opened={!!selectedCustomer}
@@ -93,12 +124,12 @@ export default function CustomersPage() {
           {state.bookings
             .filter((booking) => booking.customerId === selectedCustomer?.id)
             .map((booking) => (
-              <Card withBorder key={booking.id} p="sm">
+              <PortalSectionCard key={booking.id} p="sm">
                 <Group justify="space-between">
                   <Text size="sm">{booking.id}</Text>
                   <Text size="sm">{dayjs(booking.bookingAt).format("DD/MM HH:mm")}</Text>
                 </Group>
-              </Card>
+              </PortalSectionCard>
             ))}
         </Stack>
       </Drawer>

@@ -14,6 +14,7 @@ import {
   addUserInSupabase,
   checkInBookingInSupabase,
   createBookingInSupabase,
+  deleteFloorLayoutTemplateInSupabase,
   fetchSnapshot,
   getLastSelectedFloorLayoutTemplateInSupabase,
   isSupabaseEnabled,
@@ -75,6 +76,7 @@ interface AppContextValue {
   persistTablePosition: (tableId: string) => Promise<void>;
   setFloorBackground: (areaId: string, imageDataUrl: string) => Promise<void>;
   listFloorLayoutTemplates: (areaId: string) => Promise<FloorLayoutTemplateSummary[]>;
+  deleteFloorLayoutTemplate: (areaId: string, name: string) => Promise<void>;
   saveFloorLayoutTemplate: (input: {
     areaId: string;
     name: string;
@@ -285,6 +287,13 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     return listFloorLayoutTemplatesInSupabase(areaId);
   };
 
+  const deleteFloorLayoutTemplate = async (areaId: string, name: string) => {
+    if (!hasSupabase) {
+      return;
+    }
+    await deleteFloorLayoutTemplateInSupabase(areaId, name);
+  };
+
   const saveFloorLayoutTemplate = async (input: {
     areaId: string;
     name: string;
@@ -393,6 +402,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     persistTablePosition,
     setFloorBackground,
     listFloorLayoutTemplates,
+    deleteFloorLayoutTemplate,
     saveFloorLayoutTemplate,
     applyFloorLayoutTemplate,
     getLastSelectedFloorLayoutTemplate,

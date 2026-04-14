@@ -2,18 +2,22 @@
 
 import {
   Button,
-  Card,
-  Group,
   NumberInput,
   Select,
+  SimpleGrid,
   Stack,
   Table,
   Text,
   TextInput,
-  Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useState } from "react";
+import {
+  PortalPageTitle,
+  PortalSectionCard,
+  PortalStickyAction,
+  PortalStickyPanel,
+} from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 
 export default function AreasTablesSettingsPage() {
@@ -37,9 +41,9 @@ export default function AreasTablesSettingsPage() {
 
   return (
     <Stack>
-      <Title order={2}>Cấu hình khu vực & sức chứa</Title>
-      <Card withBorder>
-        <Group align="end">
+      <PortalPageTitle>Cấu hình khu vực & sức chứa</PortalPageTitle>
+      <PortalStickyPanel>
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
           <Select
             label="Chi nhánh"
             value={branchId}
@@ -47,7 +51,6 @@ export default function AreasTablesSettingsPage() {
             data={state.branches
               .filter((branch) => filteredBranchIds.includes(branch.id))
               .map((branch) => ({ value: branch.id, label: branch.name }))}
-            w={280}
           />
           <TextInput
             label="Tên khu vực"
@@ -59,39 +62,63 @@ export default function AreasTablesSettingsPage() {
             value={capacity}
             onChange={(value) => setCapacity(Number(value || 1))}
             min={1}
-            w={140}
           />
-          <Button onClick={() => void handleAddArea()}>Thêm khu vực</Button>
-        </Group>
-      </Card>
+          <PortalStickyAction>
+            <Button fullWidth onClick={() => void handleAddArea()} mt={{ base: 0, lg: 26 }}>
+              Thêm khu vực
+            </Button>
+          </PortalStickyAction>
+        </SimpleGrid>
+      </PortalStickyPanel>
 
-      <Card withBorder>
+      <PortalSectionCard>
         <Text fw={600} mb="sm">
           Danh sách khu vực
         </Text>
-        <Table striped>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Chi nhánh</Table.Th>
-              <Table.Th>Khu vực</Table.Th>
-              <Table.Th>Sức chứa</Table.Th>
-              <Table.Th>Số bàn</Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {areas.map((area) => (
-              <Table.Tr key={area.id}>
-                <Table.Td>
-                  {state.branches.find((branch) => branch.id === area.branchId)?.name}
-                </Table.Td>
-                <Table.Td>{area.name}</Table.Td>
-                <Table.Td>{area.capacity}</Table.Td>
-                <Table.Td>{state.tables.filter((table) => table.areaId === area.id).length}</Table.Td>
+        <Stack hiddenFrom="sm" gap="sm">
+          {areas.map((area) => (
+            <PortalSectionCard p="sm" key={area.id}>
+              <Stack gap={4}>
+                <Text fw={700}>{area.name}</Text>
+                <Text size="sm">
+                  Chi nhánh: {state.branches.find((branch) => branch.id === area.branchId)?.name}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  Sức chứa: {area.capacity}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  Số bàn: {state.tables.filter((table) => table.areaId === area.id).length}
+                </Text>
+              </Stack>
+            </PortalSectionCard>
+          ))}
+        </Stack>
+
+        <Table.ScrollContainer minWidth={680} visibleFrom="sm">
+          <Table striped>
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Chi nhánh</Table.Th>
+                <Table.Th>Khu vực</Table.Th>
+                <Table.Th>Sức chứa</Table.Th>
+                <Table.Th>Số bàn</Table.Th>
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      </Card>
+            </Table.Thead>
+            <Table.Tbody>
+              {areas.map((area) => (
+                <Table.Tr key={area.id}>
+                  <Table.Td>
+                    {state.branches.find((branch) => branch.id === area.branchId)?.name}
+                  </Table.Td>
+                  <Table.Td>{area.name}</Table.Td>
+                  <Table.Td>{area.capacity}</Table.Td>
+                  <Table.Td>{state.tables.filter((table) => table.areaId === area.id).length}</Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
+      </PortalSectionCard>
     </Stack>
   );
 }

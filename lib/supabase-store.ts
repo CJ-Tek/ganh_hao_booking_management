@@ -394,6 +394,21 @@ export async function listFloorLayoutTemplatesInSupabase(
   );
 }
 
+export async function deleteFloorLayoutTemplateInSupabase(
+  areaId: string,
+  name: string
+): Promise<void> {
+  const client = ensureClient();
+  const { error } = await client
+    .from("floor_layout_templates")
+    .delete()
+    .eq("area_id", areaId)
+    .eq("name", name);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
 export async function getLastSelectedFloorLayoutTemplateInSupabase(
   userId: string,
   areaId: string

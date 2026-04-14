@@ -3,18 +3,18 @@
 import {
   Badge,
   Button,
-  Card,
-  Group,
   MultiSelect,
   PasswordInput,
   Select,
+  SimpleGrid,
   Stack,
   Table,
+  Text,
   TextInput,
-  Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useState } from "react";
+import { PortalPageTitle, PortalSectionCard, PortalStickyAction } from "@/components/portal-page";
 import { RouteGuard } from "@/components/route-guard";
 import { useAppContext } from "@/contexts/app-context";
 import { Role } from "@/lib/types";
@@ -51,9 +51,9 @@ export default function UserManagementPage() {
   return (
     <RouteGuard allowedRoles={["admin", "general_manager"]}>
       <Stack>
-        <Title order={2}>User management & phân quyền</Title>
-        <Card withBorder>
-          <Group align="end">
+        <PortalPageTitle>User management & phân quyền</PortalPageTitle>
+        <PortalSectionCard>
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
             <TextInput
               label="Tên đăng nhập"
               value={username}
@@ -87,40 +87,62 @@ export default function UserManagementPage() {
                 value: branch.id,
                 label: branch.name,
               }))}
-              w={300}
             />
-            <Button onClick={() => void handleCreateUser()}>Tạo tài khoản</Button>
-          </Group>
-        </Card>
+            <PortalStickyAction>
+              <Button fullWidth onClick={() => void handleCreateUser()} mt={{ base: 0, sm: 25 }}>
+                Tạo tài khoản
+              </Button>
+            </PortalStickyAction>
+          </SimpleGrid>
+        </PortalSectionCard>
 
-        <Card withBorder>
-          <Table striped>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Tài khoản</Table.Th>
-                <Table.Th>Họ tên</Table.Th>
-                <Table.Th>Vai trò</Table.Th>
-                <Table.Th>Chi nhánh</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {state.users.map((user) => (
-                <Table.Tr key={user.id}>
-                  <Table.Td>{user.username}</Table.Td>
-                  <Table.Td>{user.fullName}</Table.Td>
-                  <Table.Td>
-                    <Badge>{roleLabel[user.role]}</Badge>
-                  </Table.Td>
-                  <Table.Td>
+        <PortalSectionCard>
+          <Stack hiddenFrom="sm" gap="sm">
+            {state.users.map((user) => (
+              <PortalSectionCard p="sm" key={user.id}>
+                <Stack gap={4}>
+                  <Text fw={700}>{user.username}</Text>
+                  <Text size="sm">{user.fullName}</Text>
+                  <Badge w="fit-content">{roleLabel[user.role]}</Badge>
+                  <Text size="sm" c="dimmed">
                     {user.branchIds
                       .map((id) => state.branches.find((branch) => branch.id === id)?.name ?? id)
                       .join(", ")}
-                  </Table.Td>
+                  </Text>
+                </Stack>
+              </PortalSectionCard>
+            ))}
+          </Stack>
+
+          <Table.ScrollContainer minWidth={740} visibleFrom="sm">
+            <Table striped>
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Tài khoản</Table.Th>
+                  <Table.Th>Họ tên</Table.Th>
+                  <Table.Th>Vai trò</Table.Th>
+                  <Table.Th>Chi nhánh</Table.Th>
                 </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        </Card>
+              </Table.Thead>
+              <Table.Tbody>
+                {state.users.map((user) => (
+                  <Table.Tr key={user.id}>
+                    <Table.Td>{user.username}</Table.Td>
+                    <Table.Td>{user.fullName}</Table.Td>
+                    <Table.Td>
+                      <Badge>{roleLabel[user.role]}</Badge>
+                    </Table.Td>
+                    <Table.Td>
+                      {user.branchIds
+                        .map((id) => state.branches.find((branch) => branch.id === id)?.name ?? id)
+                        .join(", ")}
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        </PortalSectionCard>
       </Stack>
     </RouteGuard>
   );

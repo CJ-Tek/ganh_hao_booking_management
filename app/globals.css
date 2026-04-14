@@ -11,4 +11,55 @@ body {
 
 body {
   background: #f5f8fb;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.mobile-sticky-action {
+  position: static;
+}
+
+.mobile-sticky-panel {
+  position: static;
+}
+
+.portal-page-title {
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.portal-section-card {
+  border-radius: 12px;
+}
+
+.mobile-action-grid button {
+  min-height: 36px;
+}
+
+@media (max-width: 48em) {
+  body {
+    font-size: 15px;
+  }
+
+  .portal-page-title {
+    font-size: 1.35rem;
+  }
+
+  .mobile-sticky-action {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin-top: 4px;
+    padding-top: 10px;
+    background: linear-gradient(180deg, rgba(245, 248, 251, 0) 0%, #f5f8fb 36%);
+  }
+
+  .mobile-sticky-panel {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    padding-top: 6px;
+    background: #f5f8fb;
+  }
 }

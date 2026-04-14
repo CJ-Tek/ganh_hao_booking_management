@@ -1,7 +1,8 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Badge, Button, Card, Group, Stack, Text, Title } from "@mantine/core";
+import { Badge, Button, Group, Stack, Text } from "@mantine/core";
+import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 
 export default function NotificationsPage() {
@@ -13,11 +14,18 @@ export default function NotificationsPage() {
 
   return (
     <Stack>
-      <Title order={2}>Thông báo nội bộ</Title>
+      <PortalPageTitle>Thông báo nội bộ</PortalPageTitle>
+      {notifications.length === 0 && (
+        <PortalSectionCard>
+          <Text c="dimmed" size="sm">
+            Hiện chưa có thông báo mới cho chi nhánh của bạn.
+          </Text>
+        </PortalSectionCard>
+      )}
       {notifications.map((item) => (
-        <Card withBorder key={item.id}>
-          <Group justify="space-between" align="start">
-            <div>
+        <PortalSectionCard key={item.id}>
+          <Group justify="space-between" align="start" wrap="wrap">
+            <Stack gap={4} style={{ flex: 1, minWidth: 220 }}>
               <Group gap="xs">
                 <Text fw={700}>{item.title}</Text>
                 {!item.isRead && <Badge size="xs">Mới</Badge>}
@@ -28,7 +36,7 @@ export default function NotificationsPage() {
               <Text size="xs" c="dimmed" mt={4}>
                 {dayjs(item.createdAt).format("HH:mm DD/MM/YYYY")}
               </Text>
-            </div>
+            </Stack>
             <Button
               variant="light"
               size="compact-sm"
@@ -38,7 +46,7 @@ export default function NotificationsPage() {
               Đánh dấu đã đọc
             </Button>
           </Group>
-        </Card>
+        </PortalSectionCard>
       ))}
     </Stack>
   );

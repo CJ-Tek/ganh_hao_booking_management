@@ -85,16 +85,16 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <AppShell
-      header={{ height: 64 }}
+      header={{ height: { base: 72, sm: 64 } }}
       navbar={{ width: 290, breakpoint: "md", collapsed: { mobile: !opened } }}
-      padding="md"
+      padding={{ base: "sm", sm: "md" }}
     >
-      <AppShell.Header px="md">
-        <Group justify="space-between" h="100%">
-          <Group>
+      <AppShell.Header px={{ base: "sm", sm: "md" }}>
+        <Group justify="space-between" h="100%" wrap="nowrap" className={classes.headerRoot}>
+          <Group gap={{ base: "xs", sm: "md" }} wrap="nowrap">
             <Burger opened={opened} onClick={toggle} hiddenFrom="md" size="sm" />
-            <Image src="/logo/horizontal.png" alt="Logo Gành Hào" h={38} w="auto" />
-            <Stack gap={0}>
+            <Image src="/logo/horizontal.png" alt="Logo Gành Hào" h={34} w="auto" />
+            <Stack gap={0} className={classes.brandCopy}>
               <Title order={5}>Hệ thống quản lý đặt bàn</Title>
               <Text size="xs" c="dimmed">
                 {portalLabel}
@@ -102,11 +102,11 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             </Stack>
           </Group>
 
-          <Group>
+          <Group gap={{ base: 6, sm: "xs" }} wrap="nowrap">
             {currentUser?.role !== "manager" && (
               <Select
                 size="xs"
-                w={230}
+                className={classes.branchSelect}
                 value={state.activeBranchId}
                 onChange={(value) => value && setActiveBranchId(value)}
                 data={branches.map((branch) => ({ value: branch.id, label: branch.name }))}
@@ -166,7 +166,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               <Avatar color="brand" radius="xl">
                 {currentUser?.fullName[0] ?? "U"}
               </Avatar>
-              <Stack gap={0}>
+              <Stack gap={0} visibleFrom="sm">
                 <Text size="sm" fw={600}>
                   {currentUser?.fullName}
                 </Text>

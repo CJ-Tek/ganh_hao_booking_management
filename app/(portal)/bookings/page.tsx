@@ -4,7 +4,6 @@ import dayjs from "dayjs";
 import {
   Badge,
   Button,
-  Card,
   Grid,
   Group,
   NumberInput,
@@ -14,11 +13,16 @@ import {
   Text,
   TextInput,
   Textarea,
-  Title,
 } from "@mantine/core";
 import { DateTimePicker } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { useMemo, useState } from "react";
+import {
+  PortalMobileActionGrid,
+  PortalPageTitle,
+  PortalSectionCard,
+  PortalStickyAction,
+} from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 
@@ -87,10 +91,10 @@ export default function BookingsPage() {
 
   return (
     <Stack>
-      <Title order={2}>Booking - Tạo / sửa / hủy đặt bàn</Title>
+      <PortalPageTitle>Booking - Tạo / sửa / hủy đặt bàn</PortalPageTitle>
       <Grid>
         <Grid.Col span={{ base: 12, lg: 5 }}>
-          <Card withBorder>
+          <PortalSectionCard>
             <Stack>
               <Select
                 label="Chi nhánh"
@@ -146,43 +150,46 @@ export default function BookingsPage() {
                 value={note}
                 onChange={(event) => setNote(event.currentTarget.value)}
               />
-              <Button onClick={() => void handleCreate()}>Xác nhận tạo booking</Button>
+              <PortalStickyAction>
+                <Button fullWidth onClick={() => void handleCreate()}>
+                  Xác nhận tạo booking
+                </Button>
+              </PortalStickyAction>
             </Stack>
-          </Card>
+          </PortalSectionCard>
         </Grid.Col>
 
         <Grid.Col span={{ base: 12, lg: 7 }}>
-          <Card withBorder>
+          <PortalSectionCard>
             <Text fw={600} mb="sm">
               Danh sách booking hiện tại
             </Text>
-            <Table striped highlightOnHover>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Mã</Table.Th>
-                  <Table.Th>Khách</Table.Th>
-                  <Table.Th>Giờ</Table.Th>
-                  <Table.Th>Trạng thái</Table.Th>
-                  <Table.Th>Thao tác</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {branchBookings.map((booking) => {
+            <Stack hiddenFrom="sm" gap="sm">
+              {branchBookings.length === 0 ? (
+                <PortalSectionCard p="sm">
+                  <Text c="dimmed" size="sm">
+                    Chưa có booking nào cho bộ lọc hiện tại.
+                  </Text>
+                </PortalSectionCard>
+              ) : (
+                branchBookings.map((booking) => {
                   const customer = state.customers.find((item) => item.id === booking.customerId);
                   return (
-                    <Table.Tr key={booking.id}>
-                      <Table.Td>{booking.id}</Table.Td>
-                      <Table.Td>{customer?.fullName}</Table.Td>
-                      <Table.Td>{dayjs(booking.bookingAt).format("HH:mm DD/MM")}</Table.Td>
-                      <Table.Td>
+                    <PortalSectionCard key={booking.id} p="sm">
+                      <Group justify="space-between" mb={6}>
+                        <Text fw={700}>{booking.id}</Text>
                         <Badge color={bookingStatusColor[booking.status]} variant="light">
                           {bookingStatusLabel[booking.status]}
                         </Badge>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap={6}>
+                      </Group>
+                      <Stack gap={4}>
+                        <Text size="sm">Khách: {customer?.fullName ?? "Không rõ"}</Text>
+                        <Text size="sm" c="dimmed">
+                          Giờ: {dayjs(booking.bookingAt).format("HH:mm DD/MM")}
+                        </Text>
+                        <PortalMobileActionGrid mt={6}>
                           <Button
-                            size="compact-xs"
+                            size="sm"
                             variant="light"
                             color="green"
                             onClick={() => void checkInBooking(booking.id)}
@@ -191,7 +198,7 @@ export default function BookingsPage() {
                             Check-in
                           </Button>
                           <Button
-                            size="compact-xs"
+                            size="sm"
                             variant="light"
                             color="red"
                             onClick={() => void updateBookingStatus(booking.id, "cancelled")}
@@ -199,14 +206,77 @@ export default function BookingsPage() {
                           >
                             Hủy
                           </Button>
-                        </Group>
+                        </PortalMobileActionGrid>
+                      </Stack>
+                    </PortalSectionCard>
+                  );
+                })
+              )}
+            </Stack>
+
+            <Table.ScrollContainer minWidth={760} visibleFrom="sm">
+              <Table striped highlightOnHover>
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Mã</Table.Th>
+                    <Table.Th>Khách</Table.Th>
+                    <Table.Th>Giờ</Table.Th>
+                    <Table.Th>Trạng thái</Table.Th>
+                    <Table.Th>Thao tác</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {branchBookings.length === 0 ? (
+                    <Table.Tr>
+                      <Table.Td colSpan={5}>
+                        <Text c="dimmed" size="sm">
+                          Chưa có booking nào cho bộ lọc hiện tại.
+                        </Text>
                       </Table.Td>
                     </Table.Tr>
-                  );
-                })}
-              </Table.Tbody>
-            </Table>
-          </Card>
+                  ) : (
+                    branchBookings.map((booking) => {
+                      const customer = state.customers.find((item) => item.id === booking.customerId);
+                      return (
+                        <Table.Tr key={booking.id}>
+                          <Table.Td>{booking.id}</Table.Td>
+                          <Table.Td>{customer?.fullName}</Table.Td>
+                          <Table.Td>{dayjs(booking.bookingAt).format("HH:mm DD/MM")}</Table.Td>
+                          <Table.Td>
+                            <Badge color={bookingStatusColor[booking.status]} variant="light">
+                              {bookingStatusLabel[booking.status]}
+                            </Badge>
+                          </Table.Td>
+                          <Table.Td>
+                            <Group gap={6} wrap="wrap">
+                              <Button
+                                size="compact-xs"
+                                variant="light"
+                                color="green"
+                                onClick={() => void checkInBooking(booking.id)}
+                                disabled={booking.status !== "confirmed"}
+                              >
+                                Check-in
+                              </Button>
+                              <Button
+                                size="compact-xs"
+                                variant="light"
+                                color="red"
+                                onClick={() => void updateBookingStatus(booking.id, "cancelled")}
+                                disabled={booking.status === "cancelled"}
+                              >
+                                Hủy
+                              </Button>
+                            </Group>
+                          </Table.Td>
+                        </Table.Tr>
+                      );
+                    })
+                  )}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          </PortalSectionCard>
         </Grid.Col>
       </Grid>
     </Stack>

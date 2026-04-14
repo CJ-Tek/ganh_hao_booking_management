@@ -1,9 +1,26 @@
 "use client";
 
-import { Badge, Button, Card, Group, NumberInput, Select, Stack, TextInput, Title } from "@mantine/core";
+import {
+  Badge,
+  Button,
+  Group,
+  NumberInput,
+  ScrollArea,
+  Select,
+  SimpleGrid,
+  Stack,
+  Text,
+  TextInput,
+} from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { DataTable } from "mantine-datatable";
 import { useMemo, useState } from "react";
+import {
+  PortalActionGrid,
+  PortalPageTitle,
+  PortalSectionCard,
+  PortalStickyPanel,
+} from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { TableStatus } from "@/lib/types";
@@ -44,10 +61,10 @@ export default function TablesPage() {
 
   return (
     <Stack>
-      <Title order={2}>Quản lý bàn</Title>
+      <PortalPageTitle>Quản lý bàn</PortalPageTitle>
 
-      <Card withBorder>
-        <Group align="end">
+      <PortalStickyPanel>
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 5 }} spacing="sm">
           <Select
             label="Chi nhánh"
             value={branchId}
@@ -58,14 +75,12 @@ export default function TablesPage() {
             data={state.branches
               .filter((branch) => filteredBranchIds.includes(branch.id))
               .map((branch) => ({ value: branch.id, label: branch.name }))}
-            w={260}
           />
           <Select
             label="Khu vực"
             value={areaId}
             onChange={(value) => setAreaId(value ?? "")}
             data={areas.map((area) => ({ value: area.id, label: area.name }))}
-            w={220}
           />
           <TextInput label="Tên bàn" value={name} onChange={(event) => setName(event.currentTarget.value)} />
           <NumberInput
@@ -73,59 +88,106 @@ export default function TablesPage() {
             value={seats}
             onChange={(value) => setSeats(Number(value || 1))}
             min={1}
-            w={120}
           />
-          <Button onClick={() => void handleAddTable()}>Thêm bàn</Button>
-        </Group>
-      </Card>
+          <Button onClick={() => void handleAddTable()} mt={{ base: 0, lg: 26 }}>
+            Thêm bàn
+          </Button>
+        </SimpleGrid>
+      </PortalStickyPanel>
 
-      <Card withBorder>
-        <DataTable
-          withTableBorder
-          records={records}
-          columns={[
-            { accessor: "name", title: "Bàn" },
-            {
-              accessor: "branchId",
-              title: "Chi nhánh",
-              render: (row) => state.branches.find((item) => item.id === row.branchId)?.name,
-            },
-            {
-              accessor: "areaId",
-              title: "Khu vực",
-              render: (row) => state.areas.find((item) => item.id === row.areaId)?.name,
-            },
-            { accessor: "seats", title: "Số ghế" },
-            {
-              accessor: "status",
-              title: "Trạng thái",
-              render: (row) => (
-                <Badge color={tableStatusColor[row.status]} variant="light">
-                  {tableStatusLabel[row.status]}
-                </Badge>
-              ),
-            },
-            {
-              accessor: "actions",
-              title: "Cập nhật nhanh",
-              render: (row) => (
-                <Group gap={6}>
+      <PortalSectionCard>
+        <Stack hiddenFrom="sm" gap="sm">
+          {records.length === 0 ? (
+            <PortalSectionCard p="sm">
+              <Text c="dimmed" size="sm">
+                Chưa có bàn nào trong phạm vi chi nhánh đã chọn.
+              </Text>
+            </PortalSectionCard>
+          ) : (
+            records.map((row) => (
+              <PortalSectionCard key={row.id} p="sm">
+                <Group justify="space-between" mb={6}>
+                  <Text fw={700}>{row.name}</Text>
+                  <Badge color={tableStatusColor[row.status]} variant="light">
+                    {tableStatusLabel[row.status]}
+                  </Badge>
+                </Group>
+                <Stack gap={4}>
+                  <Text size="sm">Chi nhánh: {state.branches.find((item) => item.id === row.branchId)?.name}</Text>
+                  <Text size="sm" c="dimmed">
+                    Khu vực: {state.areas.find((item) => item.id === row.areaId)?.name}
+                  </Text>
+                  <Text size="sm" c="dimmed">
+                    Số ghế: {row.seats}
+                  </Text>
+                </Stack>
+                <PortalActionGrid cols={2} mt="sm">
                   {(["available", "hold", "arriving", "occupied"] as TableStatus[]).map((status) => (
                     <Button
                       key={status}
-                      size="compact-xs"
+                      size="sm"
                       variant={row.status === status ? "filled" : "light"}
                       onClick={() => void updateTableStatus(row.id, status)}
                     >
                       {tableStatusLabel[status]}
                     </Button>
                   ))}
-                </Group>
-              ),
-            },
-          ]}
-        />
-      </Card>
+                </PortalActionGrid>
+              </PortalSectionCard>
+            ))
+          )}
+        </Stack>
+
+        <ScrollArea type="auto" visibleFrom="sm">
+          <DataTable
+            minHeight={240}
+            withTableBorder
+            records={records}
+            noRecordsText="Chưa có bàn nào trong phạm vi chi nhánh đã chọn."
+            columns={[
+              { accessor: "name", title: "Bàn" },
+              {
+                accessor: "branchId",
+                title: "Chi nhánh",
+                render: (row) => state.branches.find((item) => item.id === row.branchId)?.name,
+              },
+              {
+                accessor: "areaId",
+                title: "Khu vực",
+                render: (row) => state.areas.find((item) => item.id === row.areaId)?.name,
+              },
+              { accessor: "seats", title: "Số ghế" },
+              {
+                accessor: "status",
+                title: "Trạng thái",
+                render: (row) => (
+                  <Badge color={tableStatusColor[row.status]} variant="light">
+                    {tableStatusLabel[row.status]}
+                  </Badge>
+                ),
+              },
+              {
+                accessor: "actions",
+                title: "Cập nhật nhanh",
+                render: (row) => (
+                  <Group gap={6} wrap="wrap">
+                    {(["available", "hold", "arriving", "occupied"] as TableStatus[]).map((status) => (
+                      <Button
+                        key={status}
+                        size="compact-xs"
+                        variant={row.status === status ? "filled" : "light"}
+                        onClick={() => void updateTableStatus(row.id, status)}
+                      >
+                        {tableStatusLabel[status]}
+                      </Button>
+                    ))}
+                  </Group>
+                ),
+              },
+            ]}
+          />
+        </ScrollArea>
+      </PortalSectionCard>
     </Stack>
   );
 }

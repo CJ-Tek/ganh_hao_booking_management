@@ -3,7 +3,6 @@
 import {
   Badge,
   Button,
-  Card,
   Group,
   Modal,
   NumberInput,
@@ -12,11 +11,11 @@ import {
   Stack,
   Text,
   TextInput,
-  Title,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
 import { type CSSProperties, type ChangeEvent, useEffect, useRef, useState } from "react";
+import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { type DiningTable, type FloorLayoutTemplateSummary, type TableStatus } from "@/lib/types";
@@ -36,6 +35,7 @@ export default function FloorMapPage() {
     upsertTable,
     deleteTable,
     listFloorLayoutTemplates,
+    deleteFloorLayoutTemplate,
     saveFloorLayoutTemplate,
     applyFloorLayoutTemplate,
     getLastSelectedFloorLayoutTemplate,
@@ -97,6 +97,14 @@ export default function FloorMapPage() {
     const x = Math.max(0, Math.min(clientX - rect.left - 50, rect.width - 100));
     const y = Math.max(0, Math.min(clientY - rect.top - 30, rect.height - 60));
     moveTable(draggingTableId, x, y);
+  };
+
+  const finishDragging = () => {
+    if (isEditMode && draggingTableId) {
+      void persistTablePosition(draggingTableId);
+      setConfiguredTableIds((prev) => (prev.includes(draggingTableId) ? prev : [...prev, draggingTableId]));
+    }
+    setDraggingTableId(null);
   };
 
   useEffect(() => {
@@ -240,6 +248,8 @@ export default function FloorMapPage() {
     return () => {
       cancelled = true;
     };
+  // list/get/apply template functions are intentionally omitted because context functions are not memoized.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [areaId]);
 
   const openTableConfig = (table: DiningTable) => {
@@ -389,16 +399,45 @@ export default function FloorMapPage() {
     }
   };
 
+  const handleRemoveTemplate = async () => {
+    if (!areaId || !selectedTemplate) {
+      notifications.show({ color: "red", message: "Vui lòng chọn template cần xóa." });
+      return;
+    }
+    try {
+      await deleteFloorLayoutTemplate(areaId, selectedTemplate);
+      const items = await listFloorLayoutTemplates(areaId);
+      setTemplates(items);
+      setTemplateName("Mặc định");
+      setSelectedTemplate(null);
+      setConfiguredTableIds([]);
+      await setLastSelectedFloorLayoutTemplate(areaId, null);
+      notifications.show({
+        color: "green",
+        message: `Đã xóa template "${selectedTemplate}".`,
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "";
+      const isMissingTemplateTable = errorMessage.includes("floor_layout_templates");
+      notifications.show({
+        color: "red",
+        message: isMissingTemplateTable
+          ? "DB chưa có bảng floor_layout_templates. Vui lòng chạy script schema mới trong Supabase."
+          : errorMessage || "Không thể xóa template. Vui lòng thử lại.",
+      });
+    }
+  };
+
   return (
     <Stack>
       <Group justify="space-between">
         <div>
-          <Title order={2}>Sơ đồ nhà hàng tương tác</Title>
+          <PortalPageTitle>Sơ đồ nhà hàng tương tác</PortalPageTitle>
           <Text c="dimmed">Tải ảnh nền và kéo thả bàn theo vị trí thực tế từng khu vực.</Text>
         </div>
       </Group>
 
-      <Card withBorder>
+      <PortalSectionCard>
         <Stack gap="md">
           <Group className={classes.toolbarRow} align="end">
             <Select
@@ -492,6 +531,9 @@ export default function FloorMapPage() {
             <Button variant="light" onClick={() => void handleApplyTemplate()}>
               Áp dụng template
             </Button>
+            <Button color="red" variant="light" onClick={() => void handleRemoveTemplate()}>
+              Xóa template
+            </Button>
           </Group>
 
           <Group className={classes.toolbarRow} align="end">
@@ -524,31 +566,24 @@ export default function FloorMapPage() {
             </Button>
           </Group>
         </Stack>
-      </Card>
+      </PortalSectionCard>
 
-      <Card withBorder>
+      <PortalSectionCard>
         <div
           ref={containerRef}
           onMouseMove={(event) => onMove(event.clientX, event.clientY)}
-          onMouseUp={() => {
-            if (isEditMode && draggingTableId) {
-              void persistTablePosition(draggingTableId);
-              setConfiguredTableIds((prev) =>
-                prev.includes(draggingTableId) ? prev : [...prev, draggingTableId]
-              );
+          onMouseUp={finishDragging}
+          onMouseLeave={finishDragging}
+          onTouchMove={(event) => {
+            const touch = event.touches[0];
+            if (!touch) {
+              return;
             }
-            setDraggingTableId(null);
+            onMove(touch.clientX, touch.clientY);
           }}
-          onMouseLeave={() => {
-            if (isEditMode && draggingTableId) {
-              void persistTablePosition(draggingTableId);
-              setConfiguredTableIds((prev) =>
-                prev.includes(draggingTableId) ? prev : [...prev, draggingTableId]
-              );
-            }
-            setDraggingTableId(null);
-          }}
-          className={classes.floorMapCanvas}
+          onTouchEnd={finishDragging}
+          onTouchCancel={finishDragging}
+          className={`${classes.floorMapCanvas} ${isEditMode ? classes.floorMapCanvasEdit : ""}`}
           style={
             {
               "--floor-background-image": backgroundImage ? `url(${backgroundImage})` : "none",
@@ -567,6 +602,7 @@ export default function FloorMapPage() {
             <div
               key={table.id}
               onMouseDown={() => isEditMode && setDraggingTableId(table.id)}
+              onTouchStart={() => isEditMode && setDraggingTableId(table.id)}
               onClick={() => {
                 if (!isEditMode) {
                   openTableConfig(table);
@@ -589,7 +625,7 @@ export default function FloorMapPage() {
             </div>
           ))}
         </div>
-      </Card>
+      </PortalSectionCard>
       <Modal opened={Boolean(configuringTableId)} onClose={closeTableConfig} title="Cấu hình bàn" centered>
         <Stack>
           <TextInput
