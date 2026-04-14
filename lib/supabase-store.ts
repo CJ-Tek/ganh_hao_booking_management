@@ -5,7 +5,7 @@ import {
   AppStateSnapshot,
   AppUser,
   BookingStatus,
-  DiningTable,
+  FloorLayoutBlock,
   FloorLayoutTemplateSummary,
   Role,
   TableStatus,
@@ -333,6 +333,56 @@ export async function upsertTableInSupabase(input: {
   });
 }
 
+export async function upsertTablesBatchInSupabase(
+  inputs: Array<{
+    id?: string;
+    branchId: string;
+    areaId: string;
+    name: string;
+    seats: number;
+    status: TableStatus;
+    positionX: number;
+    positionY: number;
+  }>
+): Promise<void> {
+  const client = ensureClient();
+  if (inputs.length === 0) {
+    return;
+  }
+
+  const updates = inputs.filter((item) => item.id);
+  const inserts = inputs.filter((item) => !item.id);
+
+  for (const item of updates) {
+    await client
+      .from("tables")
+      .update({
+        branch_id: item.branchId,
+        area_id: item.areaId,
+        name: item.name,
+        seats: item.seats,
+        status: item.status,
+        position_x: item.positionX,
+        position_y: item.positionY,
+      })
+      .eq("id", item.id as string);
+  }
+
+  if (inserts.length > 0) {
+    await client.from("tables").insert(
+      inserts.map((item) => ({
+        branch_id: item.branchId,
+        area_id: item.areaId,
+        name: item.name,
+        seats: item.seats,
+        status: item.status,
+        position_x: item.positionX,
+        position_y: item.positionY,
+      }))
+    );
+  }
+}
+
 export async function updateTableStatusInSupabase(
   tableId: string,
   status: TableStatus
@@ -344,6 +394,14 @@ export async function updateTableStatusInSupabase(
 export async function deleteTableInSupabase(tableId: string): Promise<void> {
   const client = ensureClient();
   await client.from("tables").delete().eq("id", tableId);
+}
+
+export async function deleteTablesInSupabase(tableIds: string[]): Promise<void> {
+  const client = ensureClient();
+  if (tableIds.length === 0) {
+    return;
+  }
+  await client.from("tables").delete().in("id", tableIds);
 }
 
 export async function updateTablePositionInSupabase(
@@ -463,18 +521,18 @@ export async function saveFloorLayoutTemplateInSupabase(input: {
   createdByUserId: string;
   backgroundImageDataUrl?: string;
   backgroundScale: number;
-  tables: DiningTable[];
+  blocks: FloorLayoutBlock[];
 }): Promise<void> {
   const client = ensureClient();
-  const templateLayout = input.tables.map((table) => ({
-    tableId: table.id,
-    name: table.name,
-    seats: table.seats,
-    status: table.status,
-    positionX: table.positionX,
-    positionY: table.positionY,
+  const templateLayout = input.blocks.map((block) => ({
+    id: block.id,
+    referenceTableId: block.referenceTableId ?? null,
+    label: block.label,
+    seats: block.seats,
+    status: block.status,
+    positionX: block.positionX,
+    positionY: block.positionY,
   }));
-  const selectedTableIds = new Set(templateLayout.map((item) => item.tableId));
   const { error } = await client.from("floor_layout_templates").upsert(
     {
       area_id: input.areaId,
@@ -490,42 +548,13 @@ export async function saveFloorLayoutTemplateInSupabase(input: {
   if (error) {
     throw new Error(error.message);
   }
-
-  if (selectedTableIds.size > 0) {
-    const { data: siblingTemplates, error: siblingError } = await client
-      .from("floor_layout_templates")
-      .select("id, table_layout_json")
-      .eq("area_id", input.areaId)
-      .neq("name", input.name);
-    if (siblingError) {
-      throw new Error(siblingError.message);
-    }
-
-    for (const template of siblingTemplates ?? []) {
-      const siblingLayout = Array.isArray(template.table_layout_json) ? template.table_layout_json : [];
-      const filteredLayout = siblingLayout.filter((item) => {
-        const tableId = String(item.tableId ?? item.table_id ?? "");
-        return !selectedTableIds.has(tableId);
-      });
-      if (filteredLayout.length === siblingLayout.length) {
-        continue;
-      }
-      const { error: updateSiblingError } = await client
-        .from("floor_layout_templates")
-        .update({ table_layout_json: filteredLayout, updated_at: dayjs().toISOString() })
-        .eq("id", template.id);
-      if (updateSiblingError) {
-        throw new Error(updateSiblingError.message);
-      }
-    }
-  }
 }
 
 export async function applyFloorLayoutTemplateInSupabase(input: {
   areaId: string;
   name: string;
   userId: string;
-}): Promise<{ backgroundScale: number; tableIds: string[] } | null> {
+}): Promise<{ backgroundScale: number; blocks: FloorLayoutBlock[] } | null> {
   const client = ensureClient();
   const { data, error } = await client
     .from("floor_layout_templates")
@@ -541,61 +570,21 @@ export async function applyFloorLayoutTemplateInSupabase(input: {
   }
 
   const tableLayoutsRaw = Array.isArray(data.table_layout_json) ? data.table_layout_json : [];
-  const tableLayouts = tableLayoutsRaw
+  const blocks = tableLayoutsRaw
     .map((item) => ({
-      tableId: String(item.tableId ?? item.table_id ?? ""),
-      name: String(item.name ?? ""),
+      id: String(item.id ?? item.blockId ?? item.tableId ?? item.table_id ?? ""),
+      referenceTableId: item.referenceTableId
+        ? String(item.referenceTableId)
+        : item.tableId
+          ? String(item.tableId)
+          : undefined,
+      label: String(item.label ?? item.name ?? ""),
       seats: Number(item.seats ?? 1),
       status: item.status as TableStatus,
       positionX: Number(item.positionX ?? item.position_x ?? 0),
       positionY: Number(item.positionY ?? item.position_y ?? 0),
     }))
-    .filter((item) => item.name && Number.isFinite(item.positionX) && Number.isFinite(item.positionY));
-
-  if (tableLayouts.length > 0) {
-    const { data: areaTables, error: areaTablesError } = await client
-      .from("tables")
-      .select("id, name")
-      .eq("area_id", input.areaId);
-    if (areaTablesError) {
-      throw new Error(areaTablesError.message);
-    }
-
-    const nameToId = new Map(
-      (areaTables ?? []).map((table) => [String(table.name).toLowerCase().trim(), table.id])
-    );
-    let updatedCount = 0;
-
-    for (const item of tableLayouts) {
-      const targetTableId = item.tableId || nameToId.get(item.name.toLowerCase().trim());
-      if (!targetTableId) {
-        continue;
-      }
-      const { data: updatedTable, error: updateError } = await client
-        .from("tables")
-        .update({
-          name: item.name,
-          seats: item.seats,
-          status: item.status,
-          position_x: Math.round(item.positionX),
-          position_y: Math.round(item.positionY),
-        })
-        .eq("id", targetTableId)
-        .eq("area_id", input.areaId)
-        .select("id")
-        .maybeSingle();
-      if (updateError) {
-        throw new Error(updateError.message);
-      }
-      if (updatedTable?.id) {
-        updatedCount += 1;
-      }
-    }
-
-    if (updatedCount === 0) {
-      throw new Error("Template không khớp với bàn hiện tại trong khu vực.");
-    }
-  }
+    .filter((item) => item.id && item.label && Number.isFinite(item.positionX) && Number.isFinite(item.positionY));
 
   if (data.background_image_data_url) {
     await setFloorBackgroundInSupabase(input.userId, input.areaId, data.background_image_data_url);
@@ -603,7 +592,7 @@ export async function applyFloorLayoutTemplateInSupabase(input: {
 
   return {
     backgroundScale: data.background_scale ?? 100,
-    tableIds: tableLayouts.map((item) => item.tableId).filter(Boolean),
+    blocks,
   };
 }
 

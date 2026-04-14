@@ -26,16 +26,19 @@ import {
   setLastSelectedFloorLayoutTemplateInSupabase,
   setFloorBackgroundInSupabase,
   deleteTableInSupabase,
+  deleteTablesInSupabase,
   updateBookingStatusInSupabase,
   updateTablePositionInSupabase,
   updateTableStatusInSupabase,
   upsertTableInSupabase,
+  upsertTablesBatchInSupabase,
 } from "@/lib/supabase-store";
 import {
   AppStateSnapshot,
   AppUser,
   BookingStatus,
   DiningTable,
+  FloorLayoutBlock,
   FloorLayoutTemplateSummary,
   Role,
   TableStatus,
@@ -70,7 +73,9 @@ interface AppContextValue {
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   checkInBooking: (bookingId: string) => Promise<void>;
   upsertTable: (table: Omit<DiningTable, "id"> & { id?: string }) => Promise<void>;
+  upsertTablesBatch: (tables: Array<Omit<DiningTable, "id"> & { id?: string }>) => Promise<void>;
   deleteTable: (tableId: string) => Promise<void>;
+  deleteTables: (tableIds: string[]) => Promise<void>;
   updateTableStatus: (tableId: string, status: TableStatus) => Promise<void>;
   moveTable: (tableId: string, x: number, y: number) => void;
   persistTablePosition: (tableId: string) => Promise<void>;
@@ -82,12 +87,12 @@ interface AppContextValue {
     name: string;
     backgroundImageDataUrl?: string;
     backgroundScale: number;
-    tables: DiningTable[];
+    blocks: FloorLayoutBlock[];
   }) => Promise<void>;
   applyFloorLayoutTemplate: (
     areaId: string,
     name: string
-  ) => Promise<{ backgroundScale: number; tableIds: string[] } | null>;
+  ) => Promise<{ backgroundScale: number; blocks: FloorLayoutBlock[] } | null>;
   getLastSelectedFloorLayoutTemplate: (areaId: string) => Promise<string | null>;
   setLastSelectedFloorLayoutTemplate: (areaId: string, templateName: string | null) => Promise<void>;
   addArea: (branchId: string, name: string, capacity: number) => Promise<void>;
@@ -236,6 +241,14 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     await reload();
   };
 
+  const upsertTablesBatch = async (tables: Array<Omit<DiningTable, "id"> & { id?: string }>) => {
+    if (!hasSupabase || tables.length === 0) {
+      return;
+    }
+    await upsertTablesBatchInSupabase(tables);
+    await reload();
+  };
+
   const updateTableStatus = async (tableId: string, status: TableStatus) => {
     if (!hasSupabase) {
       return;
@@ -249,6 +262,14 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return;
     }
     await deleteTableInSupabase(tableId);
+    await reload();
+  };
+
+  const deleteTables = async (tableIds: string[]) => {
+    if (!hasSupabase || tableIds.length === 0) {
+      return;
+    }
+    await deleteTablesInSupabase(tableIds);
     await reload();
   };
 
@@ -299,7 +320,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     name: string;
     backgroundImageDataUrl?: string;
     backgroundScale: number;
-    tables: DiningTable[];
+    blocks: FloorLayoutBlock[];
   }) => {
     if (!hasSupabase || !currentUser) {
       return;
@@ -310,7 +331,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       createdByUserId: currentUser.id,
       backgroundImageDataUrl: input.backgroundImageDataUrl,
       backgroundScale: input.backgroundScale,
-      tables: input.tables,
+      blocks: input.blocks,
     });
   };
 
@@ -396,7 +417,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     updateBookingStatus,
     checkInBooking,
     upsertTable,
+    upsertTablesBatch,
     deleteTable,
+    deleteTables,
     updateTableStatus,
     moveTable,
     persistTablePosition,

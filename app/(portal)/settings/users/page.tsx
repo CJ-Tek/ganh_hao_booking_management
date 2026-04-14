@@ -8,16 +8,16 @@ import {
   Select,
   SimpleGrid,
   Stack,
-  Table,
   Text,
   TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useState } from "react";
+import { DataTable, type DataTableSortStatus } from "mantine-datatable";
+import { useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard, PortalStickyAction } from "@/components/portal-page";
 import { RouteGuard } from "@/components/route-guard";
 import { useAppContext } from "@/contexts/app-context";
-import { Role } from "@/lib/types";
+import { AppUser, Role } from "@/lib/types";
 
 const roleLabel: Record<Role, string> = {
   admin: "Admin",
@@ -32,6 +32,63 @@ export default function UserManagementPage() {
   const [fullName, setFullName] = useState("");
   const [role, setRole] = useState<Role>("manager");
   const [branchIds, setBranchIds] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<AppUser>>({
+    columnAccessor: "username",
+    direction: "asc",
+  });
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+
+  const filteredUsers = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    return state.users.filter((user) => {
+      if (!keyword) {
+        return true;
+      }
+      const branchText = user.branchIds
+        .map((id) => state.branches.find((branch) => branch.id === id)?.name ?? id)
+        .join(", ")
+        .toLowerCase();
+      return (
+        user.username.toLowerCase().includes(keyword) ||
+        user.fullName.toLowerCase().includes(keyword) ||
+        roleLabel[user.role].toLowerCase().includes(keyword) ||
+        branchText.includes(keyword)
+      );
+    });
+  }, [search, state.branches, state.users]);
+
+  const sortedUsers = useMemo(() => {
+    return [...filteredUsers].sort((a, b) => {
+      let left = "";
+      let right = "";
+      if (sortStatus.columnAccessor === "fullName") {
+        left = a.fullName;
+        right = b.fullName;
+      } else if (sortStatus.columnAccessor === "role") {
+        left = roleLabel[a.role];
+        right = roleLabel[b.role];
+      } else if (sortStatus.columnAccessor === "branchIds") {
+        left = a.branchIds.join(",");
+        right = b.branchIds.join(",");
+      } else {
+        left = a.username;
+        right = b.username;
+      }
+      const compare = left.localeCompare(right, "vi");
+      return sortStatus.direction === "asc" ? compare : -compare;
+    });
+  }, [filteredUsers, sortStatus]);
+
+  const pagedUsers = useMemo(
+    () => {
+      const totalPages = Math.max(1, Math.ceil(sortedUsers.length / pageSize));
+      const currentPage = Math.min(page, totalPages);
+      return sortedUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    },
+    [page, pageSize, sortedUsers]
+  );
 
   const handleCreateUser = async () => {
     const result = await addUser({ username, password, fullName, role, branchIds });
@@ -97,8 +154,18 @@ export default function UserManagementPage() {
         </PortalSectionCard>
 
         <PortalSectionCard>
+          <TextInput
+            label="Tìm tài khoản"
+            placeholder="Tên đăng nhập, họ tên, vai trò..."
+            value={search}
+            onChange={(event) => {
+              setSearch(event.currentTarget.value);
+              setPage(1);
+            }}
+            mb="sm"
+          />
           <Stack hiddenFrom="sm" gap="sm">
-            {state.users.map((user) => (
+            {sortedUsers.map((user) => (
               <PortalSectionCard p="sm" key={user.id}>
                 <Stack gap={4}>
                   <Text fw={700}>{user.username}</Text>
@@ -114,34 +181,40 @@ export default function UserManagementPage() {
             ))}
           </Stack>
 
-          <Table.ScrollContainer minWidth={740} visibleFrom="sm">
-            <Table striped>
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Tài khoản</Table.Th>
-                  <Table.Th>Họ tên</Table.Th>
-                  <Table.Th>Vai trò</Table.Th>
-                  <Table.Th>Chi nhánh</Table.Th>
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {state.users.map((user) => (
-                  <Table.Tr key={user.id}>
-                    <Table.Td>{user.username}</Table.Td>
-                    <Table.Td>{user.fullName}</Table.Td>
-                    <Table.Td>
-                      <Badge>{roleLabel[user.role]}</Badge>
-                    </Table.Td>
-                    <Table.Td>
-                      {user.branchIds
-                        .map((id) => state.branches.find((branch) => branch.id === id)?.name ?? id)
-                        .join(", ")}
-                    </Table.Td>
-                  </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+          <DataTable
+            visibleFrom="sm"
+            minHeight={240}
+            withTableBorder
+            records={pagedUsers}
+            totalRecords={sortedUsers.length}
+            recordsPerPage={pageSize}
+            page={Math.min(page, Math.max(1, Math.ceil(sortedUsers.length / pageSize)))}
+            onPageChange={setPage}
+            sortStatus={sortStatus}
+            onSortStatusChange={(next) => {
+              setSortStatus(next);
+              setPage(1);
+            }}
+            columns={[
+              { accessor: "username", title: "Tài khoản", sortable: true },
+              { accessor: "fullName", title: "Họ tên", sortable: true },
+              {
+                accessor: "role",
+                title: "Vai trò",
+                sortable: true,
+                render: (user) => <Badge>{roleLabel[user.role]}</Badge>,
+              },
+              {
+                accessor: "branchIds",
+                title: "Chi nhánh",
+                sortable: true,
+                render: (user) =>
+                  user.branchIds
+                    .map((id) => state.branches.find((branch) => branch.id === id)?.name ?? id)
+                    .join(", "),
+              },
+            ]}
+          />
         </PortalSectionCard>
       </Stack>
     </RouteGuard>

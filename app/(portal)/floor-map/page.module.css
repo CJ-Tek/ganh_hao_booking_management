@@ -8,6 +8,7 @@
   background-repeat: no-repeat;
   background-color: #f1f3f5;
   overflow: hidden;
+  border: 1px solid #d0d7de;
 }
 
 .floorMapCanvasEdit {
@@ -28,6 +29,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .tableCardEdit {
@@ -38,34 +40,19 @@
   cursor: pointer;
 }
 
-.toolbarRow {
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.areaSelect {
-  min-width: 260px;
-  flex: 1;
+.tableCardSelected {
+  box-shadow: 0 0 0 3px rgba(12, 97, 164, 0.35), 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 .sliderControl {
   min-width: 180px;
 }
 
-.templateNameInput {
-  min-width: 180px;
-}
-
-.templateSelect {
-  min-width: 220px;
-}
-
-.tableNameInput {
-  min-width: 180px;
-}
-
-.tableSelect {
-  min-width: 180px;
+.undoBanner {
+  padding: 6px 10px;
+  border: 1px solid #dbeafe;
+  background-color: #eff6ff;
+  border-radius: 8px;
 }
 
 @media (max-width: 62em) {

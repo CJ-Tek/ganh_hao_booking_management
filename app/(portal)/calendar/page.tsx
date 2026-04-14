@@ -6,19 +6,26 @@ import {
   Group,
   SegmentedControl,
   Stack,
-  Table,
   Text,
 } from "@mantine/core";
+import { DataTable, type DataTableSortStatus } from "mantine-datatable";
 import { useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard, PortalStickyHeader } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
+import { type Booking } from "@/lib/types";
 
 type ViewMode = "day" | "week";
 
 export default function CalendarPage() {
   const { state, filteredBranchIds } = useAppContext();
   const [mode, setMode] = useState<ViewMode>("day");
+  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Booking>>({
+    columnAccessor: "bookingAt",
+    direction: "asc",
+  });
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
   const now = dayjs();
 
   const bookings = useMemo(
@@ -35,6 +42,43 @@ export default function CalendarPage() {
     [filteredBranchIds, mode, now, state.bookings]
   );
 
+  const sortedBookings = useMemo(() => {
+    const getValue = (booking: Booking) => {
+      if (sortStatus.columnAccessor === "customerId") {
+        return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
+      }
+      if (sortStatus.columnAccessor === "branchId") {
+        return state.branches.find((item) => item.id === booking.branchId)?.name ?? "";
+      }
+      if (sortStatus.columnAccessor === "areaTable") {
+        const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
+        const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
+        return `${area} ${table}`;
+      }
+      if (sortStatus.columnAccessor === "status") {
+        return bookingStatusLabel[booking.status];
+      }
+      return dayjs(booking.bookingAt).valueOf();
+    };
+    return [...bookings].sort((a, b) => {
+      const left = getValue(a);
+      const right = getValue(b);
+      const compare = typeof left === "number" && typeof right === "number"
+        ? left - right
+        : String(left).localeCompare(String(right), "vi");
+      return sortStatus.direction === "asc" ? compare : -compare;
+    });
+  }, [bookings, sortStatus, state.areas, state.branches, state.customers, state.tables]);
+
+  const pagedBookings = useMemo(
+    () => {
+      const totalPages = Math.max(1, Math.ceil(sortedBookings.length / pageSize));
+      const currentPage = Math.min(page, totalPages);
+      return sortedBookings.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    },
+    [page, pageSize, sortedBookings]
+  );
+
   return (
     <Stack>
       <PortalStickyHeader justify="space-between" align="end" wrap="wrap">
@@ -42,7 +86,10 @@ export default function CalendarPage() {
         <SegmentedControl
           fullWidth
           value={mode}
-          onChange={(value) => setMode(value as ViewMode)}
+          onChange={(value) => {
+            setMode(value as ViewMode);
+            setPage(1);
+          }}
           data={[
             { label: "Theo ngày", value: "day" },
             { label: "Theo tuần", value: "week" },
@@ -54,14 +101,14 @@ export default function CalendarPage() {
           Hiển thị tự động theo chi nhánh bạn đang quản lý.
         </Text>
         <Stack hiddenFrom="sm" gap="sm">
-          {bookings.length === 0 ? (
+          {sortedBookings.length === 0 ? (
             <PortalSectionCard p="sm">
               <Text c="dimmed" size="sm">
                 Không có booking trong khoảng thời gian đã chọn.
               </Text>
             </PortalSectionCard>
           ) : (
-            bookings.map((booking) => {
+            sortedBookings.map((booking) => {
               const customer = state.customers.find((item) => item.id === booking.customerId);
               const branch = state.branches.find((item) => item.id === booking.branchId);
               const area = state.areas.find((item) => item.id === booking.areaId);
@@ -89,50 +136,62 @@ export default function CalendarPage() {
           )}
         </Stack>
 
-        <Table.ScrollContainer minWidth={780} visibleFrom="sm">
-          <Table striped highlightOnHover>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Thời gian</Table.Th>
-                <Table.Th>Khách</Table.Th>
-                <Table.Th>Chi nhánh</Table.Th>
-                <Table.Th>Khu vực / Bàn</Table.Th>
-                <Table.Th>Trạng thái</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {bookings.length === 0 ? (
-                <Table.Tr>
-                  <Table.Td colSpan={5}>
-                    <Text c="dimmed">Không có booking trong khoảng thời gian đã chọn.</Text>
-                  </Table.Td>
-                </Table.Tr>
-              ) : (
-                bookings.map((booking) => {
-                  const customer = state.customers.find((item) => item.id === booking.customerId);
-                  const branch = state.branches.find((item) => item.id === booking.branchId);
-                  const area = state.areas.find((item) => item.id === booking.areaId);
-                  const table = state.tables.find((item) => item.id === booking.tableId);
-                  return (
-                    <Table.Tr key={booking.id}>
-                      <Table.Td>{dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY")}</Table.Td>
-                      <Table.Td>{customer?.fullName}</Table.Td>
-                      <Table.Td>{branch?.name}</Table.Td>
-                      <Table.Td>
-                        {area?.name} / {table?.name}
-                      </Table.Td>
-                      <Table.Td>
-                        <Badge color={bookingStatusColor[booking.status]} variant="light">
-                          {bookingStatusLabel[booking.status]}
-                        </Badge>
-                      </Table.Td>
-                    </Table.Tr>
-                  );
-                })
-              )}
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
+        <DataTable
+          visibleFrom="sm"
+          minHeight={260}
+          withTableBorder
+          records={pagedBookings}
+          totalRecords={sortedBookings.length}
+          recordsPerPage={pageSize}
+          page={Math.min(page, Math.max(1, Math.ceil(sortedBookings.length / pageSize)))}
+          onPageChange={setPage}
+          sortStatus={sortStatus}
+          onSortStatusChange={(next) => {
+            setSortStatus(next);
+            setPage(1);
+          }}
+          noRecordsText="Không có booking trong khoảng thời gian đã chọn."
+          columns={[
+            {
+              accessor: "bookingAt",
+              title: "Thời gian",
+              sortable: true,
+              render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+            },
+            {
+              accessor: "customerId",
+              title: "Khách",
+              sortable: true,
+              render: (booking) => state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "-",
+            },
+            {
+              accessor: "branchId",
+              title: "Chi nhánh",
+              sortable: true,
+              render: (booking) => state.branches.find((item) => item.id === booking.branchId)?.name ?? "-",
+            },
+            {
+              accessor: "areaTable",
+              title: "Khu vực / Bàn",
+              sortable: true,
+              render: (booking) => {
+                const area = state.areas.find((item) => item.id === booking.areaId);
+                const table = state.tables.find((item) => item.id === booking.tableId);
+                return `${area?.name ?? "-"} / ${table?.name ?? "-"}`;
+              },
+            },
+            {
+              accessor: "status",
+              title: "Trạng thái",
+              sortable: true,
+              render: (booking) => (
+                <Badge color={bookingStatusColor[booking.status]} variant="light">
+                  {bookingStatusLabel[booking.status]}
+                </Badge>
+              ),
+            },
+          ]}
+        />
       </PortalSectionCard>
     </Stack>
   );

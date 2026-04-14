@@ -3,10 +3,13 @@
 import {
   Badge,
   Button,
+  Divider,
   Group,
   Modal,
   NumberInput,
+  SegmentedControl,
   Select,
+  SimpleGrid,
   Slider,
   Stack,
   Text,
@@ -14,26 +17,30 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
-import { type CSSProperties, type ChangeEvent, useEffect, useRef, useState } from "react";
-import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
+import { DataTable } from "mantine-datatable";
+import { type CSSProperties, type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
-import { type DiningTable, type FloorLayoutTemplateSummary, type TableStatus } from "@/lib/types";
+import { type FloorLayoutBlock, type FloorLayoutTemplateSummary, type TableStatus } from "@/lib/types";
 import classes from "./page.module.css";
 
 const FLOOR_MAP_VIEW_KEY = "ganh_hao_floor_map_view_v1";
 const FLOOR_MAP_ACTIVE_AREA_KEY = "ganh_hao_floor_map_active_area_v1";
+
+function createBlockId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `block-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 export default function FloorMapPage() {
   const {
     state,
     currentUser,
     filteredBranchIds,
-    moveTable,
-    persistTablePosition,
     setFloorBackground,
-    upsertTable,
-    deleteTable,
     listFloorLayoutTemplates,
     deleteFloorLayoutTemplate,
     saveFloorLayoutTemplate,
@@ -41,24 +48,31 @@ export default function FloorMapPage() {
     getLastSelectedFloorLayoutTemplate,
     setLastSelectedFloorLayoutTemplate,
   } = useAppContext();
+
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [activeAreaId, setActiveAreaId] = useState<string | null>(null);
-  const [draggingTableId, setDraggingTableId] = useState<string | null>(null);
+  const [draggingBlockId, setDraggingBlockId] = useState<string | null>(null);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
-  const [configuringTableId, setConfiguringTableId] = useState<string | null>(null);
-  const [tableName, setTableName] = useState("");
-  const [tableSeats, setTableSeats] = useState<number>(4);
-  const [tableStatus, setTableStatus] = useState<TableStatus>("available");
-  const [newTableName, setNewTableName] = useState("");
-  const [newTableSeats, setNewTableSeats] = useState<number>(4);
-  const [tableToRemoveId, setTableToRemoveId] = useState<string | null>(null);
+  const [layoutBlocks, setLayoutBlocks] = useState<FloorLayoutBlock[]>([]);
+  const [configuringBlockId, setConfiguringBlockId] = useState<string | null>(null);
+  const [blockLabel, setBlockLabel] = useState("");
+  const [blockSeats, setBlockSeats] = useState<number>(4);
+  const [blockStatus, setBlockStatus] = useState<TableStatus>("available");
+  const [newBlockTableId, setNewBlockTableId] = useState<string | null>(null);
+  const [blockToRemoveId, setBlockToRemoveId] = useState<string | null>(null);
+  const [blockSearch, setBlockSearch] = useState("");
+  const [blockStatusFilter, setBlockStatusFilter] = useState<string>("all");
+  const [blockSortMode, setBlockSortMode] = useState<string>("name-asc");
   const [backgroundScale, setBackgroundScale] = useState(100);
   const [backgroundPosX, setBackgroundPosX] = useState(50);
   const [backgroundPosY, setBackgroundPosY] = useState(50);
   const [templateName, setTemplateName] = useState("Mặc định");
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [templates, setTemplates] = useState<FloorLayoutTemplateSummary[]>([]);
-  const [configuredTableIds, setConfiguredTableIds] = useState<string[]>([]);
+  const [pendingDeleteBlockId, setPendingDeleteBlockId] = useState<string | null>(null);
+  const [pendingDeleteTemplateName, setPendingDeleteTemplateName] = useState<string | null>(null);
+  const [lastRemovedBlock, setLastRemovedBlock] = useState<FloorLayoutBlock | null>(null);
   const templateLoadErrorShownRef = useRef(false);
   const autoAppliedTemplateRef = useRef<string>("");
   const hasRestoredAreaRef = useRef(false);
@@ -66,8 +80,33 @@ export default function FloorMapPage() {
 
   const availableAreas = state.areas.filter((area) => filteredBranchIds.includes(area.branchId));
   const areaId = activeAreaId ?? availableAreas[0]?.id;
+  const referenceTables = useMemo(
+    () => state.tables.filter((table) => table.areaId === areaId),
+    [areaId, state.tables]
+  );
 
-  const tables = state.tables.filter((table) => table.areaId === areaId);
+  const visibleBlocks = useMemo(() => {
+    const keyword = blockSearch.trim().toLowerCase();
+    const filtered = layoutBlocks.filter((item) => {
+      const hitKeyword = !keyword || item.label.toLowerCase().includes(keyword);
+      const hitStatus = blockStatusFilter === "all" || item.status === blockStatusFilter;
+      return hitKeyword && hitStatus;
+    });
+    const sorted = [...filtered];
+    sorted.sort((a, b) => {
+      if (blockSortMode === "name-desc") {
+        return b.label.localeCompare(a.label, "vi");
+      }
+      if (blockSortMode === "seats-asc") {
+        return a.seats - b.seats;
+      }
+      if (blockSortMode === "seats-desc") {
+        return b.seats - a.seats;
+      }
+      return a.label.localeCompare(b.label, "vi");
+    });
+    return sorted;
+  }, [blockSearch, blockSortMode, blockStatusFilter, layoutBlocks]);
 
   const backgroundImage = areaId
     ? state.floorBackgrounds[`${currentUser?.id ?? "guest"}_${areaId}`]
@@ -82,7 +121,7 @@ export default function FloorMapPage() {
       const result = String(reader.result ?? "");
       void setFloorBackground(areaId, result);
       setSelectedTemplate(null);
-      setConfiguredTableIds([]);
+      setLayoutBlocks([]);
       void setLastSelectedFloorLayoutTemplate(areaId, null);
       notifications.show({ color: "green", message: "Đã cập nhật ảnh nền sơ đồ." });
     };
@@ -90,21 +129,23 @@ export default function FloorMapPage() {
   };
 
   const onMove = (clientX: number, clientY: number) => {
-    if (!isEditMode || !draggingTableId || !containerRef.current) {
+    if (!isEditMode || !draggingBlockId || !containerRef.current) {
       return;
     }
     const rect = containerRef.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(clientX - rect.left - 50, rect.width - 100));
     const y = Math.max(0, Math.min(clientY - rect.top - 30, rect.height - 60));
-    moveTable(draggingTableId, x, y);
+    setLayoutBlocks((prev) =>
+      prev.map((item) =>
+        item.id === draggingBlockId
+          ? { ...item, positionX: Math.round(x), positionY: Math.round(y) }
+          : item
+      )
+    );
   };
 
   const finishDragging = () => {
-    if (isEditMode && draggingTableId) {
-      void persistTablePosition(draggingTableId);
-      setConfiguredTableIds((prev) => (prev.includes(draggingTableId) ? prev : [...prev, draggingTableId]));
-    }
-    setDraggingTableId(null);
+    setDraggingBlockId(null);
   };
 
   useEffect(() => {
@@ -188,6 +229,7 @@ export default function FloorMapPage() {
         }
         setTemplates([]);
         setSelectedTemplate(null);
+        setLayoutBlocks([]);
         return;
       }
       try {
@@ -197,7 +239,6 @@ export default function FloorMapPage() {
         }
         setTemplates(items);
         templateLoadErrorShownRef.current = false;
-        setConfiguredTableIds(tables.map((table) => table.id));
         const lastTemplateName = await getLastSelectedFloorLayoutTemplate(areaId);
         if (cancelled || requestId !== templateLoadRequestIdRef.current) {
           return;
@@ -218,9 +259,11 @@ export default function FloorMapPage() {
             }
             if (result) {
               setBackgroundScale(result.backgroundScale);
-              setConfiguredTableIds(result.tableIds);
+              setLayoutBlocks(result.blocks);
             }
           }
+        } else {
+          setLayoutBlocks([]);
         }
       } catch (error) {
         if (cancelled || requestId !== templateLoadRequestIdRef.current) {
@@ -252,39 +295,36 @@ export default function FloorMapPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [areaId]);
 
-  const openTableConfig = (table: DiningTable) => {
-    setConfiguringTableId(table.id);
-    setTableName(table.name);
-    setTableSeats(table.seats);
-    setTableStatus(table.status);
+  const openBlockConfig = (block: FloorLayoutBlock) => {
+    setConfiguringBlockId(block.id);
+    setBlockLabel(block.label);
+    setBlockSeats(block.seats);
+    setBlockStatus(block.status);
   };
 
-  const closeTableConfig = () => {
-    setConfiguringTableId(null);
+  const closeBlockConfig = () => {
+    setConfiguringBlockId(null);
   };
 
-  const handleSaveTableConfig = async () => {
-    if (!configuringTableId) {
+  const handleSaveBlockConfig = () => {
+    if (!configuringBlockId || !blockLabel.trim()) {
+      notifications.show({ color: "red", message: "Vui lòng nhập nhãn block hợp lệ." });
       return;
     }
-    const table = state.tables.find((item) => item.id === configuringTableId);
-    if (!table || !tableName.trim()) {
-      notifications.show({ color: "red", message: "Vui lòng nhập tên bàn hợp lệ." });
-      return;
-    }
-    await upsertTable({
-      id: table.id,
-      branchId: table.branchId,
-      areaId: table.areaId,
-      name: tableName.trim(),
-      seats: tableSeats,
-      status: tableStatus,
-      positionX: table.positionX,
-      positionY: table.positionY,
-    });
-    setConfiguredTableIds((prev) => (prev.includes(table.id) ? prev : [...prev, table.id]));
-    notifications.show({ color: "green", message: "Đã cập nhật cấu hình bàn." });
-    closeTableConfig();
+    setLayoutBlocks((prev) =>
+      prev.map((item) =>
+        item.id === configuringBlockId
+          ? {
+              ...item,
+              label: blockLabel.trim(),
+              seats: blockSeats,
+              status: blockStatus,
+            }
+          : item
+      )
+    );
+    notifications.show({ color: "green", message: "Đã cập nhật cấu hình block." });
+    closeBlockConfig();
   };
 
   const handleCreateNewTemplate = () => {
@@ -293,7 +333,7 @@ export default function FloorMapPage() {
     setBackgroundScale(100);
     setBackgroundPosX(50);
     setBackgroundPosY(50);
-    setConfiguredTableIds([]);
+    setLayoutBlocks([]);
     setIsEditMode(true);
     if (areaId) {
       void setLastSelectedFloorLayoutTemplate(areaId, null);
@@ -304,39 +344,72 @@ export default function FloorMapPage() {
     });
   };
 
-  const handleAddTable = async () => {
-    if (!areaId || !newTableName.trim()) {
-      notifications.show({ color: "red", message: "Vui lòng nhập tên bàn để thêm." });
+  const handleAddBlock = () => {
+    if (!newBlockTableId) {
+      notifications.show({ color: "red", message: "Vui lòng chọn bàn tham chiếu để thêm block." });
       return;
     }
-    const area = state.areas.find((item) => item.id === areaId);
-    if (!area) {
-      notifications.show({ color: "red", message: "Không tìm thấy khu vực để thêm bàn." });
+    const sourceTable = referenceTables.find((table) => table.id === newBlockTableId);
+    if (!sourceTable) {
+      notifications.show({ color: "red", message: "Không tìm thấy bàn tham chiếu trong khu vực hiện tại." });
       return;
     }
-    await upsertTable({
-      branchId: area.branchId,
-      areaId,
-      name: newTableName.trim(),
-      seats: newTableSeats,
-      status: "available",
-      positionX: 40,
-      positionY: 40,
-    });
-    setNewTableName("");
-    setNewTableSeats(4);
-    notifications.show({ color: "green", message: "Đã thêm bàn mới vào sơ đồ." });
+    setLayoutBlocks((prev) => [
+      ...prev,
+      {
+        id: createBlockId(),
+        referenceTableId: sourceTable.id,
+        label: sourceTable.name,
+        seats: sourceTable.seats,
+        status: sourceTable.status,
+        positionX: 40,
+        positionY: 40,
+      },
+    ]);
+    setNewBlockTableId(null);
+    notifications.show({ color: "green", message: "Đã thêm block bàn vào template hiện tại." });
   };
 
-  const handleRemoveTable = async () => {
-    if (!tableToRemoveId) {
-      notifications.show({ color: "red", message: "Vui lòng chọn bàn cần xóa." });
+  const handleRemoveBlockById = (blockId: string) => {
+    const targetBlock = layoutBlocks.find((item) => item.id === blockId);
+    if (targetBlock) {
+      setLastRemovedBlock(targetBlock);
+    }
+    setLayoutBlocks((prev) => prev.filter((item) => item.id !== blockId));
+    if (blockToRemoveId === blockId) {
+      setBlockToRemoveId(null);
+    }
+    if (selectedBlockId === blockId) {
+      setSelectedBlockId(null);
+    }
+  };
+
+  const requestRemoveBlock = (blockId?: string) => {
+    const resolvedId = blockId ?? blockToRemoveId;
+    if (!resolvedId) {
+      notifications.show({ color: "red", message: "Vui lòng chọn block cần xóa." });
       return;
     }
-    await deleteTable(tableToRemoveId);
-    setConfiguredTableIds((prev) => prev.filter((id) => id !== tableToRemoveId));
-    setTableToRemoveId(null);
-    notifications.show({ color: "green", message: "Đã xóa bàn khỏi sơ đồ và danh sách bàn." });
+    setPendingDeleteBlockId(resolvedId);
+  };
+
+  const confirmRemoveBlock = () => {
+    if (!pendingDeleteBlockId) {
+      return;
+    }
+    handleRemoveBlockById(pendingDeleteBlockId);
+    setPendingDeleteBlockId(null);
+    notifications.show({ color: "green", message: "Đã xóa block khỏi template hiện tại." });
+  };
+
+  const handleUndoRemoveBlock = () => {
+    if (!lastRemovedBlock) {
+      return;
+    }
+    setLayoutBlocks((prev) => [...prev, lastRemovedBlock]);
+    setSelectedBlockId(lastRemovedBlock.id);
+    setLastRemovedBlock(null);
+    notifications.show({ color: "green", message: "Đã hoàn tác xóa block." });
   };
 
   const handleSaveTemplate = async () => {
@@ -350,7 +423,7 @@ export default function FloorMapPage() {
         name: templateName.trim(),
         backgroundImageDataUrl: backgroundImage,
         backgroundScale,
-        tables: tables.filter((table) => configuredTableIds.includes(table.id)),
+        blocks: layoutBlocks,
       });
       const items = await listFloorLayoutTemplates(areaId);
       setTemplates(items);
@@ -381,7 +454,7 @@ export default function FloorMapPage() {
         return;
       }
       setBackgroundScale(result.backgroundScale);
-      setConfiguredTableIds(result.tableIds);
+      setLayoutBlocks(result.blocks);
       await setLastSelectedFloorLayoutTemplate(areaId, selectedTemplate);
       notifications.show({
         color: "green",
@@ -399,22 +472,32 @@ export default function FloorMapPage() {
     }
   };
 
-  const handleRemoveTemplate = async () => {
+  const requestRemoveTemplate = () => {
     if (!areaId || !selectedTemplate) {
       notifications.show({ color: "red", message: "Vui lòng chọn template cần xóa." });
       return;
     }
+    setPendingDeleteTemplateName(selectedTemplate);
+  };
+
+  const confirmRemoveTemplate = async () => {
+    if (!areaId || !pendingDeleteTemplateName) {
+      setPendingDeleteTemplateName(null);
+      return;
+    }
+    const targetTemplateName = pendingDeleteTemplateName;
+    setPendingDeleteTemplateName(null);
     try {
-      await deleteFloorLayoutTemplate(areaId, selectedTemplate);
+      await deleteFloorLayoutTemplate(areaId, targetTemplateName);
       const items = await listFloorLayoutTemplates(areaId);
       setTemplates(items);
       setTemplateName("Mặc định");
       setSelectedTemplate(null);
-      setConfiguredTableIds([]);
+      setLayoutBlocks([]);
       await setLastSelectedFloorLayoutTemplate(areaId, null);
       notifications.show({
         color: "green",
-        message: `Đã xóa template "${selectedTemplate}".`,
+        message: `Đã xóa template "${targetTemplateName}".`,
       });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "";
@@ -428,18 +511,55 @@ export default function FloorMapPage() {
     }
   };
 
+  useEffect(() => {
+    if (!isEditMode || !selectedBlockId) {
+      return;
+    }
+    const moveByKeyboard = (event: KeyboardEvent) => {
+      const step = event.shiftKey ? 10 : 1;
+      const moveX = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
+      const moveY = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
+      if (moveX === 0 && moveY === 0) {
+        if (event.key === "Delete" || event.key === "Backspace") {
+          event.preventDefault();
+          setPendingDeleteBlockId(selectedBlockId);
+        }
+        return;
+      }
+      event.preventDefault();
+      setLayoutBlocks((prev) =>
+        prev.map((item) =>
+          item.id === selectedBlockId
+            ? {
+                ...item,
+                positionX: Math.max(0, Math.min(item.positionX + moveX, 900)),
+                positionY: Math.max(0, Math.min(item.positionY + moveY, 500)),
+              }
+            : item
+        )
+      );
+    };
+    window.addEventListener("keydown", moveByKeyboard);
+    return () => window.removeEventListener("keydown", moveByKeyboard);
+  }, [isEditMode, selectedBlockId]);
+
   return (
     <Stack>
-      <Group justify="space-between">
+      <Group justify="space-between" align="end">
         <div>
-          <PortalPageTitle>Sơ đồ nhà hàng tương tác</PortalPageTitle>
-          <Text c="dimmed">Tải ảnh nền và kéo thả bàn theo vị trí thực tế từng khu vực.</Text>
+          <PortalPageTitle>Sơ đồ nhà hàng</PortalPageTitle>
+          <Text c="dimmed">
+            Tối ưu theo workflow: chọn khu vực, quản lý template, thêm block tham chiếu, rồi kéo thả trực quan.
+          </Text>
         </div>
+        <Badge color={isEditMode ? "orange" : "green"} variant="light">
+          Chế độ: {isEditMode ? "Chỉnh sửa" : "Xem"}
+        </Badge>
       </Group>
 
-      <PortalSectionCard>
+      <PortalStickyPanel>
         <Stack gap="md">
-          <Group className={classes.toolbarRow} align="end">
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
             <Select
               label="Khu vực"
               value={areaId}
@@ -448,27 +568,149 @@ export default function FloorMapPage() {
                 value: area.id,
                 label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
               }))}
-              className={classes.areaSelect}
+              searchable
             />
-            <Button
-              variant={isEditMode ? "filled" : "light"}
-              onClick={() => {
-                setIsEditMode((prev) => !prev);
-                setDraggingTableId(null);
+            <SegmentedControl
+              value={isEditMode ? "edit" : "view"}
+              onChange={(value) => {
+                setIsEditMode(value === "edit");
+                setDraggingBlockId(null);
               }}
-            >
-              {isEditMode ? "Chỉnh sửa" : "Xem"}
-            </Button>
+              data={[
+                { label: "Xem", value: "view" },
+                { label: "Chỉnh sửa", value: "edit" },
+              ]}
+            />
             <Button component="label" variant="light">
               Tải ảnh mặt bằng
               <input type="file" hidden accept="image/*" onChange={handleUpload} />
             </Button>
             <Button variant="light" onClick={handleCreateNewTemplate}>
-              Tạo mới
+              Tạo template mới
             </Button>
+          </SimpleGrid>
+
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 5 }} spacing="sm">
+            <TextInput
+              label="Tên template"
+              value={templateName}
+              onChange={(event) => setTemplateName(event.currentTarget.value)}
+            />
+            <Select
+              label="Template đã lưu"
+              value={selectedTemplate}
+              onChange={setSelectedTemplate}
+              data={templates.map((item) => ({
+                value: item.name,
+                label: `${item.name} (${dayjs(item.updatedAt).format("DD/MM HH:mm")})`,
+              }))}
+              searchable
+            />
+            <Button mt={{ base: 0, lg: 26 }} onClick={() => void handleSaveTemplate()}>
+              Lưu template
+            </Button>
+            <Button mt={{ base: 0, lg: 26 }} variant="light" onClick={() => void handleApplyTemplate()}>
+              Áp dụng template
+            </Button>
+            <Button mt={{ base: 0, lg: 26 }} color="red" variant="light" onClick={requestRemoveTemplate}>
+              Xóa template
+            </Button>
+          </SimpleGrid>
+        </Stack>
+      </PortalStickyPanel>
+
+      <PortalSectionCard>
+        <Stack gap="md">
+          <Group justify="space-between" align="end">
+            <Text fw={600}>Quản lý block trong template</Text>
+            <Text size="sm" c="dimmed">
+              Tổng block: {layoutBlocks.length} - Đang hiển thị: {visibleBlocks.length}
+            </Text>
           </Group>
 
-          <Group className={classes.toolbarRow} align="end">
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
+            <Select
+              label="Thêm block từ bàn tham chiếu"
+              placeholder="Chọn bàn từ danh sách Quản lý bàn"
+              value={newBlockTableId}
+              onChange={setNewBlockTableId}
+              data={referenceTables.map((table) => ({
+                value: table.id,
+                label: `${table.name} (${table.seats} ghế)`,
+              }))}
+              searchable
+            />
+            <Button mt={{ base: 0, lg: 26 }} onClick={handleAddBlock} disabled={!isEditMode}>
+              Thêm block
+            </Button>
+            <Select
+              label="Xóa block theo tên"
+              placeholder="Chọn block"
+              value={blockToRemoveId}
+              onChange={setBlockToRemoveId}
+              data={layoutBlocks.map((item) => ({ value: item.id, label: item.label }))}
+              searchable
+            />
+            <Button mt={{ base: 0, lg: 26 }} color="red" variant="light" onClick={() => requestRemoveBlock()} disabled={!isEditMode}>
+              Xóa block
+            </Button>
+          </SimpleGrid>
+
+          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
+            <TextInput
+              label="Tìm block"
+              value={blockSearch}
+              onChange={(event) => setBlockSearch(event.currentTarget.value)}
+              placeholder="Tên hiển thị block"
+            />
+            <Select
+              label="Lọc trạng thái"
+              value={blockStatusFilter}
+              onChange={(value) => setBlockStatusFilter(value ?? "all")}
+              data={[
+                { value: "all", label: "Tất cả trạng thái" },
+                ...(["available", "hold", "arriving", "occupied"] as TableStatus[]).map((status) => ({
+                  value: status,
+                  label: tableStatusLabel[status],
+                })),
+              ]}
+            />
+            <Select
+              label="Sắp xếp"
+              value={blockSortMode}
+              onChange={(value) => setBlockSortMode(value ?? "name-asc")}
+              data={[
+                { value: "name-asc", label: "Tên A-Z" },
+                { value: "name-desc", label: "Tên Z-A" },
+                { value: "seats-asc", label: "Ghế tăng dần" },
+                { value: "seats-desc", label: "Ghế giảm dần" },
+              ]}
+            />
+          </SimpleGrid>
+        </Stack>
+      </PortalSectionCard>
+
+      <PortalSectionCard>
+        <Stack gap="sm">
+          <Group justify="space-between" align="end">
+            <Text fw={600}>Không gian bố trí trực quan</Text>
+            <Text size="sm" c="dimmed">
+              {isEditMode
+                ? "Kéo block hoặc dùng phím mũi tên (Shift = bước lớn) để canh chỉnh."
+                : "Bấm block để chỉnh nhanh thông tin."}
+            </Text>
+          </Group>
+
+          {lastRemovedBlock && (
+            <Group justify="space-between" className={classes.undoBanner}>
+              <Text size="sm">Đã xóa block &quot;{lastRemovedBlock.label}&quot;.</Text>
+              <Button size="compact-sm" variant="subtle" onClick={handleUndoRemoveBlock}>
+                Hoàn tác
+              </Button>
+            </Group>
+          )}
+
+          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
             <div className={classes.sliderControl}>
               <Text size="xs" fw={500} mb={4}>
                 Tỷ lệ nền: {backgroundScale}%
@@ -508,151 +750,190 @@ export default function FloorMapPage() {
                 disabled={!isEditMode}
               />
             </div>
-          </Group>
+          </SimpleGrid>
 
-          <Group className={classes.toolbarRow} align="end">
-            <TextInput
-              label="Tên template"
-              value={templateName}
-              onChange={(event) => setTemplateName(event.currentTarget.value)}
-              className={classes.templateNameInput}
-            />
-            <Button onClick={() => void handleSaveTemplate()}>Lưu template</Button>
-            <Select
-              label="Template đã lưu"
-              value={selectedTemplate}
-              onChange={setSelectedTemplate}
-              data={templates.map((item) => ({
-                value: item.name,
-                label: `${item.name} (${dayjs(item.updatedAt).format("DD/MM HH:mm")})`,
-              }))}
-              className={classes.templateSelect}
-            />
-            <Button variant="light" onClick={() => void handleApplyTemplate()}>
-              Áp dụng template
-            </Button>
-            <Button color="red" variant="light" onClick={() => void handleRemoveTemplate()}>
-              Xóa template
-            </Button>
-          </Group>
+          <Divider />
 
-          <Group className={classes.toolbarRow} align="end">
-            <TextInput
-              label="Tên bàn mới"
-              value={newTableName}
-              onChange={(event) => setNewTableName(event.currentTarget.value)}
-              className={classes.tableNameInput}
-            />
-            <NumberInput
-              label="Số ghế"
-              value={newTableSeats}
-              min={1}
-              onChange={(value) => setNewTableSeats(Number(value || 1))}
-              w={120}
-            />
-            <Button onClick={() => void handleAddTable()} disabled={!isEditMode}>
-              Thêm bàn
-            </Button>
-            <Select
-              label="Xóa bàn"
-              placeholder="Chọn bàn"
-              value={tableToRemoveId}
-              onChange={setTableToRemoveId}
-              data={tables.map((table) => ({ value: table.id, label: table.name }))}
-              className={classes.tableSelect}
-            />
-            <Button color="red" variant="light" onClick={() => void handleRemoveTable()} disabled={!isEditMode}>
-              Xóa bàn
-            </Button>
-          </Group>
+          <div
+            ref={containerRef}
+            onMouseMove={(event) => onMove(event.clientX, event.clientY)}
+            onMouseUp={finishDragging}
+            onMouseLeave={finishDragging}
+            onTouchMove={(event) => {
+              const touch = event.touches[0];
+              if (!touch) {
+                return;
+              }
+              onMove(touch.clientX, touch.clientY);
+            }}
+            onTouchEnd={finishDragging}
+            onTouchCancel={finishDragging}
+            className={`${classes.floorMapCanvas} ${isEditMode ? classes.floorMapCanvasEdit : ""}`}
+            style={
+              {
+                "--floor-background-image": backgroundImage ? `url(${backgroundImage})` : "none",
+                "--floor-background-size": `${backgroundScale}%`,
+                "--floor-background-position-x": `${backgroundPosX}%`,
+                "--floor-background-position-y": `${backgroundPosY}%`,
+              } as CSSProperties
+            }
+          >
+            {!backgroundImage && (
+              <Text c="dimmed" p="md">
+                Chưa có ảnh nền cho khu vực này. Hãy tải ảnh để bố trí bàn trực quan.
+              </Text>
+            )}
+            {visibleBlocks.map((block) => (
+              <div
+                key={block.id}
+                onMouseDown={() => isEditMode && setDraggingBlockId(block.id)}
+                onTouchStart={() => isEditMode && setDraggingBlockId(block.id)}
+                onClick={() => {
+                  setSelectedBlockId(block.id);
+                  if (!isEditMode) {
+                    openBlockConfig(block);
+                  }
+                }}
+                className={`${classes.tableCard} ${isEditMode ? classes.tableCardEdit : classes.tableCardView} ${
+                  selectedBlockId === block.id ? classes.tableCardSelected : ""
+                }`}
+                style={
+                  {
+                    "--table-left": `${block.positionX}px`,
+                    "--table-top": `${block.positionY}px`,
+                  } as CSSProperties
+                }
+              >
+                <Text fw={700} size="sm" lineClamp={1}>
+                  {block.label}
+                </Text>
+                <Badge color={tableStatusColor[block.status]} size="xs" variant="light">
+                  {tableStatusLabel[block.status]}
+                </Badge>
+              </div>
+            ))}
+          </div>
         </Stack>
       </PortalSectionCard>
 
       <PortalSectionCard>
-        <div
-          ref={containerRef}
-          onMouseMove={(event) => onMove(event.clientX, event.clientY)}
-          onMouseUp={finishDragging}
-          onMouseLeave={finishDragging}
-          onTouchMove={(event) => {
-            const touch = event.touches[0];
-            if (!touch) {
-              return;
-            }
-            onMove(touch.clientX, touch.clientY);
-          }}
-          onTouchEnd={finishDragging}
-          onTouchCancel={finishDragging}
-          className={`${classes.floorMapCanvas} ${isEditMode ? classes.floorMapCanvasEdit : ""}`}
-          style={
+        <Text fw={600} mb="sm">
+          Danh sách block trong template hiện tại
+        </Text>
+        <DataTable
+          minHeight={220}
+          withTableBorder
+          records={visibleBlocks}
+          noRecordsText="Không có block nào phù hợp với bộ lọc."
+          columns={[
+            { accessor: "label", title: "Nhãn block" },
+            { accessor: "seats", title: "Số ghế" },
             {
-              "--floor-background-image": backgroundImage ? `url(${backgroundImage})` : "none",
-              "--floor-background-size": `${backgroundScale}%`,
-              "--floor-background-position-x": `${backgroundPosX}%`,
-              "--floor-background-position-y": `${backgroundPosY}%`,
-            } as CSSProperties
-          }
-        >
-          {!backgroundImage && (
-            <Text c="dimmed" p="md">
-              Chưa có ảnh nền cho khu vực này. Hãy tải ảnh để bố trí bàn trực quan.
-            </Text>
-          )}
-          {tables.map((table) => (
-            <div
-              key={table.id}
-              onMouseDown={() => isEditMode && setDraggingTableId(table.id)}
-              onTouchStart={() => isEditMode && setDraggingTableId(table.id)}
-              onClick={() => {
-                if (!isEditMode) {
-                  openTableConfig(table);
-                }
-              }}
-              className={`${classes.tableCard} ${isEditMode ? classes.tableCardEdit : classes.tableCardView}`}
-              style={
-                {
-                  "--table-left": `${table.positionX}px`,
-                  "--table-top": `${table.positionY}px`,
-                } as CSSProperties
-              }
-            >
-              <Text fw={700} size="sm">
-                {table.name}
-              </Text>
-              <Badge color={tableStatusColor[table.status]} size="xs" variant="light">
-                {tableStatusLabel[table.status]}
-              </Badge>
-            </div>
-          ))}
-        </div>
+              accessor: "status",
+              title: "Trạng thái",
+              render: (row) => (
+                <Badge color={tableStatusColor[row.status]} variant="light">
+                  {tableStatusLabel[row.status]}
+                </Badge>
+              ),
+            },
+            {
+              accessor: "referenceTableId",
+              title: "Bàn tham chiếu",
+              render: (row) =>
+                referenceTables.find((table) => table.id === row.referenceTableId)?.name ?? "-",
+            },
+            {
+              accessor: "actions",
+              title: "Thao tác",
+              render: (row) => (
+                <Group gap={6}>
+                  <Button size="compact-xs" variant="light" onClick={() => openBlockConfig(row)}>
+                    Sửa
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    color="red"
+                    variant="light"
+                    onClick={() => requestRemoveBlock(row.id)}
+                    disabled={!isEditMode}
+                  >
+                    Xóa
+                  </Button>
+                </Group>
+              ),
+            },
+          ]}
+        />
       </PortalSectionCard>
-      <Modal opened={Boolean(configuringTableId)} onClose={closeTableConfig} title="Cấu hình bàn" centered>
+
+      <Modal opened={Boolean(configuringBlockId)} onClose={closeBlockConfig} title="Cấu hình block" centered>
         <Stack>
           <TextInput
-            label="Tên bàn"
-            value={tableName}
-            onChange={(event) => setTableName(event.currentTarget.value)}
+            label="Nhãn hiển thị"
+            value={blockLabel}
+            onChange={(event) => setBlockLabel(event.currentTarget.value)}
           />
           <NumberInput
             label="Số ghế"
-            value={tableSeats}
+            value={blockSeats}
             min={1}
-            onChange={(value) => setTableSeats(Number(value || 1))}
+            onChange={(value) => setBlockSeats(Number(value || 1))}
           />
           <Select
             label="Trạng thái"
-            value={tableStatus}
-            onChange={(value) => value && setTableStatus(value as TableStatus)}
+            value={blockStatus}
+            onChange={(value) => value && setBlockStatus(value as TableStatus)}
             data={(["available", "hold", "arriving", "occupied"] as TableStatus[]).map((status) => ({
               value: status,
               label: tableStatusLabel[status],
             }))}
           />
           <Group justify="flex-end">
-            <Button variant="light" onClick={closeTableConfig}>
+            <Button variant="light" onClick={closeBlockConfig}>
               Hủy
             </Button>
-            <Button onClick={() => void handleSaveTableConfig()}>Lưu</Button>
+            <Button onClick={handleSaveBlockConfig}>Lưu</Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={Boolean(pendingDeleteBlockId)}
+        onClose={() => setPendingDeleteBlockId(null)}
+        title="Xác nhận xóa block"
+        centered
+      >
+        <Stack>
+          <Text size="sm">Bạn có chắc muốn xóa block này khỏi template hiện tại?</Text>
+          <Group justify="flex-end">
+            <Button variant="light" onClick={() => setPendingDeleteBlockId(null)}>
+              Hủy
+            </Button>
+            <Button color="red" onClick={confirmRemoveBlock}>
+              Xóa block
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={Boolean(pendingDeleteTemplateName)}
+        onClose={() => setPendingDeleteTemplateName(null)}
+        title="Xác nhận xóa template"
+        centered
+      >
+        <Stack>
+          <Text size="sm">
+            Bạn có chắc muốn xóa template &quot;{pendingDeleteTemplateName}&quot;? Hành động này chỉ xóa template bố trí.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="light" onClick={() => setPendingDeleteTemplateName(null)}>
+              Hủy
+            </Button>
+            <Button color="red" onClick={() => void confirmRemoveTemplate()}>
+              Xóa template
+            </Button>
           </Group>
         </Stack>
       </Modal>

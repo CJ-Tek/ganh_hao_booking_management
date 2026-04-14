@@ -3,6 +3,7 @@
 import dayjs from "dayjs";
 import {
   Badge,
+  Box,
   Drawer,
   Group,
   ScrollArea,
@@ -63,19 +64,21 @@ export default function CustomersPage() {
             </PortalSectionCard>
           ) : (
             customerStats.map((customer) => (
-              <PortalSectionCard p="sm" key={customer.id} onClick={() => setSelectedCustomer(customer)}>
-                <Group justify="space-between" mb={6}>
-                  <Text fw={700}>{customer.fullName}</Text>
-                  <Badge variant="light">{customer.bookingCount} booking</Badge>
-                </Group>
-                <Stack gap={4}>
-                  <Text size="sm">Điện thoại: {customer.phone}</Text>
-                  <Text size="sm" c="dimmed">
-                    Gần nhất:{" "}
-                    {customer.latestBooking ? dayjs(customer.latestBooking).format("DD/MM/YYYY HH:mm") : "-"}
-                  </Text>
-                </Stack>
-              </PortalSectionCard>
+              <Box key={customer.id} onClick={() => setSelectedCustomer(customer)}>
+                <PortalSectionCard p="sm">
+                  <Group justify="space-between" mb={6}>
+                    <Text fw={700}>{customer.fullName}</Text>
+                    <Badge variant="light">{customer.bookingCount} booking</Badge>
+                  </Group>
+                  <Stack gap={4}>
+                    <Text size="sm">Điện thoại: {customer.phone}</Text>
+                    <Text size="sm" c="dimmed">
+                      Gần nhất:{" "}
+                      {customer.latestBooking ? dayjs(customer.latestBooking).format("DD/MM/YYYY HH:mm") : "-"}
+                    </Text>
+                  </Stack>
+                </PortalSectionCard>
+              </Box>
             ))
           )}
         </Stack>

@@ -9,13 +9,13 @@ import {
   NumberInput,
   Select,
   Stack,
-  Table,
   Text,
   TextInput,
   Textarea,
 } from "@mantine/core";
 import { DateTimePicker } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
+import { DataTable, type DataTableSortStatus } from "mantine-datatable";
 import { useMemo, useState } from "react";
 import {
   PortalMobileActionGrid,
@@ -25,6 +25,7 @@ import {
 } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
+import { type Booking } from "@/lib/types";
 
 export default function BookingsPage() {
   const {
@@ -46,9 +47,24 @@ export default function BookingsPage() {
     dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm")
   );
   const [note, setNote] = useState("");
+  const [tableSearch, setTableSearch] = useState("");
+  const [tableStatusFilter, setTableStatusFilter] = useState<string>("all");
+  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Booking>>({
+    columnAccessor: "bookingAt",
+    direction: "desc",
+  });
+  const [page, setPage] = useState(1);
+  const pageSize = 8;
 
   const filteredAreas = state.areas.filter((area) => area.branchId === branchId);
-  const filteredTables = state.tables.filter((table) => table.areaId === areaId);
+  const filteredTables = useMemo(() => {
+    const keyword = tableSearch.trim().toLowerCase();
+    return state.tables
+      .filter((table) => table.areaId === areaId)
+      .filter((table) => tableStatusFilter === "all" || table.status === tableStatusFilter)
+      .filter((table) => !keyword || table.name.toLowerCase().includes(keyword))
+      .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  }, [areaId, state.tables, tableSearch, tableStatusFilter]);
 
   const branchBookings = useMemo(
     () =>
@@ -58,6 +74,40 @@ export default function BookingsPage() {
           (currentUser?.role !== "manager" || booking.branchId === branchId)
       ),
     [branchId, currentUser?.role, filteredBranchIds, state.bookings]
+  );
+
+  const sortedBookings = useMemo(() => {
+    const getCustomerName = (booking: Booking) =>
+      state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
+    const getValue = (booking: Booking) => {
+      if (sortStatus.columnAccessor === "id") {
+        return booking.id;
+      }
+      if (sortStatus.columnAccessor === "customerId") {
+        return getCustomerName(booking);
+      }
+      if (sortStatus.columnAccessor === "status") {
+        return bookingStatusLabel[booking.status];
+      }
+      return dayjs(booking.bookingAt).valueOf();
+    };
+    return [...branchBookings].sort((a, b) => {
+      const left = getValue(a);
+      const right = getValue(b);
+      const compare = typeof left === "number" && typeof right === "number"
+        ? left - right
+        : String(left).localeCompare(String(right), "vi");
+      return sortStatus.direction === "asc" ? compare : -compare;
+    });
+  }, [branchBookings, sortStatus, state.customers]);
+
+  const pagedBookings = useMemo(
+    () => {
+      const totalPages = Math.max(1, Math.ceil(sortedBookings.length / pageSize));
+      const currentPage = Math.min(page, totalPages);
+      return sortedBookings.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    },
+    [page, pageSize, sortedBookings]
   );
 
   const handleCreate = async () => {
@@ -127,11 +177,30 @@ export default function BookingsPage() {
                 }}
                 data={filteredAreas.map((area) => ({ value: area.id, label: area.name }))}
               />
+              <TextInput
+                label="Tìm bàn"
+                value={tableSearch}
+                onChange={(event) => setTableSearch(event.currentTarget.value)}
+                placeholder="Tên bàn"
+              />
+              <Select
+                label="Lọc trạng thái bàn"
+                value={tableStatusFilter}
+                onChange={(value) => setTableStatusFilter(value ?? "all")}
+                data={[
+                  { value: "all", label: "Tất cả trạng thái" },
+                  { value: "available", label: "Sẵn sàng" },
+                  { value: "hold", label: "Đang giữ chỗ" },
+                  { value: "arriving", label: "Sắp đến" },
+                  { value: "occupied", label: "Đang có khách" },
+                ]}
+              />
               <Select
                 label="Bàn"
                 value={tableId}
                 onChange={setTableId}
                 data={filteredTables.map((table) => ({ value: table.id, label: table.name }))}
+                searchable
               />
               <DateTimePicker
                 value={bookingAt}
@@ -165,14 +234,14 @@ export default function BookingsPage() {
               Danh sách booking hiện tại
             </Text>
             <Stack hiddenFrom="sm" gap="sm">
-              {branchBookings.length === 0 ? (
+              {sortedBookings.length === 0 ? (
                 <PortalSectionCard p="sm">
                   <Text c="dimmed" size="sm">
                     Chưa có booking nào cho bộ lọc hiện tại.
                   </Text>
                 </PortalSectionCard>
               ) : (
-                branchBookings.map((booking) => {
+                sortedBookings.map((booking) => {
                   const customer = state.customers.find((item) => item.id === booking.customerId);
                   return (
                     <PortalSectionCard key={booking.id} p="sm">
@@ -214,68 +283,73 @@ export default function BookingsPage() {
               )}
             </Stack>
 
-            <Table.ScrollContainer minWidth={760} visibleFrom="sm">
-              <Table striped highlightOnHover>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Mã</Table.Th>
-                    <Table.Th>Khách</Table.Th>
-                    <Table.Th>Giờ</Table.Th>
-                    <Table.Th>Trạng thái</Table.Th>
-                    <Table.Th>Thao tác</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {branchBookings.length === 0 ? (
-                    <Table.Tr>
-                      <Table.Td colSpan={5}>
-                        <Text c="dimmed" size="sm">
-                          Chưa có booking nào cho bộ lọc hiện tại.
-                        </Text>
-                      </Table.Td>
-                    </Table.Tr>
-                  ) : (
-                    branchBookings.map((booking) => {
-                      const customer = state.customers.find((item) => item.id === booking.customerId);
-                      return (
-                        <Table.Tr key={booking.id}>
-                          <Table.Td>{booking.id}</Table.Td>
-                          <Table.Td>{customer?.fullName}</Table.Td>
-                          <Table.Td>{dayjs(booking.bookingAt).format("HH:mm DD/MM")}</Table.Td>
-                          <Table.Td>
-                            <Badge color={bookingStatusColor[booking.status]} variant="light">
-                              {bookingStatusLabel[booking.status]}
-                            </Badge>
-                          </Table.Td>
-                          <Table.Td>
-                            <Group gap={6} wrap="wrap">
-                              <Button
-                                size="compact-xs"
-                                variant="light"
-                                color="green"
-                                onClick={() => void checkInBooking(booking.id)}
-                                disabled={booking.status !== "confirmed"}
-                              >
-                                Check-in
-                              </Button>
-                              <Button
-                                size="compact-xs"
-                                variant="light"
-                                color="red"
-                                onClick={() => void updateBookingStatus(booking.id, "cancelled")}
-                                disabled={booking.status === "cancelled"}
-                              >
-                                Hủy
-                              </Button>
-                            </Group>
-                          </Table.Td>
-                        </Table.Tr>
-                      );
-                    })
-                  )}
-                </Table.Tbody>
-              </Table>
-            </Table.ScrollContainer>
+            <DataTable
+              visibleFrom="sm"
+              minHeight={260}
+              withTableBorder
+              records={pagedBookings}
+              totalRecords={sortedBookings.length}
+              recordsPerPage={pageSize}
+              page={Math.min(page, Math.max(1, Math.ceil(sortedBookings.length / pageSize)))}
+              onPageChange={setPage}
+              sortStatus={sortStatus}
+              onSortStatusChange={(next) => {
+                setSortStatus(next);
+                setPage(1);
+              }}
+              noRecordsText="Chưa có booking nào cho bộ lọc hiện tại."
+              columns={[
+                { accessor: "id", title: "Mã", sortable: true },
+                {
+                  accessor: "customerId",
+                  title: "Khách",
+                  sortable: true,
+                  render: (booking) => state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "-",
+                },
+                {
+                  accessor: "bookingAt",
+                  title: "Giờ",
+                  sortable: true,
+                  render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM"),
+                },
+                {
+                  accessor: "status",
+                  title: "Trạng thái",
+                  sortable: true,
+                  render: (booking) => (
+                    <Badge color={bookingStatusColor[booking.status]} variant="light">
+                      {bookingStatusLabel[booking.status]}
+                    </Badge>
+                  ),
+                },
+                {
+                  accessor: "actions",
+                  title: "Thao tác",
+                  render: (booking) => (
+                    <Group gap={6} wrap="wrap">
+                      <Button
+                        size="compact-xs"
+                        variant="light"
+                        color="green"
+                        onClick={() => void checkInBooking(booking.id)}
+                        disabled={booking.status !== "confirmed"}
+                      >
+                        Check-in
+                      </Button>
+                      <Button
+                        size="compact-xs"
+                        variant="light"
+                        color="red"
+                        onClick={() => void updateBookingStatus(booking.id, "cancelled")}
+                        disabled={booking.status === "cancelled"}
+                      >
+                        Hủy
+                      </Button>
+                    </Group>
+                  ),
+                },
+              ]}
+            />
           </PortalSectionCard>
         </Grid.Col>
       </Grid>

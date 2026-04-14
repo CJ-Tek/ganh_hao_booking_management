@@ -6,12 +6,12 @@ import {
   Select,
   SimpleGrid,
   Stack,
-  Table,
   Text,
   TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { useState } from "react";
+import { DataTable, type DataTableSortStatus } from "mantine-datatable";
+import { useMemo, useState } from "react";
 import {
   PortalPageTitle,
   PortalSectionCard,
@@ -20,13 +20,76 @@ import {
 } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 
+type AreaRow = {
+  id: string;
+  branchId: string;
+  branchName: string;
+  name: string;
+  capacity: number;
+  tableCount: number;
+};
+
 export default function AreasTablesSettingsPage() {
   const { state, filteredBranchIds, addArea } = useAppContext();
   const [branchId, setBranchId] = useState(filteredBranchIds[0] ?? "");
   const [name, setName] = useState("");
   const [capacity, setCapacity] = useState<number>(30);
+  const [search, setSearch] = useState("");
+  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<AreaRow>>({
+    columnAccessor: "name",
+    direction: "asc",
+  });
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
 
-  const areas = state.areas.filter((area) => filteredBranchIds.includes(area.branchId));
+  const areaRows = useMemo(
+    () =>
+      state.areas
+        .filter((area) => filteredBranchIds.includes(area.branchId))
+        .map((area) => ({
+          id: area.id,
+          branchId: area.branchId,
+          branchName: state.branches.find((branch) => branch.id === area.branchId)?.name ?? "-",
+          name: area.name,
+          capacity: area.capacity,
+          tableCount: state.tables.filter((table) => table.areaId === area.id).length,
+        })),
+    [filteredBranchIds, state.areas, state.branches, state.tables]
+  );
+  const filteredAreas = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    return areaRows.filter((area) => {
+      if (!keyword) {
+        return true;
+      }
+      return area.name.toLowerCase().includes(keyword) || area.branchName.toLowerCase().includes(keyword);
+    });
+  }, [areaRows, search]);
+
+  const sortedAreas = useMemo(() => {
+    return [...filteredAreas].sort((a, b) => {
+      let compare = 0;
+      if (sortStatus.columnAccessor === "branchName") {
+        compare = a.branchName.localeCompare(b.branchName, "vi");
+      } else if (sortStatus.columnAccessor === "capacity") {
+        compare = a.capacity - b.capacity;
+      } else if (sortStatus.columnAccessor === "tableCount") {
+        compare = a.tableCount - b.tableCount;
+      } else {
+        compare = a.name.localeCompare(b.name, "vi");
+      }
+      return sortStatus.direction === "asc" ? compare : -compare;
+    });
+  }, [filteredAreas, sortStatus]);
+
+  const pagedAreas = useMemo(
+    () => {
+      const totalPages = Math.max(1, Math.ceil(sortedAreas.length / pageSize));
+      const currentPage = Math.min(page, totalPages);
+      return sortedAreas.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    },
+    [page, pageSize, sortedAreas]
+  );
 
   const handleAddArea = async () => {
     if (!branchId || !name) {
@@ -75,49 +138,64 @@ export default function AreasTablesSettingsPage() {
         <Text fw={600} mb="sm">
           Danh sách khu vực
         </Text>
+        <TextInput
+          label="Tìm khu vực"
+          placeholder="Tên khu vực hoặc chi nhánh"
+          value={search}
+          onChange={(event) => {
+            setSearch(event.currentTarget.value);
+            setPage(1);
+          }}
+          mb="sm"
+        />
         <Stack hiddenFrom="sm" gap="sm">
-          {areas.map((area) => (
+          {sortedAreas.map((area) => (
             <PortalSectionCard p="sm" key={area.id}>
               <Stack gap={4}>
                 <Text fw={700}>{area.name}</Text>
                 <Text size="sm">
-                  Chi nhánh: {state.branches.find((branch) => branch.id === area.branchId)?.name}
+                  Chi nhánh: {area.branchName}
                 </Text>
                 <Text size="sm" c="dimmed">
                   Sức chứa: {area.capacity}
                 </Text>
                 <Text size="sm" c="dimmed">
-                  Số bàn: {state.tables.filter((table) => table.areaId === area.id).length}
+                  Số bàn: {area.tableCount}
                 </Text>
               </Stack>
             </PortalSectionCard>
           ))}
         </Stack>
 
-        <Table.ScrollContainer minWidth={680} visibleFrom="sm">
-          <Table striped>
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Chi nhánh</Table.Th>
-                <Table.Th>Khu vực</Table.Th>
-                <Table.Th>Sức chứa</Table.Th>
-                <Table.Th>Số bàn</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {areas.map((area) => (
-                <Table.Tr key={area.id}>
-                  <Table.Td>
-                    {state.branches.find((branch) => branch.id === area.branchId)?.name}
-                  </Table.Td>
-                  <Table.Td>{area.name}</Table.Td>
-                  <Table.Td>{area.capacity}</Table.Td>
-                  <Table.Td>{state.tables.filter((table) => table.areaId === area.id).length}</Table.Td>
-                </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        </Table.ScrollContainer>
+        <DataTable
+          visibleFrom="sm"
+          minHeight={240}
+          withTableBorder
+          records={pagedAreas}
+          totalRecords={sortedAreas.length}
+          recordsPerPage={pageSize}
+          page={Math.min(page, Math.max(1, Math.ceil(sortedAreas.length / pageSize)))}
+          onPageChange={setPage}
+          sortStatus={sortStatus}
+          onSortStatusChange={(next) => {
+            setSortStatus(next);
+            setPage(1);
+          }}
+          columns={[
+            {
+              accessor: "branchName",
+              title: "Chi nhánh",
+              sortable: true,
+            },
+            { accessor: "name", title: "Khu vực", sortable: true },
+            { accessor: "capacity", title: "Sức chứa", sortable: true },
+            {
+              accessor: "tableCount",
+              title: "Số bàn",
+              sortable: true,
+            },
+          ]}
+        />
       </PortalSectionCard>
     </Stack>
   );

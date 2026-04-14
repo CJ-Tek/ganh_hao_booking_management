@@ -91,7 +91,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     >
       <AppShell.Header px={{ base: "sm", sm: "md" }}>
         <Group justify="space-between" h="100%" wrap="nowrap" className={classes.headerRoot}>
-          <Group gap={{ base: "xs", sm: "md" }} wrap="nowrap">
+          <Group gap="sm" wrap="nowrap">
             <Burger opened={opened} onClick={toggle} hiddenFrom="md" size="sm" />
             <Image src="/logo/horizontal.png" alt="Logo Gành Hào" h={34} w="auto" />
             <Stack gap={0} className={classes.brandCopy}>
@@ -102,7 +102,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             </Stack>
           </Group>
 
-          <Group gap={{ base: 6, sm: "xs" }} wrap="nowrap">
+          <Group gap="xs" wrap="nowrap">
             {currentUser?.role !== "manager" && (
               <Select
                 size="xs"

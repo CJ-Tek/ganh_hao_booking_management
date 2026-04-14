@@ -3,7 +3,7 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Ganh Hao Booking Management",
+  title: "Gành Hào Booking Management",
   description: "Hệ thống quản lý đặt bàn cho nhà hàng Gành Hào",
   icons: {
     icon: 'logo/main_logo.png',

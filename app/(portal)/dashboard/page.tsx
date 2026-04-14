@@ -8,21 +8,33 @@ import {
   RingProgress,
   SimpleGrid,
   Stack,
-  Table,
   Text,
   Title,
 } from "@mantine/core";
+import { DataTable, type DataTableSortStatus } from "mantine-datatable";
+import { useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusLabel, tableStatusLabel } from "@/lib/display";
+import { type Booking } from "@/lib/types";
 
 export default function DashboardPage() {
   const { state, filteredBranchIds } = useAppContext();
+  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Booking>>({
+    columnAccessor: "bookingAt",
+    direction: "desc",
+  });
+  const [page, setPage] = useState(1);
+  const pageSize = 8;
 
-  const branchBookings = state.bookings.filter((item) =>
-    filteredBranchIds.includes(item.branchId)
+  const branchBookings = useMemo(
+    () => state.bookings.filter((item) => filteredBranchIds.includes(item.branchId)),
+    [filteredBranchIds, state.bookings]
   );
-  const branchTables = state.tables.filter((item) => filteredBranchIds.includes(item.branchId));
+  const branchTables = useMemo(
+    () => state.tables.filter((item) => filteredBranchIds.includes(item.branchId)),
+    [filteredBranchIds, state.tables]
+  );
   const checkedInCount = branchBookings.filter((item) => item.status === "checked_in").length;
   const branchNames = state.branches
     .filter((branch) => filteredBranchIds.includes(branch.id))
@@ -34,6 +46,38 @@ export default function DashboardPage() {
     occupied: branchTables.filter((table) => table.status === "occupied").length,
     available: branchTables.filter((table) => table.status === "available").length,
   };
+
+  const sortedHistoryBookings = useMemo(() => {
+    const getValue = (booking: Booking) => {
+      if (sortStatus.columnAccessor === "id") {
+        return booking.id;
+      }
+      if (sortStatus.columnAccessor === "createdByUserId") {
+        return state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
+      }
+      if (sortStatus.columnAccessor === "status") {
+        return bookingStatusLabel[booking.status];
+      }
+      return dayjs(booking.bookingAt).valueOf();
+    };
+    return [...branchBookings].sort((a, b) => {
+      const left = getValue(a);
+      const right = getValue(b);
+      const compare = typeof left === "number" && typeof right === "number"
+        ? left - right
+        : String(left).localeCompare(String(right), "vi");
+      return sortStatus.direction === "asc" ? compare : -compare;
+    });
+  }, [branchBookings, sortStatus, state.users]);
+
+  const pagedHistoryBookings = useMemo(
+    () => {
+      const totalPages = Math.max(1, Math.ceil(sortedHistoryBookings.length / pageSize));
+      const currentPage = Math.min(page, totalPages);
+      return sortedHistoryBookings.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    },
+    [page, pageSize, sortedHistoryBookings]
+  );
 
   return (
     <Stack>
@@ -110,33 +154,43 @@ export default function DashboardPage() {
             <Text fw={600} mb="sm">
               Lịch sử booking theo nhân viên
             </Text>
-            <Table.ScrollContainer minWidth={620}>
-              <Table striped highlightOnHover>
-                <Table.Thead>
-                  <Table.Tr>
-                    <Table.Th>Mã</Table.Th>
-                    <Table.Th>Giờ đặt</Table.Th>
-                    <Table.Th>Người tạo</Table.Th>
-                    <Table.Th>Trạng thái</Table.Th>
-                  </Table.Tr>
-                </Table.Thead>
-                <Table.Tbody>
-                  {branchBookings.slice(0, 8).map((booking) => {
-                    const user = state.users.find((item) => item.id === booking.createdByUserId);
-                    return (
-                      <Table.Tr key={booking.id}>
-                        <Table.Td>{booking.id}</Table.Td>
-                        <Table.Td>{dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY")}</Table.Td>
-                        <Table.Td>{user?.fullName ?? "Không rõ"}</Table.Td>
-                        <Table.Td>
-                          <Badge variant="light">{bookingStatusLabel[booking.status]}</Badge>
-                        </Table.Td>
-                      </Table.Tr>
-                    );
-                  })}
-                </Table.Tbody>
-              </Table>
-            </Table.ScrollContainer>
+            <DataTable
+              minHeight={260}
+              withTableBorder
+              records={pagedHistoryBookings}
+              totalRecords={sortedHistoryBookings.length}
+              recordsPerPage={pageSize}
+              page={Math.min(page, Math.max(1, Math.ceil(sortedHistoryBookings.length / pageSize)))}
+              onPageChange={setPage}
+              sortStatus={sortStatus}
+              onSortStatusChange={(next) => {
+                setSortStatus(next);
+                setPage(1);
+              }}
+              noRecordsText="Chưa có booking nào."
+              columns={[
+                { accessor: "id", title: "Mã", sortable: true },
+                {
+                  accessor: "bookingAt",
+                  title: "Giờ đặt",
+                  sortable: true,
+                  render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+                },
+                {
+                  accessor: "createdByUserId",
+                  title: "Người tạo",
+                  sortable: true,
+                  render: (booking) =>
+                    state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "Không rõ",
+                },
+                {
+                  accessor: "status",
+                  title: "Trạng thái",
+                  sortable: true,
+                  render: (booking) => <Badge variant="light">{bookingStatusLabel[booking.status]}</Badge>,
+                },
+              ]}
+            />
           </PortalSectionCard>
         </Grid.Col>
       </Grid>
