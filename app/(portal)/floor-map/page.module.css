@@ -1,74 +1,52 @@
-.floorMapCanvas {
-  height: 520px;
-  border-radius: 12px;
-  position: relative;
-  background-image: var(--floor-background-image, none);
-  background-size: var(--floor-background-size, 100%);
-  background-position: var(--floor-background-position-x, 50%) var(--floor-background-position-y, 50%);
-  background-repeat: no-repeat;
-  background-color: #f1f3f5;
-  overflow: hidden;
-  border: 1px solid #d0d7de;
+.gridWrapper {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 8px;
 }
 
-.floorMapCanvasEdit {
-  touch-action: none;
-}
-
-.tableCard {
-  position: absolute;
-  left: var(--table-left);
-  top: var(--table-top);
-  width: 100px;
-  height: 60px;
+.gridCell {
+  min-height: 116px;
+  border: 1px dashed #cbd5e1;
   border-radius: 10px;
-  border: 2px solid #0c61a4;
-  background-color: #fff;
   padding: 6px;
-  user-select: none;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  background-color: #f8fafc;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
-.tableCardEdit {
-  cursor: grab;
-}
-
-.tableCardView {
-  cursor: pointer;
-}
-
-.tableCardSelected {
-  box-shadow: 0 0 0 3px rgba(12, 97, 164, 0.35), 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-.sliderControl {
-  min-width: 180px;
-}
-
-.undoBanner {
-  padding: 6px 10px;
-  border: 1px solid #dbeafe;
+.gridCellDropReady {
+  border-color: #0c61a4;
   background-color: #eff6ff;
+}
+
+.gridCellLabel {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.tableBlock {
+  border: 1px solid #bfdbfe;
   border-radius: 8px;
+  padding: 6px;
+  background-color: #ffffff;
+  cursor: grab;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+
+@media (max-width: 75em) {
+  .gridWrapper {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 62em) {
-  .floorMapCanvas {
-    height: 440px;
+  .gridWrapper {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 48em) {
-  .floorMapCanvas {
-    height: 340px;
-  }
-
-  .tableCard {
-    width: 92px;
-    height: 56px;
-    padding: 4px;
+  .gridWrapper {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }

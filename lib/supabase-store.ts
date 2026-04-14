@@ -5,8 +5,6 @@ import {
   AppStateSnapshot,
   AppUser,
   BookingStatus,
-  FloorLayoutBlock,
-  FloorLayoutTemplateSummary,
   Role,
   TableStatus,
 } from "./types";
@@ -50,7 +48,6 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
     customersResult,
     bookingsResult,
     notificationsResult,
-    backgroundsResult,
   ] = await Promise.all([
     client.from("app_users").select("*"),
     client.from("branches").select("*"),
@@ -62,7 +59,6 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
       .from("internal_notifications")
       .select("*")
       .order("created_at", { ascending: false }),
-    client.from("floor_backgrounds").select("*"),
   ]);
 
   const errors = [
@@ -73,18 +69,11 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
     customersResult.error,
     bookingsResult.error,
     notificationsResult.error,
-    backgroundsResult.error,
   ].filter(Boolean);
 
   if (errors.length > 0) {
     throw new Error(errors[0]?.message ?? "Khong the tai du lieu Supabase.");
   }
-
-  const floorBackgrounds =
-    backgroundsResult.data?.reduce<Record<string, string>>((acc, item) => {
-      acc[`${item.user_id}_${item.area_id}`] = item.image_data_url;
-      return acc;
-    }, {}) ?? {};
 
   return {
     users:
@@ -151,7 +140,6 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
       })) ?? [],
     activeBranchId:
       branchesResult.data?.[0]?.id ?? initialState.activeBranchId ?? undefined,
-    floorBackgrounds,
   };
 }
 
@@ -414,186 +402,6 @@ export async function updateTablePositionInSupabase(
     .from("tables")
     .update({ position_x: Math.round(x), position_y: Math.round(y) })
     .eq("id", tableId);
-}
-
-export async function setFloorBackgroundInSupabase(
-  userId: string,
-  areaId: string,
-  imageDataUrl: string
-): Promise<void> {
-  const client = ensureClient();
-  await client.from("floor_backgrounds").upsert(
-    {
-      user_id: userId,
-      area_id: areaId,
-      image_data_url: imageDataUrl,
-    },
-    { onConflict: "user_id,area_id" }
-  );
-}
-
-export async function listFloorLayoutTemplatesInSupabase(
-  areaId: string
-): Promise<FloorLayoutTemplateSummary[]> {
-  const client = ensureClient();
-  const { data, error } = await client
-    .from("floor_layout_templates")
-    .select("name, updated_at")
-    .eq("area_id", areaId)
-    .order("updated_at", { ascending: false });
-  if (error) {
-    throw new Error(error.message);
-  }
-  return (
-    data?.map((item) => ({
-      name: item.name,
-      updatedAt: item.updated_at,
-    })) ?? []
-  );
-}
-
-export async function deleteFloorLayoutTemplateInSupabase(
-  areaId: string,
-  name: string
-): Promise<void> {
-  const client = ensureClient();
-  const { error } = await client
-    .from("floor_layout_templates")
-    .delete()
-    .eq("area_id", areaId)
-    .eq("name", name);
-  if (error) {
-    throw new Error(error.message);
-  }
-}
-
-export async function getLastSelectedFloorLayoutTemplateInSupabase(
-  userId: string,
-  areaId: string
-): Promise<string | null> {
-  const client = ensureClient();
-  const { data, error } = await client
-    .from("floor_layout_template_selections")
-    .select("template_name")
-    .eq("user_id", userId)
-    .eq("area_id", areaId)
-    .maybeSingle();
-  if (error) {
-    throw new Error(error.message);
-  }
-  return data?.template_name ?? null;
-}
-
-export async function setLastSelectedFloorLayoutTemplateInSupabase(
-  userId: string,
-  areaId: string,
-  templateName: string | null
-): Promise<void> {
-  const client = ensureClient();
-  if (!templateName) {
-    const { error } = await client
-      .from("floor_layout_template_selections")
-      .delete()
-      .eq("user_id", userId)
-      .eq("area_id", areaId);
-    if (error) {
-      throw new Error(error.message);
-    }
-    return;
-  }
-  const { error } = await client.from("floor_layout_template_selections").upsert(
-    {
-      user_id: userId,
-      area_id: areaId,
-      template_name: templateName,
-      updated_at: dayjs().toISOString(),
-    },
-    { onConflict: "user_id,area_id" }
-  );
-  if (error) {
-    throw new Error(error.message);
-  }
-}
-
-export async function saveFloorLayoutTemplateInSupabase(input: {
-  areaId: string;
-  name: string;
-  createdByUserId: string;
-  backgroundImageDataUrl?: string;
-  backgroundScale: number;
-  blocks: FloorLayoutBlock[];
-}): Promise<void> {
-  const client = ensureClient();
-  const templateLayout = input.blocks.map((block) => ({
-    id: block.id,
-    referenceTableId: block.referenceTableId ?? null,
-    label: block.label,
-    seats: block.seats,
-    status: block.status,
-    positionX: block.positionX,
-    positionY: block.positionY,
-  }));
-  const { error } = await client.from("floor_layout_templates").upsert(
-    {
-      area_id: input.areaId,
-      name: input.name,
-      created_by_user_id: input.createdByUserId,
-      background_image_data_url: input.backgroundImageDataUrl ?? null,
-      background_scale: input.backgroundScale,
-      table_layout_json: templateLayout,
-      updated_at: dayjs().toISOString(),
-    },
-    { onConflict: "area_id,name" }
-  );
-  if (error) {
-    throw new Error(error.message);
-  }
-}
-
-export async function applyFloorLayoutTemplateInSupabase(input: {
-  areaId: string;
-  name: string;
-  userId: string;
-}): Promise<{ backgroundScale: number; blocks: FloorLayoutBlock[] } | null> {
-  const client = ensureClient();
-  const { data, error } = await client
-    .from("floor_layout_templates")
-    .select("background_image_data_url, background_scale, table_layout_json")
-    .eq("area_id", input.areaId)
-    .eq("name", input.name)
-    .maybeSingle();
-  if (error) {
-    throw new Error(error.message);
-  }
-  if (!data) {
-    return null;
-  }
-
-  const tableLayoutsRaw = Array.isArray(data.table_layout_json) ? data.table_layout_json : [];
-  const blocks = tableLayoutsRaw
-    .map((item) => ({
-      id: String(item.id ?? item.blockId ?? item.tableId ?? item.table_id ?? ""),
-      referenceTableId: item.referenceTableId
-        ? String(item.referenceTableId)
-        : item.tableId
-          ? String(item.tableId)
-          : undefined,
-      label: String(item.label ?? item.name ?? ""),
-      seats: Number(item.seats ?? 1),
-      status: item.status as TableStatus,
-      positionX: Number(item.positionX ?? item.position_x ?? 0),
-      positionY: Number(item.positionY ?? item.position_y ?? 0),
-    }))
-    .filter((item) => item.id && item.label && Number.isFinite(item.positionX) && Number.isFinite(item.positionY));
-
-  if (data.background_image_data_url) {
-    await setFloorBackgroundInSupabase(input.userId, input.areaId, data.background_image_data_url);
-  }
-
-  return {
-    backgroundScale: data.background_scale ?? 100,
-    blocks,
-  };
 }
 
 export async function addAreaInSupabase(

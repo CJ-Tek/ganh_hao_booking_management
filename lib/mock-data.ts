@@ -178,5 +178,4 @@ export const initialState: AppStateSnapshot = {
   bookings: seedBookings,
   notifications: seedNotifications,
   activeBranchId: "cn-1",
-  floorBackgrounds: {},
 };

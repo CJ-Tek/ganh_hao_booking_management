@@ -152,8 +152,8 @@ export default function TablesPage() {
       name: singleName.trim(),
       seats: Math.max(1, Number(singleSeats || 1)),
       status: "available",
-      positionX: 40,
-      positionY: 40,
+      positionX: 0,
+      positionY: 0,
     });
     setSingleName("");
     setSingleSeats(4);
@@ -173,8 +173,8 @@ export default function TablesPage() {
       name: `${batchPrefix.trim()} ${start + index}`,
       seats: Math.max(1, Number(batchSeats || 1)),
       status: "available" as const,
-      positionX: 40,
-      positionY: 40,
+      positionX: 0,
+      positionY: 0,
     }));
     await upsertTablesBatch(payload);
     notifications.show({ color: "green", message: `Đã thêm ${quantity} bàn mới.` });

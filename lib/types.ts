@@ -36,21 +36,6 @@ export interface DiningTable {
   positionY: number;
 }
 
-export interface FloorLayoutBlock {
-  id: string;
-  referenceTableId?: string;
-  label: string;
-  seats: number;
-  status: TableStatus;
-  positionX: number;
-  positionY: number;
-}
-
-export interface FloorLayoutTemplateSummary {
-  name: string;
-  updatedAt: string;
-}
-
 export interface Customer {
   id: string;
   fullName: string;
@@ -89,5 +74,4 @@ export interface AppStateSnapshot {
   bookings: Booking[];
   notifications: InternalNotification[];
   activeBranchId?: string;
-  floorBackgrounds: Record<string, string>;
 }
