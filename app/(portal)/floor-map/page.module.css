@@ -1,52 +1,310 @@
-.gridWrapper {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 8px;
+.pageRoot {
+  min-height: calc(100dvh - 88px);
 }
 
-.gridCell {
-  min-height: 116px;
-  border: 1px dashed #cbd5e1;
-  border-radius: 10px;
-  padding: 6px;
-  background-color: #f8fafc;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+.canvasFrame {
+  position: relative;
+  height: calc(100dvh - 210px);
+  min-height: 620px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #f8fafc;
 }
 
-.gridCellDropReady {
-  border-color: #0c61a4;
-  background-color: #eff6ff;
+.canvasViewport {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background-image: radial-gradient(circle at 1px 1px, #cbd5e1 1px, transparent 0);
+  background-size: 16px 16px;
 }
 
-.gridCellLabel {
+.canvasViewport:active {
+  cursor: grabbing;
+}
+
+.canvasContent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: top left;
+}
+
+.gridSvg {
+  position: absolute;
+  inset: 0;
+}
+
+.gridNode {
+  fill: #0c61a4;
+  stroke: #ffffff;
+  stroke-width: 2;
+}
+
+.gridNodeLabel {
   font-size: 11px;
-  color: #64748b;
-  margin-bottom: 6px;
+  fill: #475569;
 }
 
 .tableBlock {
+  position: absolute;
+  width: 112px;
+  z-index: 3;
   border: 1px solid #bfdbfe;
   border-radius: 8px;
   padding: 6px;
   background-color: #ffffff;
   cursor: grab;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+  user-select: none;
 }
 
-@media (max-width: 75em) {
-  .gridWrapper {
-    grid-template-columns: repeat(8, minmax(0, 1fr));
-  }
+.tableBlockDragging {
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.2);
+  border-color: #0c61a4;
+  opacity: 0.95;
+}
+
+.tableBlockReadonly {
+  cursor: default;
+}
+
+.canvasOverlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  padding: 12px;
+  pointer-events: none;
+}
+
+.canvasTopToolbar {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  width: min(100%, 980px);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
+  padding: 12px;
+}
+
+.toolbarPopoverAnchor {
+  position: relative;
+}
+
+.toolbarModeControl {
+  min-width: 180px;
+}
+
+.toolbarAreaSelect {
+  min-width: 320px;
+  flex: 1;
+}
+
+.canvasPopoverPanel {
+  width: min(320px, calc(100vw - 40px));
+  pointer-events: none;
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  transform: translateY(-8px) scale(0.97);
+  transform-origin: top;
+  transition:
+    opacity 0.24s ease,
+    transform 0.24s ease,
+    max-height 0.24s ease;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
+  padding: 0 12px;
+}
+
+.canvasPopoverPanelOpen {
+  pointer-events: auto;
+  opacity: 1;
+  max-height: 460px;
+  transform: translateY(0) scale(1);
+  padding: 12px;
+}
+
+.toolbarPopoverLeft {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+}
+
+.canvasZoomDock {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
+  padding: 8px;
+}
+
+.canvasZoomDockRaised {
+  bottom: 146px;
+}
+
+.tablePalette {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: auto;
+  pointer-events: auto;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
+  padding: 10px;
+}
+
+.tablePaletteList {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.paletteTableBlock {
+  min-width: 136px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 6px;
+  background: #ffffff;
+  cursor: grab;
+  user-select: none;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+
+.tablePaletteToggleDock {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  pointer-events: auto;
 }
 
 @media (max-width: 62em) {
-  .gridWrapper {
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+  .canvasFrame {
+    height: calc(100dvh - 190px);
+    min-height: 560px;
+  }
+
+  .canvasViewport {
+    min-height: 0;
+  }
+
+  .canvasTopToolbar {
+    width: min(100%, 860px);
+    padding: 10px;
+  }
+
+  .toolbarAreaSelect {
+    min-width: 260px;
+  }
+
+  .canvasZoomDockRaised {
+    bottom: 156px;
   }
 }
 
 @media (max-width: 48em) {
-  .gridWrapper {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+  .pageRoot {
+    min-height: calc(100dvh - 72px);
+  }
+
+  .canvasFrame {
+    height: calc(100dvh - 176px);
+    min-height: 500px;
+  }
+
+  .canvasViewport {
+    min-height: 0;
+  }
+
+  .canvasOverlay {
+    padding: 8px;
+  }
+
+  .canvasTopToolbar {
+    padding: 10px;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .toolbarModeControl {
+    min-width: 0;
+    flex: 1 1 180px;
+  }
+
+  .toolbarAreaSelect {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  .canvasPopoverPanel {
+    width: min(260px, calc(100vw - 26px));
+  }
+
+  .toolbarPopoverLeft {
+    left: 0;
+    right: auto;
+  }
+
+  .canvasPopoverPanelOpen {
+    max-height: 360px;
+  }
+
+  .canvasZoomDock {
+    right: 8px;
+    bottom: 8px;
+  }
+
+  .canvasZoomDockRaised {
+    bottom: 142px;
+  }
+
+  .tablePalette {
+    left: 8px;
+    right: 8px;
+    width: auto;
+    bottom: 8px;
+    padding: 8px;
+  }
+
+  .tablePaletteToggleDock {
+    bottom: 8px;
+  }
+
+  .tablePaletteList {
+    gap: 6px;
+  }
+
+  .paletteTableBlock {
+    min-width: 122px;
   }
 }
