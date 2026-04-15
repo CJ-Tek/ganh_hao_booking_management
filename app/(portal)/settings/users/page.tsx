@@ -21,6 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard, PortalStickyAction } from "@/components/portal-page";
 import { RouteGuard } from "@/components/route-guard";
 import { useAppContext } from "@/contexts/app-context";
+import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { AppUser, Role } from "@/lib/types";
 
 const roleLabel: Record<Role, string> = {
@@ -264,49 +265,9 @@ export default function UserManagementPage() {
             }}
             mb="sm"
           />
-          <Stack hiddenFrom="sm" gap="sm">
-            {sortedUsers.map((user) => (
-              <PortalSectionCard p="sm" key={user.id}>
-                <Stack gap="sm">
-                  <Group justify="space-between" wrap="nowrap">
-                    <Text fw={700}>{user.username}</Text>
-                    <Group gap={4}>
-                      <ActionIcon
-                        variant="light"
-                        aria-label="Sửa"
-                        disabled={user.id === currentUser?.id || gmCannotManageUser(user)}
-                        onClick={() => openEdit(user)}
-                      >
-                        <Pencil size={16} />
-                      </ActionIcon>
-                      <ActionIcon
-                        variant="light"
-                        color="red"
-                        aria-label="Xóa"
-                        disabled={
-                          user.id === currentUser?.id || gmCannotManageUser(user)
-                        }
-                        onClick={() => setDeleteTarget(user)}
-                      >
-                        <Trash2 size={16} />
-                      </ActionIcon>
-                    </Group>
-                  </Group>
-                  <Text size="sm">{user.fullName}</Text>
-                  <Badge w="fit-content">{roleLabel[user.role]}</Badge>
-                  <Text size="sm" c="dimmed">
-                    {user.branchIds
-                      .map((id) => state.branches.find((branch) => branch.id === id)?.name ?? id)
-                      .join(", ")}
-                  </Text>
-                </Stack>
-              </PortalSectionCard>
-            ))}
-          </Stack>
-
           <DataTable
-            visibleFrom="sm"
             minHeight={240}
+            scrollAreaProps={portalDataTableScrollAreaProps}
             withTableBorder
             records={pagedUsers}
             totalRecords={sortedUsers.length}

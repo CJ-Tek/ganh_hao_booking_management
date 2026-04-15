@@ -18,13 +18,13 @@ import { notifications } from "@mantine/notifications";
 import { DataTable, type DataTableSortStatus } from "mantine-datatable";
 import { useEffect, useMemo, useState } from "react";
 import {
-  PortalMobileActionGrid,
   PortalPageTitle,
   PortalSectionCard,
   PortalStickyAction,
 } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
+import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { type Booking } from "@/lib/types";
 
 export default function BookingsPage() {
@@ -227,59 +227,9 @@ export default function BookingsPage() {
             <Text fw={600} mb="sm">
               Danh sách booking hiện tại
             </Text>
-            <Stack hiddenFrom="sm" gap="sm">
-              {sortedBookings.length === 0 ? (
-                <PortalSectionCard p="sm">
-                  <Text c="dimmed" size="sm">
-                    Chưa có booking nào cho bộ lọc hiện tại.
-                  </Text>
-                </PortalSectionCard>
-              ) : (
-                sortedBookings.map((booking) => {
-                  const customer = state.customers.find((item) => item.id === booking.customerId);
-                  return (
-                    <PortalSectionCard key={booking.id} p="sm">
-                      <Group justify="space-between" mb={6}>
-                        <Text fw={700}>{booking.id}</Text>
-                        <Badge color={bookingStatusColor[booking.status]} variant="light">
-                          {bookingStatusLabel[booking.status]}
-                        </Badge>
-                      </Group>
-                      <Stack gap={4}>
-                        <Text size="sm">Khách: {customer?.fullName ?? "Không rõ"}</Text>
-                        <Text size="sm" c="dimmed">
-                          Giờ: {dayjs(booking.bookingAt).format("HH:mm DD/MM")}
-                        </Text>
-                        <PortalMobileActionGrid mt={6}>
-                          <Button
-                            size="sm"
-                            variant="light"
-                            color="green"
-                            onClick={() => void checkInBooking(booking.id)}
-                            disabled={booking.status !== "confirmed"}
-                          >
-                            Check-in
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="light"
-                            color="red"
-                            onClick={() => void updateBookingStatus(booking.id, "cancelled")}
-                            disabled={booking.status === "cancelled"}
-                          >
-                            Hủy
-                          </Button>
-                        </PortalMobileActionGrid>
-                      </Stack>
-                    </PortalSectionCard>
-                  );
-                })
-              )}
-            </Stack>
-
             <DataTable
-              visibleFrom="sm"
               minHeight={260}
+              scrollAreaProps={portalDataTableScrollAreaProps}
               withTableBorder
               records={pagedBookings}
               totalRecords={sortedBookings.length}

@@ -201,11 +201,11 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               </Popover.Dropdown>
             </Popover>
 
-            <Group gap="xs">
+            <Group gap="xs" wrap="nowrap" visibleFrom="md">
               <Avatar color="brand" radius="xl">
                 {currentUser?.fullName[0] ?? "U"}
               </Avatar>
-              <Stack gap={0} visibleFrom="sm">
+              <Stack gap={0}>
                 <Text size="sm" fw={600}>
                   {currentUser?.fullName}
                 </Text>
@@ -213,47 +213,86 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                   {currentUser?.username}
                 </Text>
               </Stack>
-            {!hasSupabase && (
-              <Badge color="red" variant="light">
-                Chưa kết nối DB
-              </Badge>
-            )}
+              {!hasSupabase && (
+                <Badge color="red" variant="light">
+                  Chưa kết nối DB
+                </Badge>
+              )}
+              <ActionIcon
+                variant="light"
+                color="red"
+                aria-label="Đăng xuất"
+                onClick={() => {
+                  logout();
+                  router.replace("/login");
+                }}
+              >
+                <LogOut size={16} />
+              </ActionIcon>
             </Group>
-            <ActionIcon
-              variant="light"
-              color="red"
-              onClick={() => {
-                logout();
-                router.replace("/login");
-              }}
-            >
-              <LogOut size={16} />
-            </ActionIcon>
           </Group>
         </Group>
       </AppShell.Header>
 
       <AppShell.Navbar p="md">
-        <Text fw={700} size="sm" mb="sm">
-          Điều hướng
-        </Text>
-        <Stack gap={6}>
-          {shownNavItems.map((item) => (
-            <NavLink
-              key={item.href}
-              component={Link}
-              href={item.href}
-              label={item.label}
-              leftSection={item.icon}
-              active={pathname.startsWith(item.href)}
-              onClick={close}
-            />
-          ))}
+        <Stack gap="md">
+          <Text fw={700} size="sm">
+            Điều hướng
+          </Text>
+          <Stack gap={6}>
+            {shownNavItems.map((item) => (
+              <NavLink
+                key={item.href}
+                component={Link}
+                href={item.href}
+                label={item.label}
+                leftSection={item.icon}
+                active={pathname.startsWith(item.href)}
+                onClick={close}
+              />
+            ))}
+          </Stack>
+
+          <Stack
+            gap="sm"
+            hiddenFrom="md"
+            pt="lg"
+            pb="max(var(--mantine-spacing-xl), calc(env(safe-area-inset-bottom, 0px) + var(--mantine-spacing-md)))"
+          >
+            <Divider />
+            <Group wrap="nowrap" align="flex-start">
+              <Avatar color="brand" radius="xl" size="md">
+                {currentUser?.fullName[0] ?? "U"}
+              </Avatar>
+              <Stack gap={0} style={{ minWidth: 0 }}>
+                <Text size="sm" fw={600} lineClamp={2}>
+                  {currentUser?.fullName}
+                </Text>
+                <Text size="xs" c="dimmed" lineClamp={1}>
+                  {currentUser?.username}
+                </Text>
+              </Stack>
+            </Group>
+            {!hasSupabase && (
+              <Badge color="red" variant="light" w="fit-content">
+                Chưa kết nối DB
+              </Badge>
+            )}
+            <Button
+              fullWidth
+              variant="light"
+              color="red"
+              leftSection={<LogOut size={16} />}
+              onClick={() => {
+                close();
+                logout();
+                router.replace("/login");
+              }}
+            >
+              Đăng xuất
+            </Button>
+          </Stack>
         </Stack>
-        <Divider my="md" />
-        <Text size="xs" c="dimmed">
-          Gợi ý trạng thái bàn: hold - arriving - occupied - available
-        </Text>
       </AppShell.Navbar>
 
       <AppShell.Main>{children}</AppShell.Main>

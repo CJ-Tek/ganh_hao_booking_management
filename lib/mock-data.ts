@@ -21,7 +21,7 @@ export const seedUsers: AppUser[] = [
   },
   {
     id: "u-gm",
-    username: "tongquanly",
+    username: "manager-all",
     password: "123456",
     fullName: "Quản lý tổng",
     role: "general_manager",

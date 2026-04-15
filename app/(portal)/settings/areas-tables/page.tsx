@@ -23,6 +23,7 @@ import {
   PortalStickyPanel,
 } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
+import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 
 type AreaRow = {
   id: string;
@@ -229,52 +230,9 @@ export default function AreasTablesSettingsPage() {
           }}
           mb="sm"
         />
-        <Stack hiddenFrom="sm" gap="sm">
-          {sortedAreas.map((area) => (
-            <PortalSectionCard p="sm" key={area.id}>
-              <Stack gap={4}>
-                <Text fw={700}>{area.name}</Text>
-                <Text size="sm">
-                  Chi nhánh: {area.branchName}
-                </Text>
-                <Text size="sm" c="dimmed">
-                  Sức chứa: {area.capacity}
-                </Text>
-                <Text size="sm" c="dimmed">
-                  Số bàn: {area.tableCount}
-                </Text>
-                <Text size="sm" c="dimmed">
-                  Đặt bàn: {area.bookingCount}
-                </Text>
-                <Group gap="xs" mt="xs">
-                  <Button
-                    size="xs"
-                    variant="light"
-                    leftSection={<Pencil size={14} />}
-                    disabled={!hasSupabase}
-                    onClick={() => openEdit(area)}
-                  >
-                    Sửa
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="light"
-                    color="red"
-                    leftSection={<Trash2 size={14} />}
-                    disabled={!hasSupabase}
-                    onClick={() => setDeleteTarget(area)}
-                  >
-                    Xóa
-                  </Button>
-                </Group>
-              </Stack>
-            </PortalSectionCard>
-          ))}
-        </Stack>
-
         <DataTable
-          visibleFrom="sm"
           minHeight={240}
+          scrollAreaProps={portalDataTableScrollAreaProps}
           withTableBorder
           records={pagedAreas}
           totalRecords={sortedAreas.length}

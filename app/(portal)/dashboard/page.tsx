@@ -15,6 +15,7 @@ import { DataTable, type DataTableSortStatus } from "mantine-datatable";
 import { useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
+import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { bookingStatusLabel, tableStatusLabel } from "@/lib/display";
 import { type Booking } from "@/lib/types";
 
@@ -156,6 +157,7 @@ export default function DashboardPage() {
             </Text>
             <DataTable
               minHeight={260}
+              scrollAreaProps={portalDataTableScrollAreaProps}
               withTableBorder
               records={pagedHistoryBookings}
               totalRecords={sortedHistoryBookings.length}

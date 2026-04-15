@@ -3,7 +3,6 @@
 import dayjs from "dayjs";
 import {
   Badge,
-  Group,
   SegmentedControl,
   Stack,
   Text,
@@ -12,6 +11,7 @@ import { DataTable, type DataTableSortStatus } from "mantine-datatable";
 import { useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard, PortalStickyHeader } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
+import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import { type Booking } from "@/lib/types";
 
@@ -100,45 +100,9 @@ export default function CalendarPage() {
         <Text c="dimmed" mb="sm">
           Hiển thị tự động theo chi nhánh bạn đang quản lý.
         </Text>
-        <Stack hiddenFrom="sm" gap="sm">
-          {sortedBookings.length === 0 ? (
-            <PortalSectionCard p="sm">
-              <Text c="dimmed" size="sm">
-                Không có booking trong khoảng thời gian đã chọn.
-              </Text>
-            </PortalSectionCard>
-          ) : (
-            sortedBookings.map((booking) => {
-              const customer = state.customers.find((item) => item.id === booking.customerId);
-              const branch = state.branches.find((item) => item.id === booking.branchId);
-              const area = state.areas.find((item) => item.id === booking.areaId);
-              const table = state.tables.find((item) => item.id === booking.tableId);
-              return (
-                <PortalSectionCard key={booking.id} p="sm">
-                  <Group justify="space-between" mb={6}>
-                    <Text fw={700}>{dayjs(booking.bookingAt).format("HH:mm DD/MM")}</Text>
-                    <Badge color={bookingStatusColor[booking.status]} variant="light">
-                      {bookingStatusLabel[booking.status]}
-                    </Badge>
-                  </Group>
-                  <Stack gap={4}>
-                    <Text size="sm">Khách: {customer?.fullName ?? "Không rõ"}</Text>
-                    <Text size="sm" c="dimmed">
-                      Chi nhánh: {branch?.name ?? "-"}
-                    </Text>
-                    <Text size="sm" c="dimmed">
-                      Khu vực / Bàn: {area?.name} / {table?.name}
-                    </Text>
-                  </Stack>
-                </PortalSectionCard>
-              );
-            })
-          )}
-        </Stack>
-
         <DataTable
-          visibleFrom="sm"
           minHeight={260}
+          scrollAreaProps={portalDataTableScrollAreaProps}
           withTableBorder
           records={pagedBookings}
           totalRecords={sortedBookings.length}

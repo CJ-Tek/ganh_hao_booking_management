@@ -18,6 +18,7 @@ import { DataTable, type DataTableSortStatus } from "mantine-datatable";
 import { useEffect, useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
+import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { type DiningTable, TableStatus } from "@/lib/types";
 
@@ -425,6 +426,7 @@ export default function TablesPage() {
 
         <DataTable
           minHeight={260}
+          scrollAreaProps={portalDataTableScrollAreaProps}
           withTableBorder
           idAccessor="id"
           records={pagedRecords}
