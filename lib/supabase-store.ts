@@ -34,6 +34,21 @@ function ensureClient() {
   return supabase;
 }
 
+export async function updateBranchInSupabase(
+  branchId: string,
+  input: { name: string; address: string }
+): Promise<Result> {
+  const client = ensureClient();
+  const { error } = await client
+    .from("branches")
+    .update({ name: input.name, address: input.address })
+    .eq("id", branchId);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  return { ok: true, message: "Da cap nhat chi nhanh." };
+}
+
 export async function fetchSnapshot(): Promise<AppStateSnapshot> {
   if (!supabase) {
     return initialState;
@@ -97,6 +112,11 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
         branchId: item.branch_id,
         name: item.name,
         capacity: item.capacity,
+        floorGridColumns:
+          typeof item.floor_grid_columns === "number" ? item.floor_grid_columns : 12,
+        floorGridRows: typeof item.floor_grid_rows === "number" ? item.floor_grid_rows : 8,
+        floorNodeSpacing:
+          typeof item.floor_node_spacing === "number" ? item.floor_node_spacing : 96,
       })) ?? [],
     tables:
       tablesResult.data?.map((item) => ({
@@ -414,7 +434,147 @@ export async function addAreaInSupabase(
     branch_id: branchId,
     name,
     capacity,
+    floor_grid_columns: 12,
+    floor_grid_rows: 8,
+    floor_node_spacing: 96,
   });
+}
+
+export async function updateAreaFloorLayoutInSupabase(
+  areaId: string,
+  input: {
+    floorGridColumns: number;
+    floorGridRows: number;
+    floorNodeSpacing: number;
+  }
+): Promise<void> {
+  const client = ensureClient();
+  const { error } = await client
+    .from("areas")
+    .update({
+      floor_grid_columns: input.floorGridColumns,
+      floor_grid_rows: input.floorGridRows,
+      floor_node_spacing: input.floorNodeSpacing,
+    })
+    .eq("id", areaId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+const LOCK_TTL_MS = 3 * 60 * 1000;
+
+async function deleteExpiredFloorLayoutLocks(client: ReturnType<typeof ensureClient>) {
+  await client.from("floor_layout_edit_locks").delete().lt("expires_at", new Date().toISOString());
+}
+
+export async function tryAcquireFloorLayoutLockInSupabase(
+  areaId: string,
+  userId: string
+): Promise<{ ok: true } | { ok: false; holderFullName: string }> {
+  const client = ensureClient();
+  await deleteExpiredFloorLayoutLocks(client);
+  const expiresAt = new Date(Date.now() + LOCK_TTL_MS).toISOString();
+
+  const { data: row } = await client
+    .from("floor_layout_edit_locks")
+    .select("user_id, expires_at")
+    .eq("area_id", areaId)
+    .maybeSingle();
+
+  if (!row) {
+    const { error } = await client.from("floor_layout_edit_locks").insert({
+      area_id: areaId,
+      user_id: userId,
+      expires_at: expiresAt,
+    });
+    if (error) {
+      throw new Error(error.message);
+    }
+    return { ok: true };
+  }
+
+  if (row.user_id === userId) {
+    await client
+      .from("floor_layout_edit_locks")
+      .update({ expires_at: expiresAt })
+      .eq("area_id", areaId);
+    return { ok: true };
+  }
+
+  if (new Date(row.expires_at) > new Date()) {
+    const { data: holder } = await client
+      .from("app_users")
+      .select("full_name")
+      .eq("id", row.user_id)
+      .maybeSingle();
+    return {
+      ok: false,
+      holderFullName: (holder?.full_name as string) ?? "Người dùng khác",
+    };
+  }
+
+  const { error: upErr } = await client
+    .from("floor_layout_edit_locks")
+    .update({ user_id: userId, expires_at: expiresAt })
+    .eq("area_id", areaId);
+  if (upErr) {
+    throw new Error(upErr.message);
+  }
+  return { ok: true };
+}
+
+export async function renewFloorLayoutLockInSupabase(
+  areaId: string,
+  userId: string
+): Promise<void> {
+  const client = ensureClient();
+  await deleteExpiredFloorLayoutLocks(client);
+  const expiresAt = new Date(Date.now() + LOCK_TTL_MS).toISOString();
+  await client
+    .from("floor_layout_edit_locks")
+    .update({ expires_at: expiresAt })
+    .eq("area_id", areaId)
+    .eq("user_id", userId);
+}
+
+export async function releaseFloorLayoutLockInSupabase(
+  areaId: string,
+  userId: string
+): Promise<void> {
+  const client = ensureClient();
+  await client
+    .from("floor_layout_edit_locks")
+    .delete()
+    .eq("area_id", areaId)
+    .eq("user_id", userId);
+}
+
+export async function getFloorLayoutLockInfoInSupabase(areaId: string): Promise<{
+  userId: string;
+  fullName: string;
+  expiresAt: string;
+} | null> {
+  const client = ensureClient();
+  await deleteExpiredFloorLayoutLocks(client);
+  const { data: row } = await client
+    .from("floor_layout_edit_locks")
+    .select("user_id, expires_at")
+    .eq("area_id", areaId)
+    .maybeSingle();
+  if (!row) {
+    return null;
+  }
+  const { data: holder } = await client
+    .from("app_users")
+    .select("full_name")
+    .eq("id", row.user_id)
+    .maybeSingle();
+  return {
+    userId: row.user_id as string,
+    fullName: (holder?.full_name as string) ?? "?",
+    expiresAt: row.expires_at as string,
+  };
 }
 
 export async function addUserInSupabase(payload: {
@@ -444,6 +604,57 @@ export async function addUserInSupabase(payload: {
     return { ok: false, message: error.message };
   }
   return { ok: true, message: "Da tao tai khoan moi." };
+}
+
+export async function updateUserInSupabase(
+  userId: string,
+  payload: {
+    username: string;
+    password?: string;
+    fullName: string;
+    role: Role;
+    branchIds: string[];
+  }
+): Promise<Result> {
+  const client = ensureClient();
+  const { data: conflict } = await client
+    .from("app_users")
+    .select("id")
+    .eq("username", payload.username)
+    .neq("id", userId)
+    .maybeSingle();
+  if (conflict) {
+    return { ok: false, message: "Tên đăng nhập đã tồn tại." };
+  }
+  const update: {
+    username: string;
+    full_name: string;
+    role: Role;
+    branch_ids: string[];
+    password?: string;
+  } = {
+    username: payload.username,
+    full_name: payload.fullName,
+    role: payload.role,
+    branch_ids: payload.branchIds,
+  };
+  if (payload.password && payload.password.trim().length > 0) {
+    update.password = payload.password.trim();
+  }
+  const { error } = await client.from("app_users").update(update).eq("id", userId);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  return { ok: true, message: "Đã cập nhật tài khoản." };
+}
+
+export async function deleteUserInSupabase(userId: string): Promise<Result> {
+  const client = ensureClient();
+  const { error } = await client.from("app_users").delete().eq("id", userId);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  return { ok: true, message: "Đã xóa tài khoản." };
 }
 
 export async function markNotificationReadInSupabase(id: string): Promise<void> {

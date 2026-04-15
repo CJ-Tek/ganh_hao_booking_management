@@ -59,10 +59,42 @@ export const seedBranches: Branch[] = [
 ];
 
 export const seedAreas: Area[] = [
-  { id: "kv-1", branchId: "cn-1", name: "Sảnh biển", capacity: 120 },
-  { id: "kv-2", branchId: "cn-1", name: "Phòng VIP", capacity: 40 },
-  { id: "kv-3", branchId: "cn-2", name: "Sân vườn", capacity: 90 },
-  { id: "kv-4", branchId: "cn-2", name: "Phòng máy lạnh", capacity: 70 },
+  {
+    id: "kv-1",
+    branchId: "cn-1",
+    name: "Sảnh biển",
+    capacity: 120,
+    floorGridColumns: 12,
+    floorGridRows: 8,
+    floorNodeSpacing: 96,
+  },
+  {
+    id: "kv-2",
+    branchId: "cn-1",
+    name: "Phòng VIP",
+    capacity: 40,
+    floorGridColumns: 12,
+    floorGridRows: 8,
+    floorNodeSpacing: 96,
+  },
+  {
+    id: "kv-3",
+    branchId: "cn-2",
+    name: "Sân vườn",
+    capacity: 90,
+    floorGridColumns: 12,
+    floorGridRows: 8,
+    floorNodeSpacing: 96,
+  },
+  {
+    id: "kv-4",
+    branchId: "cn-2",
+    name: "Phòng máy lạnh",
+    capacity: 70,
+    floorGridColumns: 12,
+    floorGridRows: 8,
+    floorNodeSpacing: 96,
+  },
 ];
 
 export const seedTables: DiningTable[] = [

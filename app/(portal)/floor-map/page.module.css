@@ -12,6 +12,10 @@
   background: #f8fafc;
 }
 
+.canvasFramePendingPlacement {
+  box-shadow: inset 0 0 0 2px rgba(12, 97, 164, 0.45);
+}
+
 .canvasViewport {
   position: relative;
   height: 100%;
@@ -44,11 +48,6 @@
   stroke-width: 2;
 }
 
-.gridNodeLabel {
-  font-size: 11px;
-  fill: #475569;
-}
-
 .tableBlock {
   position: absolute;
   width: 112px;
@@ -56,10 +55,24 @@
   border: 1px solid #bfdbfe;
   border-radius: 8px;
   padding: 6px;
+  padding-top: 22px;
   background-color: #ffffff;
   cursor: grab;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
   user-select: none;
+}
+
+.tableBlockView {
+  cursor: pointer;
+  padding-top: 6px;
+}
+
+.tableBlockRemove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 4;
+  pointer-events: auto;
 }
 
 .tableBlockDragging {
@@ -87,6 +100,7 @@
   pointer-events: auto;
   display: flex;
   align-items: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   width: min(100%, 980px);
   border: 1px solid rgba(148, 163, 184, 0.35);
@@ -95,6 +109,20 @@
   backdrop-filter: blur(6px);
   box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
   padding: 12px;
+}
+
+.topToolbarCollapseBtn {
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.topToolbarToggleDock {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 11;
+  pointer-events: auto;
 }
 
 .toolbarPopoverAnchor {
@@ -199,6 +227,11 @@
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
 }
 
+.paletteTableBlockPending {
+  border-color: #0c61a4;
+  box-shadow: 0 0 0 2px rgba(12, 97, 164, 0.35);
+}
+
 .tablePaletteToggleDock {
   position: absolute;
   left: 50%;
@@ -298,6 +331,10 @@
 
   .tablePaletteToggleDock {
     bottom: 8px;
+  }
+
+  .topToolbarToggleDock {
+    top: 8px;
   }
 
   .tablePaletteList {

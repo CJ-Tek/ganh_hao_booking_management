@@ -32,6 +32,7 @@ import {
   Users,
   UserCog,
   BookOpenText,
+  Building2,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -50,6 +51,12 @@ const navItems: NavItem[] = [
   { label: "Khách hàng", href: "/customers", icon: <Users size={16} /> },
   { label: "Khu vực & bàn", href: "/settings/areas-tables", icon: <Settings size={16} /> },
   {
+    label: "Thông tin chi nhánh",
+    href: "/settings/branches",
+    icon: <Building2 size={16} />,
+    adminOnly: true,
+  },
+  {
     label: "User management",
     href: "/settings/users",
     icon: <UserCog size={16} />,
@@ -58,7 +65,7 @@ const navItems: NavItem[] = [
 ];
 
 export function AppShellLayout({ children }: { children: React.ReactNode }) {
-  const [opened, { toggle }] = useDisclosure();
+  const [opened, { toggle, close }] = useDisclosure();
   const pathname = usePathname();
   const router = useRouter();
   const {
@@ -71,8 +78,26 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     hasSupabase,
   } = useAppContext();
 
-  const branches = state.branches.filter((branch) => filteredBranchIds.includes(branch.id));
-  const unreadNotifications = state.notifications.filter((item) => !item.isRead);
+  /** All branches this account may switch to (header); data scope uses `filteredBranchIds` only. */
+  const branchSwitcherOptions = useMemo(
+    () =>
+      state.branches.filter((branch) =>
+        currentUser ? currentUser.branchIds.includes(branch.id) : false
+      ),
+    [state.branches, currentUser]
+  );
+
+  const scopedNotifications = useMemo(
+    () =>
+      state.notifications.filter(
+        (item) => !item.branchId || filteredBranchIds.includes(item.branchId)
+      ),
+    [filteredBranchIds, state.notifications]
+  );
+  const unreadNotifications = useMemo(
+    () => scopedNotifications.filter((item) => !item.isRead),
+    [scopedNotifications]
+  );
   const shownNavItems = useMemo(() => {
     if (currentUser?.role === "admin" || currentUser?.role === "general_manager") {
       return navItems;
@@ -109,7 +134,10 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 className={classes.branchSelect}
                 value={state.activeBranchId}
                 onChange={(value) => value && setActiveBranchId(value)}
-                data={branches.map((branch) => ({ value: branch.id, label: branch.name }))}
+                data={branchSwitcherOptions.map((branch) => ({
+                  value: branch.id,
+                  label: branch.name,
+                }))}
               />
             )}
             <Popover width={340} position="bottom-end" withArrow shadow="md">
@@ -136,7 +164,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 </Group>
                 <ScrollArea h={220}>
                   <Stack gap="xs">
-                    {state.notifications.slice(0, 5).map((item) => (
+                    {scopedNotifications.slice(0, 5).map((item) => (
                       <Box
                         key={item.id}
                         p="xs"
@@ -207,6 +235,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               label={item.label}
               leftSection={item.icon}
               active={pathname.startsWith(item.href)}
+              onClick={close}
             />
           ))}
         </Stack>

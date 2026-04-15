@@ -11,7 +11,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { DataTable, type DataTableSortStatus } from "mantine-datatable";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   PortalPageTitle,
   PortalSectionCard,
@@ -30,8 +30,16 @@ type AreaRow = {
 };
 
 export default function AreasTablesSettingsPage() {
-  const { state, filteredBranchIds, addArea } = useAppContext();
+  const { state, filteredBranchIds, addArea, currentUser } = useAppContext();
   const [branchId, setBranchId] = useState(filteredBranchIds[0] ?? "");
+
+  useEffect(() => {
+    if (currentUser?.role === "manager") {
+      return;
+    }
+    const next = filteredBranchIds[0] ?? "";
+    setBranchId(next);
+  }, [currentUser?.role, filteredBranchIds]);
   const [name, setName] = useState("");
   const [capacity, setCapacity] = useState<number>(30);
   const [search, setSearch] = useState("");

@@ -8,19 +8,36 @@ import {
   useMemo,
   useState,
 } from "react";
+import {
+  clearBranchPickRequired,
+  clearStoredActiveBranch,
+  isBranchPickRequired,
+  persistActiveBranch,
+  readStoredActiveBranch,
+  setBranchPickRequired,
+  shouldPickBranchOnLogin,
+} from "@/lib/branch-pick";
 import { initialState } from "@/lib/mock-data";
 import {
   addAreaInSupabase,
   addUserInSupabase,
+  deleteUserInSupabase,
+  updateUserInSupabase,
   checkInBookingInSupabase,
   createBookingInSupabase,
   fetchSnapshot,
+  getFloorLayoutLockInfoInSupabase,
   isSupabaseEnabled,
   loginWithSupabase,
   markNotificationReadInSupabase,
   deleteTableInSupabase,
   deleteTablesInSupabase,
+  renewFloorLayoutLockInSupabase,
+  releaseFloorLayoutLockInSupabase,
+  tryAcquireFloorLayoutLockInSupabase,
+  updateAreaFloorLayoutInSupabase,
   updateBookingStatusInSupabase,
+  updateBranchInSupabase,
   updateTablePositionInSupabase,
   updateTableStatusInSupabase,
   upsertTableInSupabase,
@@ -56,10 +73,14 @@ interface AppContextValue {
   filteredBranchIds: string[];
   isLoading: boolean;
   hasSupabase: boolean;
-  login: (username: string, password: string) => Promise<boolean>;
+  login: (username: string, password: string) => Promise<AppUser | null>;
   logout: () => void;
   reload: () => Promise<void>;
   setActiveBranchId: (branchId: string) => void;
+  updateBranch: (
+    branchId: string,
+    input: { name: string; address: string }
+  ) => Promise<ActionResult>;
   createBooking: (input: CreateBookingInput) => Promise<ActionResult>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   checkInBooking: (bookingId: string) => Promise<void>;
@@ -77,11 +98,43 @@ interface AppContextValue {
     role: Role;
     branchIds: string[];
   }) => Promise<ActionResult>;
+  updateUser: (
+    userId: string,
+    payload: {
+      username: string;
+      password?: string;
+      fullName: string;
+      role: Role;
+      branchIds: string[];
+    }
+  ) => Promise<ActionResult>;
+  deleteUser: (userId: string) => Promise<ActionResult>;
   markNotificationRead: (id: string) => Promise<void>;
+  saveAreaFloorGrid: (
+    areaId: string,
+    columns: number,
+    rows: number,
+    nodeSpacing: number
+  ) => Promise<void>;
+  acquireFloorLayoutEditLock: (
+    areaId: string
+  ) => Promise<{ ok: true } | { ok: false; holderFullName: string }>;
+  renewFloorLayoutEditLock: (areaId: string) => Promise<void>;
+  releaseFloorLayoutEditLock: (areaId: string) => Promise<void>;
+  getFloorLayoutEditLockInfo: (areaId: string) => Promise<{
+    userId: string;
+    fullName: string;
+    expiresAt: string;
+  } | null>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
+/**
+ * Branch IDs used to scope bookings, tables, areas, dashboard, etc.
+ * Admin / Quản lý tổng: exactly the active branch (must switch in header to work on another).
+ * Quản lý chi nhánh: all branches they are assigned to.
+ */
 function userScopeBranchIds(user: AppUser | null, activeBranchId?: string): string[] {
   if (!user) {
     return [];
@@ -89,7 +142,13 @@ function userScopeBranchIds(user: AppUser | null, activeBranchId?: string): stri
   if (user.role === "manager") {
     return user.branchIds;
   }
-  return activeBranchId ? [activeBranchId] : user.branchIds;
+  if (shouldPickBranchOnLogin(user.role) && isBranchPickRequired()) {
+    return [];
+  }
+  if (activeBranchId && user.branchIds.includes(activeBranchId)) {
+    return [activeBranchId];
+  }
+  return [];
 }
 
 export function AppContextProvider({ children }: { children: React.ReactNode }) {
@@ -106,16 +165,36 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const hasSupabase = isSupabaseEnabled();
 
   const reload = useCallback(async () => {
+    const mergeActive = (
+      prev: AppStateSnapshot,
+      fallback: AppStateSnapshot["activeBranchId"]
+    ): AppStateSnapshot["activeBranchId"] => {
+      if (!currentUser) {
+        return prev.activeBranchId ?? fallback;
+      }
+      if (shouldPickBranchOnLogin(currentUser.role) && isBranchPickRequired()) {
+        return undefined;
+      }
+      const stored = readStoredActiveBranch(currentUser);
+      if (stored) {
+        return stored;
+      }
+      return prev.activeBranchId ?? fallback;
+    };
+
     if (!hasSupabase) {
-      setState(initialState);
+      setState((prev) => ({
+        ...initialState,
+        activeBranchId: mergeActive(prev, initialState.activeBranchId),
+      }));
       return;
     }
     const snapshot = await fetchSnapshot();
     setState((prev) => ({
       ...snapshot,
-      activeBranchId: prev.activeBranchId ?? snapshot.activeBranchId,
+      activeBranchId: mergeActive(prev, snapshot.activeBranchId),
     }));
-  }, [hasSupabase]);
+  }, [hasSupabase, currentUser]);
 
   useEffect(() => {
     const run = async () => {
@@ -154,24 +233,53 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }
 
     if (!user) {
-      return false;
+      return null;
     }
 
     setCurrentUser(user);
-    setState((prev) => ({
-      ...prev,
-      activeBranchId:
-        user.role === "manager" ? user.branchIds[0] : prev.activeBranchId ?? user.branchIds[0],
-    }));
-    return true;
+    if (shouldPickBranchOnLogin(user.role)) {
+      setBranchPickRequired();
+      clearStoredActiveBranch(user.id);
+      setState((prev) => ({
+        ...prev,
+        activeBranchId: undefined,
+      }));
+    } else {
+      setState((prev) => ({
+        ...prev,
+        activeBranchId: user.branchIds[0],
+      }));
+    }
+    return user;
   };
 
   const logout = () => {
+    clearBranchPickRequired();
     setCurrentUser(null);
   };
 
   const setActiveBranchId = (branchId: string) => {
+    if (currentUser && shouldPickBranchOnLogin(currentUser.role)) {
+      persistActiveBranch(currentUser, branchId);
+    }
     setState((prev) => ({ ...prev, activeBranchId: branchId }));
+  };
+
+  const updateBranch = async (branchId: string, input: { name: string; address: string }) => {
+    if (!hasSupabase) {
+      setState((prev) => ({
+        ...prev,
+        branches: prev.branches.map((branch) =>
+          branch.id === branchId ? { ...branch, ...input } : branch
+        ),
+      }));
+      return { ok: true, message: "Đã cập nhật chi nhánh." };
+    }
+    const result = await updateBranchInSupabase(branchId, input);
+    if (result.ok) {
+      await reload();
+    }
+    return result;
   };
 
   const createBooking = async (input: CreateBookingInput) => {
@@ -279,11 +387,122 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     role: Role;
     branchIds: string[];
   }) => {
+    if (currentUser?.role === "general_manager" && payload.role === "admin") {
+      return {
+        ok: false,
+        message: "Chỉ Admin mới có thể tạo hoặc gán vai trò Admin.",
+      };
+    }
     if (!hasSupabase) {
       return { ok: false, message: "Chua ket noi Supabase." };
     }
     const result = await addUserInSupabase(payload);
     await reload();
+    return result;
+  };
+
+  const updateUser = async (
+    userId: string,
+    payload: {
+      username: string;
+      password?: string;
+      fullName: string;
+      role: Role;
+      branchIds: string[];
+    }
+  ) => {
+    const target = state.users.find((u) => u.id === userId);
+    if (!target) {
+      return { ok: false, message: "Không tìm thấy tài khoản." };
+    }
+    if (currentUser?.role === "general_manager") {
+      if (target.role === "admin") {
+        return {
+          ok: false,
+          message: "Quản lý tổng không được chỉnh sửa tài khoản Admin.",
+        };
+      }
+      if (payload.role === "admin") {
+        return {
+          ok: false,
+          message: "Chỉ Admin mới có thể gán vai trò Admin.",
+        };
+      }
+    }
+
+    const applySession = () => {
+      if (currentUser?.id !== userId) {
+        return;
+      }
+      setCurrentUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              username: payload.username,
+              fullName: payload.fullName,
+              role: payload.role,
+              branchIds: payload.branchIds,
+              password:
+                payload.password && payload.password.trim().length > 0
+                  ? payload.password.trim()
+                  : prev.password,
+            }
+          : null
+      );
+    };
+
+    if (!hasSupabase) {
+      setState((prev) => ({
+        ...prev,
+        users: prev.users.map((u) =>
+          u.id === userId
+            ? {
+                ...u,
+                username: payload.username,
+                fullName: payload.fullName,
+                role: payload.role,
+                branchIds: payload.branchIds,
+                password:
+                  payload.password && payload.password.trim().length > 0
+                    ? payload.password.trim()
+                    : u.password,
+              }
+            : u
+        ),
+      }));
+      applySession();
+      return { ok: true, message: "Đã cập nhật tài khoản." };
+    }
+    const result = await updateUserInSupabase(userId, payload);
+    if (result.ok) {
+      await reload();
+      applySession();
+    }
+    return result;
+  };
+
+  const deleteUser = async (userId: string) => {
+    if (userId === currentUser?.id) {
+      return { ok: false, message: "Không thể xóa tài khoản đang đăng nhập." };
+    }
+    const target = state.users.find((u) => u.id === userId);
+    if (currentUser?.role === "general_manager" && target?.role === "admin") {
+      return {
+        ok: false,
+        message: "Quản lý tổng không được xóa tài khoản Admin.",
+      };
+    }
+    if (!hasSupabase) {
+      setState((prev) => ({
+        ...prev,
+        users: prev.users.filter((u) => u.id !== userId),
+      }));
+      return { ok: true, message: "Đã xóa tài khoản." };
+    }
+    const result = await deleteUserInSupabase(userId);
+    if (result.ok) {
+      await reload();
+    }
     return result;
   };
 
@@ -300,6 +519,76 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }));
   };
 
+  const saveAreaFloorGrid = useCallback(
+    async (areaId: string, columns: number, rows: number, spacing: number) => {
+      const floorGridColumns = Math.min(24, Math.max(4, Math.round(columns)));
+      const floorGridRows = Math.min(18, Math.max(4, Math.round(rows)));
+      const floorNodeSpacing = Math.min(160, Math.max(64, Math.round(spacing)));
+      if (!hasSupabase) {
+        setState((prev) => ({
+          ...prev,
+          areas: prev.areas.map((a) =>
+            a.id === areaId
+              ? { ...a, floorGridColumns, floorGridRows, floorNodeSpacing }
+              : a
+          ),
+        }));
+        return;
+      }
+      await updateAreaFloorLayoutInSupabase(areaId, {
+        floorGridColumns,
+        floorGridRows,
+        floorNodeSpacing,
+      });
+      setState((prev) => ({
+        ...prev,
+        areas: prev.areas.map((a) =>
+          a.id === areaId
+            ? { ...a, floorGridColumns, floorGridRows, floorNodeSpacing }
+            : a
+        ),
+      }));
+    },
+    [hasSupabase]
+  );
+
+  const acquireFloorLayoutEditLock = useCallback(
+    async (areaId: string) => {
+      if (!hasSupabase || !currentUser) {
+        return { ok: true as const };
+      }
+      return tryAcquireFloorLayoutLockInSupabase(areaId, currentUser.id);
+    },
+    [hasSupabase, currentUser]
+  );
+
+  const renewFloorLayoutEditLock = useCallback(
+    async (areaId: string) => {
+      if (!hasSupabase || !currentUser) {
+        return;
+      }
+      await renewFloorLayoutLockInSupabase(areaId, currentUser.id);
+    },
+    [hasSupabase, currentUser]
+  );
+
+  const releaseFloorLayoutEditLock = useCallback(
+    async (areaId: string) => {
+      if (!hasSupabase || !currentUser) {
+        return;
+      }
+      await releaseFloorLayoutLockInSupabase(areaId, currentUser.id);
+    },
+    [hasSupabase, currentUser]
+  );
+
+  const getFloorLayoutEditLockInfo = useCallback(async (areaId: string) => {
+    if (!hasSupabase) {
+      return null;
+    }
+    return getFloorLayoutLockInfoInSupabase(areaId);
+  }, [hasSupabase]);
+
   const value: AppContextValue = {
     state,
     currentUser,
@@ -310,6 +599,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     logout,
     reload,
     setActiveBranchId,
+    updateBranch,
     createBooking,
     updateBookingStatus,
     checkInBooking,
@@ -321,7 +611,14 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     updateTablePosition,
     addArea,
     addUser,
+    updateUser,
+    deleteUser,
     markNotificationRead,
+    saveAreaFloorGrid,
+    acquireFloorLayoutEditLock,
+    renewFloorLayoutEditLock,
+    releaseFloorLayoutEditLock,
+    getFloorLayoutEditLockInfo,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

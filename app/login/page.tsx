@@ -32,13 +32,17 @@ export default function LoginPage() {
     setIsSubmitting(true);
     setError("");
 
-    const ok = await login(username.trim(), password);
-    if (!ok) {
+    const user = await login(username.trim(), password);
+    if (!user) {
       setError("Sai thông tin đăng nhập. Vui lòng thử lại.");
       setIsSubmitting(false);
       return;
     }
-    router.replace("/dashboard");
+    if (user.role === "admin" || user.role === "general_manager") {
+      router.replace("/select-branch");
+    } else {
+      router.replace("/dashboard");
+    }
   };
 
   const demoAccounts = ["admin", "tongquanly", "manager-vt", "manager-hcm"];

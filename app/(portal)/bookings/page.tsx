@@ -16,7 +16,7 @@ import {
 import { DateTimePicker } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { DataTable, type DataTableSortStatus } from "mantine-datatable";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   PortalMobileActionGrid,
   PortalPageTitle,
@@ -40,6 +40,16 @@ export default function BookingsPage() {
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [branchId, setBranchId] = useState<string | null>(filteredBranchIds[0] ?? null);
+
+  useEffect(() => {
+    if (currentUser?.role === "manager") {
+      return;
+    }
+    const next = filteredBranchIds[0] ?? null;
+    setBranchId(next);
+    setAreaId(null);
+    setTableId(null);
+  }, [currentUser?.role, filteredBranchIds]);
   const [areaId, setAreaId] = useState<string | null>(null);
   const [tableId, setTableId] = useState<string | null>(null);
   const [guestCount, setGuestCount] = useState<number>(4);

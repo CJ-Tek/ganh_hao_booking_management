@@ -23,6 +23,12 @@ export interface Area {
   branchId: string;
   name: string;
   capacity: number;
+  /** Floor map grid columns (persisted when using Supabase). */
+  floorGridColumns?: number;
+  /** Floor map grid rows (persisted when using Supabase). */
+  floorGridRows?: number;
+  /** Node spacing in px (persisted when using Supabase). */
+  floorNodeSpacing?: number;
 }
 
 export interface DiningTable {

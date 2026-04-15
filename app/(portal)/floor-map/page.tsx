@@ -2,8 +2,11 @@
 
 import {
   ActionIcon,
+  Alert,
   Badge,
+  Button,
   Group,
+  Menu,
   NumberInput,
   Select,
   SegmentedControl,
@@ -13,15 +16,18 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import {
+  ChevronDown,
   ChevronUp,
   Crosshair,
+  Minimize2,
   Minus,
   Plus,
   RotateCcw,
   Search,
   Wrench,
+  X,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
@@ -32,12 +38,30 @@ const DEFAULT_GRID_COLUMNS = 12;
 const DEFAULT_GRID_ROWS = 8;
 const LEGACY_CELL_WIDTH = 100;
 const LEGACY_CELL_HEIGHT = 70;
-const MIN_SCALE = 0.5;
+/** Low enough that large grids can shrink to fit small viewports; zoom controls use the same range. */
+const MIN_SCALE = 0.12;
 const MAX_SCALE = 2.5;
 const SCALE_STEP = 0.1;
 const DEFAULT_NODE_SPACING = 96;
 const CANVAS_PADDING = 64;
 const TOUCH_PINCH_FACTOR = 0.005;
+/** Inset the fitted region slightly inside the viewport so edges are not flush with the frame. */
+const FIT_VIEWPORT_MARGIN = 0.94;
+/** World-space padding around the union of table blocks when fitting (px). */
+const FIT_TABLE_BOUNDS_PADDING = 40;
+/** Must match `.tableBlock` width and the positioning math in the canvas. */
+const TABLE_BLOCK_WIDTH = 112;
+/** Includes space for the edit-mode remove control. */
+const TABLE_BLOCK_HEIGHT = 90;
+const TABLE_STACK_OFFSET = 8;
+/** Sentinel coordinates when a table is stored in the palette (off the grid). */
+const STORAGE_OFF_GRID = -1;
+const TAP_PLACE_THRESHOLD_PX = 14;
+const PALETTE_DRAG_THRESHOLD_PX = 12;
+
+function isTableBlockTarget(target: EventTarget | null) {
+  return Boolean(target && (target as HTMLElement).closest?.("[data-table-block]"));
+}
 
 function normalizeGridValue(value: number, max: number, legacyStep: number) {
   if (Number.isInteger(value) && value >= 0 && value < max) {
@@ -69,6 +93,45 @@ function isTableInGrid(table: DiningTable, gridColumns: number, gridRows: number
   );
 }
 
+/** Union of axis-aligned rects for rendered table blocks (same left/top math as the canvas). */
+function getPlacedTableBounds(
+  placedTables: DiningTable[],
+  gridColumns: number,
+  gridRows: number,
+  nodeSpacing: number
+): { minX: number; minY: number; maxX: number; maxY: number } | null {
+  const grouped = new Map<string, DiningTable[]>();
+  for (const table of placedTables) {
+    const { row, col } = getTableGridPosition(table, gridColumns, gridRows);
+    const key = `${row}-${col}`;
+    const list = grouped.get(key) ?? [];
+    list.push(table);
+    grouped.set(key, list);
+  }
+  if (grouped.size === 0) {
+    return null;
+  }
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const [, tablesAtNode] of grouped) {
+    const stackMax = tablesAtNode.length - 1;
+    const { row, col } = getTableGridPosition(tablesAtNode[0]!, gridColumns, gridRows);
+    const x = CANVAS_PADDING + col * nodeSpacing;
+    const y = CANVAS_PADDING + row * nodeSpacing;
+    const left = x - 56 + 0 * TABLE_STACK_OFFSET;
+    const right = x - 56 + stackMax * TABLE_STACK_OFFSET + TABLE_BLOCK_WIDTH;
+    const top = y - 28 + 0 * TABLE_STACK_OFFSET;
+    const bottom = y - 28 + stackMax * TABLE_STACK_OFFSET + TABLE_BLOCK_HEIGHT;
+    minX = Math.min(minX, left);
+    minY = Math.min(minY, top);
+    maxX = Math.max(maxX, right);
+    maxY = Math.max(maxY, bottom);
+  }
+  return { minX, minY, maxX, maxY };
+}
+
 type DragState = {
   pointerId: number;
   tableId: string;
@@ -87,9 +150,22 @@ type PanState = {
 type CanvasMode = "view" | "edit";
 
 export default function FloorMapPage() {
-  const { state, filteredBranchIds, updateTablePosition } = useAppContext();
+  const {
+    state,
+    filteredBranchIds,
+    updateTablePosition,
+    updateTableStatus,
+    currentUser,
+    isLoading,
+    hasSupabase,
+    saveAreaFloorGrid,
+    acquireFloorLayoutEditLock,
+    renewFloorLayoutEditLock,
+    releaseFloorLayoutEditLock,
+    getFloorLayoutEditLockInfo,
+  } = useAppContext();
   const [activeAreaId, setActiveAreaId] = useState<string | null>(null);
-  const [mode, setMode] = useState<CanvasMode>("edit");
+  const [mode, setMode] = useState<CanvasMode>("view");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [gridColumns, setGridColumns] = useState(DEFAULT_GRID_COLUMNS);
@@ -101,16 +177,37 @@ export default function FloorMapPage() {
   const [isSearchPanelOpen, setIsSearchPanelOpen] = useState(false);
   const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(true);
+  const [isTopToolbarOpen, setIsTopToolbarOpen] = useState(true);
+  const [pendingPlacementTableId, setPendingPlacementTableId] = useState<string | null>(null);
+  const [isTrimmingGrid, setIsTrimmingGrid] = useState(false);
+  const [layoutLockHolderName, setLayoutLockHolderName] = useState<string | null>(null);
   const isEditMode = mode === "edit";
+  const editBlockedByOther = Boolean(layoutLockHolderName);
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const panStateRef = useRef<PanState | null>(null);
+  const placementTapRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+  const paletteGestureRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    tableId: string;
+  } | null>(null);
   const pinchRef = useRef<{
     distance: number;
     centerX: number;
     centerY: number;
     scale: number;
   } | null>(null);
+  const gridSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const areaIdRef = useRef<string | null>(null);
+  const modeRef = useRef<CanvasMode>("view");
 
   const availableAreas = useMemo(
     () => state.areas.filter((area) => filteredBranchIds.includes(area.branchId)),
@@ -118,6 +215,90 @@ export default function FloorMapPage() {
   );
 
   const areaId = activeAreaId ?? availableAreas[0]?.id ?? null;
+
+  areaIdRef.current = areaId;
+  modeRef.current = mode;
+
+  useEffect(() => {
+    if (!areaId || isLoading) {
+      return;
+    }
+    const area = state.areas.find((a) => a.id === areaId);
+    if (!area) {
+      return;
+    }
+    setGridColumns(area.floorGridColumns ?? DEFAULT_GRID_COLUMNS);
+    setGridRows(area.floorGridRows ?? DEFAULT_GRID_ROWS);
+    setNodeSpacing(area.floorNodeSpacing ?? DEFAULT_NODE_SPACING);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resync only when area or loading gate changes, not on every snapshot update
+  }, [areaId, isLoading]);
+
+  useEffect(() => {
+    if (!areaId || isLoading) {
+      return;
+    }
+    if (gridSaveTimerRef.current) {
+      clearTimeout(gridSaveTimerRef.current);
+    }
+    gridSaveTimerRef.current = setTimeout(() => {
+      void saveAreaFloorGrid(areaId, gridColumns, gridRows, nodeSpacing);
+    }, 650);
+    return () => {
+      if (gridSaveTimerRef.current) {
+        clearTimeout(gridSaveTimerRef.current);
+      }
+    };
+  }, [areaId, gridColumns, gridRows, nodeSpacing, isLoading, saveAreaFloorGrid]);
+
+  useEffect(() => {
+    if (!areaId || !hasSupabase) {
+      setLayoutLockHolderName(null);
+      return;
+    }
+    const poll = async () => {
+      const info = await getFloorLayoutEditLockInfo(areaId);
+      if (!info || !currentUser) {
+        setLayoutLockHolderName(null);
+        return;
+      }
+      if (info.userId !== currentUser.id) {
+        setLayoutLockHolderName(info.fullName);
+        setMode((m) => {
+          if (m === "edit") {
+            notifications.show({
+              color: "orange",
+              message: `${info.fullName} đang chỉnh sửa sơ đồ. Chế độ của bạn chuyển sang xem.`,
+            });
+            return "view";
+          }
+          return m;
+        });
+      } else {
+        setLayoutLockHolderName(null);
+      }
+    };
+    void poll();
+    const id = setInterval(() => void poll(), 4000);
+    return () => clearInterval(id);
+  }, [areaId, hasSupabase, currentUser, getFloorLayoutEditLockInfo]);
+
+  useEffect(() => {
+    if (!areaId || mode !== "edit" || !hasSupabase) {
+      return;
+    }
+    const id = setInterval(() => {
+      void renewFloorLayoutEditLock(areaId);
+    }, 45_000);
+    return () => clearInterval(id);
+  }, [areaId, mode, hasSupabase, renewFloorLayoutEditLock]);
+
+  useEffect(() => {
+    return () => {
+      if (modeRef.current === "edit" && areaId) {
+        void releaseFloorLayoutEditLock(areaId);
+      }
+    };
+  }, [areaId, releaseFloorLayoutEditLock]);
 
   const tablesInArea = useMemo(
     () => state.tables.filter((table) => table.areaId === areaId),
@@ -208,6 +389,76 @@ export default function FloorMapPage() {
     }
   };
 
+  const commitPlacement = async (tableId: string, row: number, col: number) => {
+    const source = state.tables.find((t) => t.id === tableId);
+    if (!source) {
+      return;
+    }
+    const current = getTableGridPosition(source, gridColumns, gridRows);
+    if (
+      isTableInGrid(source, gridColumns, gridRows) &&
+      current.row === row &&
+      current.col === col
+    ) {
+      return;
+    }
+    try {
+      await updateTablePosition(tableId, col, row);
+      notifications.show({
+        color: "green",
+        message: `Đã đặt ${source.name} vào node C${col + 1}-R${row + 1}.`,
+      });
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Không thể cập nhật vị trí bàn.",
+      });
+    }
+  };
+
+  const removeTableToStorage = async (table: DiningTable) => {
+    try {
+      await updateTablePosition(table.id, STORAGE_OFF_GRID, STORAGE_OFF_GRID);
+      notifications.show({
+        color: "green",
+        message: `Đã chuyển ${table.name} vào kho bàn.`,
+      });
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Không thể cập nhật vị trí bàn.",
+      });
+    }
+  };
+
+  const handleStatusChange = async (table: DiningTable, next: TableStatus) => {
+    if (table.status === next) {
+      return;
+    }
+    try {
+      await updateTableStatus(table.id, next);
+      notifications.show({
+        color: "green",
+        message: `Đã đổi trạng thái ${table.name} thành ${tableStatusLabel[next]}.`,
+      });
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Không thể cập nhật trạng thái.",
+      });
+    }
+  };
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPendingPlacementTableId(null);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const gridNodes = useMemo(
     () =>
       Array.from({ length: gridRows * gridColumns }, (_, index) => ({
@@ -219,6 +470,128 @@ export default function FloorMapPage() {
 
   const canvasWidth = CANVAS_PADDING * 2 + Math.max(0, gridColumns - 1) * nodeSpacing;
   const canvasHeight = CANVAS_PADDING * 2 + Math.max(0, gridRows - 1) * nodeSpacing;
+
+  const fitCanvasToViewport = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const vw = viewport.clientWidth;
+    const vh = viewport.clientHeight;
+    if (vw <= 0 || vh <= 0) {
+      return;
+    }
+
+    let contentW = canvasWidth;
+    let contentH = canvasHeight;
+    let centerX = canvasWidth / 2;
+    let centerY = canvasHeight / 2;
+
+    const tableBounds = getPlacedTableBounds(placedTables, gridColumns, gridRows, nodeSpacing);
+    if (tableBounds) {
+      const minX = tableBounds.minX - FIT_TABLE_BOUNDS_PADDING;
+      const minY = tableBounds.minY - FIT_TABLE_BOUNDS_PADDING;
+      const maxX = tableBounds.maxX + FIT_TABLE_BOUNDS_PADDING;
+      const maxY = tableBounds.maxY + FIT_TABLE_BOUNDS_PADDING;
+      const bw = maxX - minX;
+      const bh = maxY - minY;
+      if (bw > 0 && bh > 0) {
+        contentW = bw;
+        contentH = bh;
+        centerX = (minX + maxX) / 2;
+        centerY = (minY + maxY) / 2;
+      }
+    }
+
+    const scaleX = (vw * FIT_VIEWPORT_MARGIN) / contentW;
+    const scaleY = (vh * FIT_VIEWPORT_MARGIN) / contentH;
+    const nextScale = clamp(Math.min(scaleX, scaleY), MIN_SCALE, MAX_SCALE);
+    setScale(nextScale);
+    setOffset({
+      x: vw / 2 - centerX * nextScale,
+      y: vh / 2 - centerY * nextScale,
+    });
+  }, [canvasHeight, canvasWidth, gridColumns, gridRows, nodeSpacing, placedTables]);
+
+  const trimRedundantGrid = useCallback(async () => {
+    const placed = tablesInArea.filter((table) =>
+      isTableInGrid(table, gridColumns, gridRows)
+    );
+    if (placed.length === 0) {
+      notifications.show({
+        color: "yellow",
+        message: "Không có bàn trên lưới để thu gọn.",
+      });
+      return;
+    }
+    let minC = Infinity;
+    let maxC = -Infinity;
+    let minR = Infinity;
+    let maxR = -Infinity;
+    for (const table of placed) {
+      minC = Math.min(minC, table.positionX);
+      maxC = Math.max(maxC, table.positionX);
+      minR = Math.min(minR, table.positionY);
+      maxR = Math.max(maxR, table.positionY);
+    }
+    const spanC = maxC - minC + 1;
+    const spanR = maxR - minR + 1;
+    const newCols = clamp(Math.max(spanC, 4), 4, 24);
+    const newRows = clamp(Math.max(spanR, 4), 4, 18);
+    const alreadyTight =
+      newCols === gridColumns &&
+      newRows === gridRows &&
+      minC === 0 &&
+      minR === 0;
+    if (alreadyTight) {
+      notifications.show({
+        color: "blue",
+        message: "Lưới đã khớp phạm vi bàn — không còn hàng/cột thừa.",
+      });
+      return;
+    }
+    setIsTrimmingGrid(true);
+    try {
+      await Promise.all(
+        placed.map((table) =>
+          updateTablePosition(
+            table.id,
+            table.positionX - minC,
+            table.positionY - minR
+          )
+        )
+      );
+      setGridColumns(newCols);
+      setGridRows(newRows);
+      if (areaId) {
+        await saveAreaFloorGrid(areaId, newCols, newRows, nodeSpacing);
+      }
+      notifications.show({
+        color: "green",
+        message: `Đã thu lưới còn ${newCols} × ${newRows} (căn bàn về góc trên-trái).`,
+      });
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Không thể thu gọn lưới.",
+      });
+    } finally {
+      setIsTrimmingGrid(false);
+    }
+  }, [areaId, gridColumns, gridRows, nodeSpacing, saveAreaFloorGrid, tablesInArea, updateTablePosition]);
+
+  useLayoutEffect(() => {
+    fitCanvasToViewport();
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      fitCanvasToViewport();
+    });
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, [fitCanvasToViewport, areaId]);
 
   const toWorldCoordinate = (clientX: number, clientY: number) => {
     const viewport = viewportRef.current;
@@ -255,6 +628,30 @@ export default function FloorMapPage() {
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const placementTap = placementTapRef.current;
+    if (placementTap && event.pointerId === placementTap.pointerId) {
+      const dist = Math.hypot(
+        event.clientX - placementTap.startX,
+        event.clientY - placementTap.startY
+      );
+      if (dist > TAP_PLACE_THRESHOLD_PX) {
+        setPendingPlacementTableId(null);
+        panStateRef.current = {
+          pointerId: event.pointerId,
+          startX: placementTap.startX,
+          startY: placementTap.startY,
+          originX: placementTap.originX,
+          originY: placementTap.originY,
+        };
+        placementTapRef.current = null;
+        setOffset({
+          x: placementTap.originX + (event.clientX - placementTap.startX),
+          y: placementTap.originY + (event.clientY - placementTap.startY),
+        });
+      }
+      return;
+    }
+
     if (dragState && event.pointerId === dragState.pointerId) {
       const world = toWorldCoordinate(event.clientX, event.clientY);
       const snapped = nearestNode(world.x, world.y);
@@ -279,6 +676,27 @@ export default function FloorMapPage() {
     if (viewport) {
       viewport.releasePointerCapture(event.pointerId);
     }
+
+    const placementTap = placementTapRef.current;
+    if (placementTap && event.pointerId === placementTap.pointerId) {
+      placementTapRef.current = null;
+      const dist = Math.hypot(
+        event.clientX - placementTap.startX,
+        event.clientY - placementTap.startY
+      );
+      if (
+        dist <= TAP_PLACE_THRESHOLD_PX &&
+        pendingPlacementTableId &&
+        isEditMode
+      ) {
+        const world = toWorldCoordinate(event.clientX, event.clientY);
+        const snapped = nearestNode(world.x, world.y);
+        void commitPlacement(pendingPlacementTableId, snapped.row, snapped.col);
+        setPendingPlacementTableId(null);
+      }
+      return;
+    }
+
     if (isEditMode && dragState && event.pointerId === dragState.pointerId) {
       void commitDrop(dragState.tableId, dragState.row, dragState.col);
       return;
@@ -289,16 +707,29 @@ export default function FloorMapPage() {
   };
 
   const handleViewportPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (isEditMode && (event.target as HTMLElement).dataset.tableBlock === "true") {
+    if (isTableBlockTarget(event.target)) {
       return;
     }
-    if (!isEditMode || event.button !== 0) {
+    if (event.button !== 0) {
       return;
     }
     const viewport = viewportRef.current;
     if (!viewport) {
       return;
     }
+
+    if (isEditMode && pendingPlacementTableId) {
+      placementTapRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: offset.x,
+        originY: offset.y,
+      };
+      viewport.setPointerCapture(event.pointerId);
+      return;
+    }
+
     viewport.setPointerCapture(event.pointerId);
     panStateRef.current = {
       pointerId: event.pointerId,
@@ -313,6 +744,12 @@ export default function FloorMapPage() {
     event: React.PointerEvent<HTMLDivElement>,
     table: DiningTable
   ) => {
+    if (!isEditMode) {
+      return;
+    }
+    if ((event.target as HTMLElement).closest("[data-table-remove]")) {
+      return;
+    }
     if (event.button !== 0) {
       return;
     }
@@ -341,20 +778,88 @@ export default function FloorMapPage() {
     }
     event.preventDefault();
     event.stopPropagation();
+    paletteGestureRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      tableId: table.id,
+    };
+  };
+
+  const handlePalettePointerMove = (
+    event: React.PointerEvent<HTMLDivElement>,
+    table: DiningTable
+  ) => {
+    const gesture = paletteGestureRef.current;
+    if (
+      !gesture ||
+      gesture.tableId !== table.id ||
+      gesture.pointerId !== event.pointerId
+    ) {
+      return;
+    }
+    const dist = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
+    if (dist <= PALETTE_DRAG_THRESHOLD_PX) {
+      return;
+    }
     const viewport = viewportRef.current;
     if (!viewport) {
       return;
     }
+    paletteGestureRef.current = null;
+    viewport.setPointerCapture(event.pointerId);
     const centerWorldX = (viewport.clientWidth / 2 - offset.x) / scale;
     const centerWorldY = (viewport.clientHeight / 2 - offset.y) / scale;
     const centerNode = nearestNode(centerWorldX, centerWorldY);
-    viewport.setPointerCapture(event.pointerId);
     setDragState({
       pointerId: event.pointerId,
       tableId: table.id,
       row: centerNode.row,
       col: centerNode.col,
     });
+  };
+
+  const handlePalettePointerUp = (
+    event: React.PointerEvent<HTMLDivElement>,
+    table: DiningTable
+  ) => {
+    const gesture = paletteGestureRef.current;
+    if (
+      !gesture ||
+      gesture.tableId !== table.id ||
+      gesture.pointerId !== event.pointerId
+    ) {
+      return;
+    }
+    paletteGestureRef.current = null;
+    const dist = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
+    if (dist <= PALETTE_DRAG_THRESHOLD_PX) {
+      setPendingPlacementTableId((current) => {
+        if (current === table.id) {
+          notifications.show({ color: "blue", message: "Đã bỏ chọn đặt bàn." });
+          return null;
+        }
+        notifications.show({
+          color: "blue",
+          message: "Chạm vào ô trên sơ đồ để đặt bàn (hoặc kéo từ kho như trước).",
+        });
+        return table.id;
+      });
+    }
+  };
+
+  const handlePalettePointerCancel = (
+    event: React.PointerEvent<HTMLDivElement>,
+    table: DiningTable
+  ) => {
+    const gesture = paletteGestureRef.current;
+    if (
+      gesture &&
+      gesture.tableId === table.id &&
+      gesture.pointerId === event.pointerId
+    ) {
+      paletteGestureRef.current = null;
+    }
   };
 
   const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
@@ -383,33 +888,41 @@ export default function FloorMapPage() {
     zoomAt(pinchRef.current.scale + factor * TOUCH_PINCH_FACTOR, centerX, centerY);
   };
 
-  const centerCanvasView = () => {
-    const viewport = viewportRef.current;
-    if (!viewport) {
-      return;
-    }
-    setOffset({
-      x: (viewport.clientWidth - canvasWidth * scale) / 2,
-      y: (viewport.clientHeight - canvasHeight * scale) / 2,
-    });
-  };
-
   return (
     <Stack className={classes.pageRoot}>
       <Group justify="space-between" align="end">
         <div>
           <PortalPageTitle>Sơ đồ nhà hàng</PortalPageTitle>
           <Text c="dimmed">
-            Bàn sẽ bám vào node gần nhất trong canvas. Dùng cuộn chuột hoặc chụm/ngón tay để zoom.
+            {isEditMode
+              ? "Kéo bàn trên lưới hoặc chạm bàn trong kho rồi chạm ô để đặt. Cuộn/chụm để zoom."
+              : "Chạm bàn để đổi trạng thái. Kéo nền để xem sơ đồ, cuộn/chụm để zoom."}
           </Text>
         </div>
-        <Badge variant="light">
-          Node Grid {gridColumns} x {gridRows}
-        </Badge>
+        {isEditMode ? (
+          <Badge variant="light">
+            Node Grid {gridColumns} x {gridRows}
+          </Badge>
+        ) : null}
       </Group>
 
+      {layoutLockHolderName ? (
+        <Alert color="orange" variant="light" title="Sơ đồ đang được chỉnh sửa">
+          <strong>{layoutLockHolderName}</strong> đang ở chế độ chỉnh sửa bố cục. Bạn chỉ có thể xem; nút Edit tạm khóa cho đến khi họ xong.
+        </Alert>
+      ) : null}
+
+      {!hasSupabase ? (
+        <Alert color="gray" variant="light">
+          Chưa kết nối Supabase — kích thước lưới chỉ lưu trên máy bạn (mock). Kết nối database để đồng bộ sơ đồ cho mọi người.
+        </Alert>
+      ) : null}
+
       <PortalSectionCard>
-        <div className={classes.canvasFrame}>
+        <div
+          className={`${classes.canvasFrame} ${pendingPlacementTableId ? classes.canvasFramePendingPlacement : ""
+            }`}
+        >
           <div
             ref={viewportRef}
             className={classes.canvasViewport}
@@ -433,12 +946,13 @@ export default function FloorMapPage() {
                   const x = CANVAS_PADDING + node.col * nodeSpacing;
                   const y = CANVAS_PADDING + node.row * nodeSpacing;
                   return (
-                    <g key={`${node.row}-${node.col}`}>
-                      <circle className={classes.gridNode} cx={x} cy={y} r={6} />
-                      <text className={classes.gridNodeLabel} x={x + 10} y={y - 10}>
-                        C{node.col + 1}-R{node.row + 1}
-                      </text>
-                    </g>
+                    <circle
+                      key={`${node.row}-${node.col}`}
+                      className={classes.gridNode}
+                      cx={x}
+                      cy={y}
+                      r={6}
+                    />
                   );
                 })}
               </svg>
@@ -447,183 +961,301 @@ export default function FloorMapPage() {
                 const tables = tableByNode.get(key) ?? [];
                 const x = CANVAS_PADDING + node.col * nodeSpacing;
                 const y = CANVAS_PADDING + node.row * nodeSpacing;
-                return tables.map((table, stackIndex) => (
-                  <div
-                    key={`${table.id}-${node.row}-${node.col}-${stackIndex}`}
-                    data-table-block="true"
-                    className={`${classes.tableBlock} ${
-                      dragState?.tableId === table.id ? classes.tableBlockDragging : ""
-                    } ${!isEditMode ? classes.tableBlockReadonly : ""}`}
-                    style={{
-                      left: x - 56 + stackIndex * 8,
-                      top: y - 28 + stackIndex * 8,
-                    }}
-                    onPointerDown={(event) => handleTablePointerDown(event, table)}
-                  >
-                    <Text fw={600} size="sm" lineClamp={1}>
-                      {table.name}
-                    </Text>
-                    <Group justify="space-between" gap={6}>
+                return tables.map((table, stackIndex) => {
+                  const stackKey = `${table.id}-${node.row}-${node.col}-${stackIndex}`;
+                  const style = {
+                    left: x - 56 + stackIndex * 8,
+                    top: y - 28 + stackIndex * 8,
+                  };
+                  if (!isEditMode) {
+                    return (
+                      <Menu key={stackKey} position="bottom-start" withinPortal closeOnItemClick>
+                        <Menu.Target>
+                          <div
+                            data-table-block="true"
+                            className={`${classes.tableBlock} ${classes.tableBlockView} ${dragState?.tableId === table.id ? classes.tableBlockDragging : ""
+                              }`}
+                            style={style}
+                          >
+                            <Text fw={600} size="sm" lineClamp={1}>
+                              {table.name}
+                            </Text>
+                            <Text size="xs">{table.seats} ghế</Text>
+                            <Badge
+                              color={tableStatusColor[table.status]}
+                              variant="light"
+                              size="xs"
+                            >
+                              {tableStatusLabel[table.status]}
+                            </Badge>
+                          </div>
+                        </Menu.Target>
+                        <Menu.Dropdown>
+                          <Menu.Label>Đổi trạng thái</Menu.Label>
+                          {(["available", "hold", "arriving", "occupied"] as TableStatus[]).map(
+                            (status) => (
+                              <Menu.Item
+                                key={status}
+                                disabled={table.status === status}
+                                onClick={() => void handleStatusChange(table, status)}
+                              >
+                                {tableStatusLabel[status]}
+                              </Menu.Item>
+                            )
+                          )}
+                        </Menu.Dropdown>
+                      </Menu>
+                    );
+                  }
+                  return (
+                    <div
+                      key={stackKey}
+                      data-table-block="true"
+                      className={`${classes.tableBlock} ${dragState?.tableId === table.id ? classes.tableBlockDragging : ""
+                        }`}
+                      style={style}
+                      onPointerDown={(event) => handleTablePointerDown(event, table)}
+                    >
+                      <ActionIcon
+                        type="button"
+                        variant="subtle"
+                        color="gray"
+                        size="sm"
+                        className={classes.tableBlockRemove}
+                        data-table-remove="true"
+                        aria-label={`Chuyển ${table.name} vào kho`}
+                        onPointerDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void removeTableToStorage(table);
+                        }}
+                      >
+                        <X size={14} />
+                      </ActionIcon>
+                      <Text fw={600} size="sm" lineClamp={1}>
+                        {table.name}
+                      </Text>
+                      <Text size="xs">{table.seats} ghế</Text>
                       <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
                         {tableStatusLabel[table.status]}
                       </Badge>
-                      <Text size="xs">{table.seats} ghế</Text>
-                    </Group>
-                  </div>
-                ));
+                    </div>
+                  );
+                });
               })}
             </div>
           </div>
           <div className={classes.canvasOverlay}>
-            <div className={classes.canvasTopToolbar}>
-              <div className={classes.toolbarPopoverAnchor}>
-                <ActionIcon
-                  variant={isSearchPanelOpen ? "filled" : "light"}
-                  size="lg"
-                  aria-label="Search filters"
-                  onClick={() => {
-                    setIsSearchPanelOpen((value) => !value);
-                    setIsToolsPanelOpen(false);
-                  }}
-                >
-                  <Search size={16} />
-                </ActionIcon>
-                <div
-                  className={`${classes.canvasPopoverPanel} ${
-                    isSearchPanelOpen ? classes.canvasPopoverPanelOpen : ""
-                  } ${classes.toolbarPopoverLeft}`}
-                  aria-hidden={!isSearchPanelOpen}
-                >
-                  <Stack gap="sm">
-                    <TextInput
-                      label="Tìm bàn"
-                      placeholder="Theo tên bàn"
-                      value={search}
-                      onChange={(event) => setSearch(event.currentTarget.value)}
-                    />
-                    <Select
-                      label="Lọc trạng thái"
-                      value={statusFilter}
-                      onChange={(value) => setStatusFilter(value ?? "all")}
-                      data={[
-                        { value: "all", label: "Tất cả trạng thái" },
-                        ...(["available", "hold", "arriving", "occupied"] as TableStatus[]).map(
-                          (status) => ({
-                            value: status,
-                            label: tableStatusLabel[status],
-                          })
-                        ),
-                      ]}
-                    />
-                  </Stack>
+            {isTopToolbarOpen ? (
+              <div className={classes.canvasTopToolbar}>
+                <div className={classes.toolbarPopoverAnchor}>
+                  <ActionIcon
+                    variant={isSearchPanelOpen ? "filled" : "light"}
+                    size="lg"
+                    aria-label="Search filters"
+                    onClick={() => {
+                      setIsSearchPanelOpen((value) => !value);
+                      setIsToolsPanelOpen(false);
+                    }}
+                  >
+                    <Search size={16} />
+                  </ActionIcon>
+                  <div
+                    className={`${classes.canvasPopoverPanel} ${isSearchPanelOpen ? classes.canvasPopoverPanelOpen : ""
+                      } ${classes.toolbarPopoverLeft}`}
+                    aria-hidden={!isSearchPanelOpen}
+                  >
+                    <Stack gap="sm">
+                      <TextInput
+                        label="Tìm bàn"
+                        placeholder="Theo tên bàn"
+                        value={search}
+                        onChange={(event) => setSearch(event.currentTarget.value)}
+                      />
+                      <Select
+                        label="Lọc trạng thái"
+                        value={statusFilter}
+                        onChange={(value) => setStatusFilter(value ?? "all")}
+                        data={[
+                          { value: "all", label: "Tất cả trạng thái" },
+                          ...(["available", "hold", "arriving", "occupied"] as TableStatus[]).map(
+                            (status) => ({
+                              value: status,
+                              label: tableStatusLabel[status],
+                            })
+                          ),
+                        ]}
+                      />
+                    </Stack>
+                  </div>
                 </div>
-              </div>
 
-              <div className={classes.toolbarPopoverAnchor}>
-                <ActionIcon
-                  variant={isToolsPanelOpen ? "filled" : "light"}
-                  size="lg"
-                  aria-label="Grid tools"
-                  disabled={!isEditMode}
-                  onClick={() => {
-                    setIsToolsPanelOpen((value) => !value);
-                    setIsSearchPanelOpen(false);
-                  }}
-                >
-                  <Wrench size={16} />
-                </ActionIcon>
-                <div
-                  className={`${classes.canvasPopoverPanel} ${
-                    isToolsPanelOpen ? classes.canvasPopoverPanelOpen : ""
-                  } ${classes.toolbarPopoverLeft}`}
-                  aria-hidden={!isToolsPanelOpen}
-                >
-                  <Stack gap="sm">
-                    <Group align="end" gap="xs" wrap="nowrap">
-                      <NumberInput
-                        label="Cột"
-                        value={gridColumns}
-                        onChange={(value) =>
-                          setGridColumns(clamp(Number(value) || DEFAULT_GRID_COLUMNS, 4, 24))
-                        }
-                        min={4}
-                        max={24}
-                        clampBehavior="strict"
-                        style={{ flex: 1 }}
-                      />
-                      <NumberInput
-                        label="Hàng"
-                        value={gridRows}
-                        onChange={(value) =>
-                          setGridRows(clamp(Number(value) || DEFAULT_GRID_ROWS, 4, 18))
-                        }
-                        min={4}
-                        max={18}
-                        clampBehavior="strict"
-                        style={{ flex: 1 }}
-                      />
-                    </Group>
-                    <NumberInput
-                      label="Khoảng cách node"
-                      value={nodeSpacing}
-                      onChange={(value) =>
-                        setNodeSpacing(clamp(Number(value) || DEFAULT_NODE_SPACING, 64, 160))
-                      }
-                      min={64}
-                      max={160}
-                      step={4}
-                      clampBehavior="strict"
-                    />
+                {isEditMode ? (
+                  <div className={classes.toolbarPopoverAnchor}>
                     <ActionIcon
-                      variant="light"
+                      variant={isToolsPanelOpen ? "filled" : "light"}
                       size="lg"
+                      aria-label="Grid tools"
                       onClick={() => {
-                        setScale(1);
-                        setOffset({ x: 24, y: 24 });
+                        setIsToolsPanelOpen((value) => !value);
+                        setIsSearchPanelOpen(false);
                       }}
-                      aria-label="Reset view"
                     >
-                      <RotateCcw size={16} />
+                      <Wrench size={16} />
                     </ActionIcon>
-                  </Stack>
-                </div>
-              </div>
+                    <div
+                      className={`${classes.canvasPopoverPanel} ${isToolsPanelOpen ? classes.canvasPopoverPanelOpen : ""
+                        } ${classes.toolbarPopoverLeft}`}
+                      aria-hidden={!isToolsPanelOpen}
+                    >
+                      <Stack gap="sm">
+                        <Group align="end" gap="xs" wrap="nowrap">
+                          <NumberInput
+                            label="Cột"
+                            value={gridColumns}
+                            onChange={(value) =>
+                              setGridColumns(clamp(Number(value) || DEFAULT_GRID_COLUMNS, 4, 24))
+                            }
+                            min={4}
+                            max={24}
+                            clampBehavior="strict"
+                            style={{ flex: 1 }}
+                          />
+                          <NumberInput
+                            label="Hàng"
+                            value={gridRows}
+                            onChange={(value) =>
+                              setGridRows(clamp(Number(value) || DEFAULT_GRID_ROWS, 4, 18))
+                            }
+                            min={4}
+                            max={18}
+                            clampBehavior="strict"
+                            style={{ flex: 1 }}
+                          />
+                        </Group>
+                        <NumberInput
+                          label="Khoảng cách node"
+                          value={nodeSpacing}
+                          onChange={(value) =>
+                            setNodeSpacing(clamp(Number(value) || DEFAULT_NODE_SPACING, 64, 160))
+                          }
+                          min={64}
+                          max={160}
+                          step={4}
+                          clampBehavior="strict"
+                        />
+                        <Button
+                          variant="light"
+                          size="xs"
+                          leftSection={<Minimize2 size={14} />}
+                          loading={isTrimmingGrid}
+                          onClick={() => void trimRedundantGrid()}
+                        >
+                          Thu gọn lưới thừa
+                        </Button>
+                        <ActionIcon
+                          variant="light"
+                          size="lg"
+                          onClick={fitCanvasToViewport}
+                          aria-label="Reset view"
+                        >
+                          <RotateCcw size={16} />
+                        </ActionIcon>
+                      </Stack>
+                    </div>
+                  </div>
+                ) : null}
 
-              <SegmentedControl
-                value={mode}
-                onChange={(value) => {
-                  const nextMode = value as CanvasMode;
-                  setMode(nextMode);
-                  if (nextMode === "view") {
+                <SegmentedControl
+                  value={mode}
+                  onChange={(value) => {
+                    const nextMode = value as CanvasMode;
+                    if (nextMode === "edit") {
+                      if (editBlockedByOther) {
+                        notifications.show({
+                          color: "yellow",
+                          message: `${layoutLockHolderName ?? "Người khác"} đang chỉnh sửa sơ đồ. Chỉ xem được.`,
+                        });
+                        return;
+                      }
+                      if (!areaId) {
+                        return;
+                      }
+                      void (async () => {
+                        const acquired = await acquireFloorLayoutEditLock(areaId);
+                        if (!acquired.ok) {
+                          notifications.show({
+                            color: "yellow",
+                            message: `${acquired.holderFullName} đang chỉnh sửa sơ đồ. Thử lại sau.`,
+                          });
+                          return;
+                        }
+                        setMode("edit");
+                        setPendingPlacementTableId(null);
+                      })();
+                      return;
+                    }
+                    setMode("view");
+                    setPendingPlacementTableId(null);
                     setIsToolsPanelOpen(false);
                     setIsSearchPanelOpen(false);
                     setDragState(null);
-                  }
-                }}
-                data={[
-                  { label: "View", value: "view" },
-                  { label: "Edit", value: "edit" },
-                ]}
-                className={classes.toolbarModeControl}
-              />
+                    if (areaId) {
+                      void releaseFloorLayoutEditLock(areaId);
+                    }
+                  }}
+                  data={[
+                    { label: "View", value: "view" },
+                    {
+                      label: "Edit",
+                      value: "edit",
+                      disabled: editBlockedByOther,
+                    },
+                  ]}
+                  className={classes.toolbarModeControl}
+                />
 
-              <Select
-                label="Khu vực"
-                value={areaId}
-                onChange={setActiveAreaId}
-                data={availableAreas.map((area) => ({
-                  value: area.id,
-                  label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
-                }))}
-                searchable
-                className={classes.toolbarAreaSelect}
-              />
-            </div>
+                <Select
+                  label="Khu vực"
+                  value={areaId}
+                  onChange={setActiveAreaId}
+                  data={availableAreas.map((area) => ({
+                    value: area.id,
+                    label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
+                  }))}
+                  searchable
+                  className={classes.toolbarAreaSelect}
+                />
+                <ActionIcon
+                  variant="light"
+                  size="lg"
+                  className={classes.topToolbarCollapseBtn}
+                  onClick={() => {
+                    setIsTopToolbarOpen(false);
+                    setIsSearchPanelOpen(false);
+                    setIsToolsPanelOpen(false);
+                  }}
+                  aria-label="Ẩn thanh công cụ"
+                >
+                  <ChevronUp size={16} />
+                </ActionIcon>
+              </div>
+            ) : (
+              <div className={classes.topToolbarToggleDock}>
+                <ActionIcon
+                  variant="filled"
+                  size="lg"
+                  onClick={() => setIsTopToolbarOpen(true)}
+                  aria-label="Hiện thanh công cụ"
+                >
+                  <ChevronDown size={16} />
+                </ActionIcon>
+              </div>
+            )}
 
             <div
-              className={`${classes.canvasZoomDock} ${
-                isEditMode && isPaletteOpen ? classes.canvasZoomDockRaised : ""
-              }`}
+              className={`${classes.canvasZoomDock} ${isEditMode && isPaletteOpen ? classes.canvasZoomDockRaised : ""
+                }`}
             >
               <ActionIcon
                 variant="light"
@@ -644,7 +1276,7 @@ export default function FloorMapPage() {
               <ActionIcon
                 variant="light"
                 size="lg"
-                onClick={centerCanvasView}
+                onClick={fitCanvasToViewport}
                 aria-label="Center view"
               >
                 <Crosshair size={16} />
@@ -667,7 +1299,7 @@ export default function FloorMapPage() {
                         onClick={() => setIsPaletteOpen(false)}
                         aria-label="Ẩn kho bàn"
                       >
-                        <ChevronUp size={14} />
+                        <ChevronDown size={14} />
                       </ActionIcon>
                     </Group>
                     <div className={classes.tablePaletteList}>
@@ -679,8 +1311,14 @@ export default function FloorMapPage() {
                         paletteTables.map((table) => (
                           <div
                             key={`palette-${table.id}`}
-                            className={classes.paletteTableBlock}
+                            className={`${classes.paletteTableBlock} ${pendingPlacementTableId === table.id
+                              ? classes.paletteTableBlockPending
+                              : ""
+                              }`}
                             onPointerDown={(event) => handlePalettePointerDown(event, table)}
+                            onPointerMove={(event) => handlePalettePointerMove(event, table)}
+                            onPointerUp={(event) => handlePalettePointerUp(event, table)}
+                            onPointerCancel={(event) => handlePalettePointerCancel(event, table)}
                           >
                             <Text size="sm" fw={600} lineClamp={1}>
                               {table.name}

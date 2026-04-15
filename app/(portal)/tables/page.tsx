@@ -15,17 +15,34 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { DataTable, type DataTableSortStatus } from "mantine-datatable";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { type DiningTable, TableStatus } from "@/lib/types";
 
 export default function TablesPage() {
-  const { state, filteredBranchIds, upsertTable, upsertTablesBatch, deleteTables, updateTableStatus } = useAppContext();
+  const {
+    state,
+    filteredBranchIds,
+    upsertTable,
+    upsertTablesBatch,
+    deleteTables,
+    updateTableStatus,
+    currentUser,
+  } = useAppContext();
 
   const [branchId, setBranchId] = useState(filteredBranchIds[0] ?? "");
   const [areaId, setAreaId] = useState("");
+
+  useEffect(() => {
+    if (currentUser?.role === "manager") {
+      return;
+    }
+    const next = filteredBranchIds[0] ?? "";
+    setBranchId(next);
+    setAreaId("");
+  }, [currentUser?.role, filteredBranchIds]);
   const [activeTab, setActiveTab] = useState<string | null>("single");
 
   const [singleName, setSingleName] = useState("");
