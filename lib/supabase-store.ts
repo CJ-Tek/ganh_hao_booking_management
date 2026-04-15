@@ -440,6 +440,71 @@ export async function addAreaInSupabase(
   });
 }
 
+export async function updateAreaInSupabase(
+  areaId: string,
+  input: { branchId?: string; name?: string; capacity?: number }
+): Promise<Result> {
+  const client = ensureClient();
+  const patch: {
+    name?: string;
+    capacity?: number;
+    branch_id?: string;
+  } = {};
+  if (input.name !== undefined) {
+    patch.name = input.name;
+  }
+  if (input.capacity !== undefined) {
+    patch.capacity = input.capacity;
+  }
+  if (input.branchId !== undefined) {
+    patch.branch_id = input.branchId;
+  }
+  if (Object.keys(patch).length === 0) {
+    return { ok: true, message: "Không có thay đổi." };
+  }
+  const { error } = await client.from("areas").update(patch).eq("id", areaId);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  if (input.branchId !== undefined) {
+    await client.from("tables").update({ branch_id: input.branchId }).eq("area_id", areaId);
+    await client.from("bookings").update({ branch_id: input.branchId }).eq("area_id", areaId);
+  }
+  return { ok: true, message: "Đã cập nhật khu vực." };
+}
+
+export async function deleteAreaInSupabase(areaId: string): Promise<Result> {
+  const client = ensureClient();
+
+  const { count: tableCount } = await client
+    .from("tables")
+    .select("*", { count: "exact", head: true })
+    .eq("area_id", areaId);
+
+  const { count: bookingCount } = await client
+    .from("bookings")
+    .select("*", { count: "exact", head: true })
+    .eq("area_id", areaId);
+
+  if ((tableCount ?? 0) > 0 || (bookingCount ?? 0) > 0) {
+    return {
+      ok: false,
+      message: `Không thể xóa: còn ${tableCount ?? 0} bàn và ${bookingCount ?? 0} đặt bàn gắn khu vực này.`,
+    };
+  }
+
+  await client.from("floor_layout_edit_locks").delete().eq("area_id", areaId);
+  await client.from("floor_backgrounds").delete().eq("area_id", areaId);
+  await client.from("floor_layout_template_selections").delete().eq("area_id", areaId);
+  await client.from("floor_layout_templates").delete().eq("area_id", areaId);
+
+  const { error } = await client.from("areas").delete().eq("id", areaId);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  return { ok: true, message: "Đã xóa khu vực." };
+}
+
 export async function updateAreaFloorLayoutInSupabase(
   areaId: string,
   input: {
@@ -460,6 +525,34 @@ export async function updateAreaFloorLayoutInSupabase(
   if (error) {
     throw new Error(error.message);
   }
+}
+
+export type SaveFloorLayoutInput = {
+  floorGridColumns: number;
+  floorGridRows: number;
+  floorNodeSpacing: number;
+  /** All tables in this area; positions use grid indices (or STORAGE_OFF_GRID for palette). */
+  tablePositions: Array<{ tableId: string; x: number; y: number }>;
+};
+
+/** Persists grid metadata and all table positions for a floor in one logical save. */
+export async function saveFloorLayoutToSupabase(
+  areaId: string,
+  input: SaveFloorLayoutInput
+): Promise<void> {
+  await updateAreaFloorLayoutInSupabase(areaId, {
+    floorGridColumns: input.floorGridColumns,
+    floorGridRows: input.floorGridRows,
+    floorNodeSpacing: input.floorNodeSpacing,
+  });
+  if (input.tablePositions.length === 0) {
+    return;
+  }
+  await Promise.all(
+    input.tablePositions.map((row) =>
+      updateTablePositionInSupabase(row.tableId, row.x, row.y)
+    )
+  );
 }
 
 const LOCK_TTL_MS = 3 * 60 * 1000;

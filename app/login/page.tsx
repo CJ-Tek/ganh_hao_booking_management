@@ -45,7 +45,7 @@ export default function LoginPage() {
     }
   };
 
-  const demoAccounts = ["admin", "tongquanly", "manager-vt", "manager-hcm"];
+  const demoAccounts = ["admin", "tongquanly", "manager-1", "manager-2"];
 
   return (
     <Center mih="100dvh" bg="linear-gradient(180deg, #f4f8fd 0%, #eaf2fb 100%)">

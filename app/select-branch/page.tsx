@@ -17,7 +17,11 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { RouteGuard } from "@/components/route-guard";
 import { useAppContext } from "@/contexts/app-context";
-import { clearBranchPickRequired, isBranchPickRequired, shouldPickBranchOnLogin } from "@/lib/branch-pick";
+import {
+  clearBranchPickRequired,
+  isBranchPickRequired,
+  shouldPickBranchOnLogin,
+} from "@/lib/branch-pick";
 
 export default function SelectBranchPage() {
   const { currentUser, state, setActiveBranchId } = useAppContext();
@@ -27,13 +31,14 @@ export default function SelectBranchPage() {
     if (!currentUser) {
       return;
     }
-    if (!shouldPickBranchOnLogin(currentUser.role)) {
-      router.replace("/dashboard");
+    if (shouldPickBranchOnLogin(currentUser.role)) {
+      if (!isBranchPickRequired()) {
+        router.replace("/dashboard");
+      }
       return;
     }
-    if (!isBranchPickRequired()) {
+    if (currentUser.role === "manager" && currentUser.branchIds.length <= 1) {
       router.replace("/dashboard");
-      return;
     }
   }, [currentUser, router]);
 
@@ -44,7 +49,9 @@ export default function SelectBranchPage() {
 
   const handleSelect = (id: string) => {
     setActiveBranchId(id);
-    clearBranchPickRequired();
+    if (currentUser && shouldPickBranchOnLogin(currentUser.role)) {
+      clearBranchPickRequired();
+    }
     router.replace("/dashboard");
   };
 
@@ -59,8 +66,8 @@ export default function SelectBranchPage() {
             <Stack gap="xs" ta="center">
               <Title order={2}>Chọn chi nhánh làm việc</Title>
               <Text c="dimmed" size="sm">
-                Chọn chi nhánh bạn muốn thao tác sau khi đăng nhập. Bạn có thể đổi chi nhánh trên
-                thanh công cụ bất cứ lúc nào.
+                Chọn chi nhánh bạn muốn thao tác. Quản lý tổng đổi nhanh trên thanh công cụ; quản lý
+                nhiều chi nhánh có thể quay lại đây từ mục &quot;Chọn chi nhánh&quot; trong menu.
               </Text>
             </Stack>
             {branches.length === 0 ? (

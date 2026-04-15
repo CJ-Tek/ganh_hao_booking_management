@@ -133,8 +133,20 @@
   min-width: 180px;
 }
 
+.toolbarAreaRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.toolbarAreaActions {
+  flex-shrink: 0;
+}
+
 .toolbarAreaSelect {
-  min-width: 320px;
+  min-width: 200px;
   flex: 1;
 }
 
@@ -287,6 +299,10 @@
     gap: 6px;
     flex-wrap: wrap;
     align-items: stretch;
+  }
+
+  .toolbarAreaRow {
+    flex: 1 1 100%;
   }
 
   .toolbarModeControl {

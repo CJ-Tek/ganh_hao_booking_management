@@ -56,7 +56,9 @@ export function persistActiveBranch(user: AppUser, branchId: string): void {
   if (!user.branchIds.includes(branchId)) {
     return;
   }
-  if (shouldPickBranchOnLogin(user.role)) {
+  const persistForManagerMulti =
+    user.role === "manager" && user.branchIds.length > 1;
+  if (shouldPickBranchOnLogin(user.role) || persistForManagerMulti) {
     localStorage.setItem(activeBranchStorageKey(user.id), branchId);
   }
 }

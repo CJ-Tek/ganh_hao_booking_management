@@ -99,11 +99,22 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     [scopedNotifications]
   );
   const shownNavItems = useMemo(() => {
-    if (currentUser?.role === "admin" || currentUser?.role === "general_manager") {
-      return navItems;
+    const base =
+      currentUser?.role === "admin" || currentUser?.role === "general_manager"
+        ? navItems
+        : navItems.filter((item) => !item.adminOnly);
+    if (currentUser?.role === "manager" && currentUser.branchIds.length > 1) {
+      return [
+        ...base,
+        {
+          label: "Chọn chi nhánh",
+          href: "/select-branch",
+          icon: <Building2 size={16} />,
+        },
+      ];
     }
-    return navItems.filter((item) => !item.adminOnly);
-  }, [currentUser?.role]);
+    return base;
+  }, [currentUser?.branchIds.length, currentUser?.role]);
 
   const portalLabel =
     currentUser?.role === "manager" ? "Cổng quản lý chi nhánh" : "Cổng quản lý tổng";

@@ -7,6 +7,7 @@ import {
   Button,
   Group,
   Menu,
+  Modal,
   NumberInput,
   Select,
   SegmentedControl,
@@ -23,13 +24,17 @@ import {
   Minus,
   Plus,
   RotateCcw,
+  Pencil,
+  Save,
   Search,
+  Trash2,
   Wrench,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
+import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { type DiningTable, type TableStatus } from "@/lib/types";
 import classes from "./page.module.css";
@@ -149,20 +154,29 @@ type PanState = {
 
 type CanvasMode = "view" | "edit";
 
+type FloorEditLayout = {
+  gridColumns: number;
+  gridRows: number;
+  nodeSpacing: number;
+  positions: Record<string, { x: number; y: number }>;
+};
+
 export default function FloorMapPage() {
   const {
     state,
     filteredBranchIds,
-    updateTablePosition,
     updateTableStatus,
     currentUser,
     isLoading,
     hasSupabase,
     saveAreaFloorGrid,
+    saveFloorLayout,
     acquireFloorLayoutEditLock,
     renewFloorLayoutEditLock,
     releaseFloorLayoutEditLock,
     getFloorLayoutEditLockInfo,
+    updateArea,
+    deleteArea,
   } = useAppContext();
   const [activeAreaId, setActiveAreaId] = useState<string | null>(null);
   const [mode, setMode] = useState<CanvasMode>("view");
@@ -181,6 +195,15 @@ export default function FloorMapPage() {
   const [pendingPlacementTableId, setPendingPlacementTableId] = useState<string | null>(null);
   const [isTrimmingGrid, setIsTrimmingGrid] = useState(false);
   const [layoutLockHolderName, setLayoutLockHolderName] = useState<string | null>(null);
+  const [areaEditOpen, setAreaEditOpen] = useState(false);
+  const [areaEditBranchId, setAreaEditBranchId] = useState("");
+  const [areaEditName, setAreaEditName] = useState("");
+  const [areaEditCapacity, setAreaEditCapacity] = useState(30);
+  const [areaEditSaving, setAreaEditSaving] = useState(false);
+  const [areaDeleteOpen, setAreaDeleteOpen] = useState(false);
+  const [areaDeleteLoading, setAreaDeleteLoading] = useState(false);
+  const [editLayout, setEditLayout] = useState<FloorEditLayout | null>(null);
+  const [isSavingLayout, setIsSavingLayout] = useState(false);
   const isEditMode = mode === "edit";
   const editBlockedByOther = Boolean(layoutLockHolderName);
 
@@ -208,19 +231,55 @@ export default function FloorMapPage() {
   const gridSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const areaIdRef = useRef<string | null>(null);
   const modeRef = useRef<CanvasMode>("view");
+  const resyncEditLayoutAfterSaveRef = useRef(false);
+  const prevAreaIdForLayoutRef = useRef<string | null>(null);
+  const prevModeForLayoutRef = useRef<CanvasMode>("view");
 
   const availableAreas = useMemo(
     () => state.areas.filter((area) => filteredBranchIds.includes(area.branchId)),
     [filteredBranchIds, state.areas]
   );
 
+  const branchSelectData = useMemo(
+    () =>
+      state.branches
+        .filter((b) => filteredBranchIds.includes(b.id))
+        .map((b) => ({ value: b.id, label: b.name })),
+    [filteredBranchIds, state.branches]
+  );
+
   const areaId = activeAreaId ?? availableAreas[0]?.id ?? null;
+
+  const selectedAreaTableCount = useMemo(() => {
+    if (!areaId) {
+      return 0;
+    }
+    return state.tables.filter((t) => t.areaId === areaId).length;
+  }, [areaId, state.tables]);
+
+  const selectedAreaBookingCount = useMemo(() => {
+    if (!areaId) {
+      return 0;
+    }
+    return state.bookings.filter((b) => b.areaId === areaId).length;
+  }, [areaId, state.bookings]);
+
+  useEffect(() => {
+    if (activeAreaId && !availableAreas.some((a) => a.id === activeAreaId)) {
+      setActiveAreaId(availableAreas[0]?.id ?? null);
+    }
+  }, [activeAreaId, availableAreas]);
+
+  useEffect(() => {
+    setAreaEditOpen(false);
+    setAreaDeleteOpen(false);
+  }, [areaId]);
 
   areaIdRef.current = areaId;
   modeRef.current = mode;
 
   useEffect(() => {
-    if (!areaId || isLoading) {
+    if (!areaId || isLoading || mode !== "view") {
       return;
     }
     const area = state.areas.find((a) => a.id === areaId);
@@ -230,11 +289,84 @@ export default function FloorMapPage() {
     setGridColumns(area.floorGridColumns ?? DEFAULT_GRID_COLUMNS);
     setGridRows(area.floorGridRows ?? DEFAULT_GRID_ROWS);
     setNodeSpacing(area.floorNodeSpacing ?? DEFAULT_NODE_SPACING);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- resync only when area or loading gate changes, not on every snapshot update
-  }, [areaId, isLoading]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- resync view grid when area/mode/loading changes, not on every snapshot
+  }, [areaId, isLoading, mode, state.areas]);
 
   useEffect(() => {
-    if (!areaId || isLoading) {
+    setFloorLayoutRealtimeReloadBlocked(mode === "edit");
+    return () => setFloorLayoutRealtimeReloadBlocked(false);
+  }, [mode]);
+
+  useEffect(() => {
+    if (
+      mode === "edit" &&
+      prevAreaIdForLayoutRef.current &&
+      prevAreaIdForLayoutRef.current !== areaId
+    ) {
+      const oldArea = prevAreaIdForLayoutRef.current;
+      setMode("view");
+      setEditLayout(null);
+      void releaseFloorLayoutEditLock(oldArea);
+      notifications.show({
+        color: "blue",
+        message: "Đã thoát chỉnh sửa khi chuyển khu vực.",
+      });
+      prevAreaIdForLayoutRef.current = areaId;
+      prevModeForLayoutRef.current = "view";
+      return;
+    }
+
+    prevAreaIdForLayoutRef.current = areaId;
+
+    if (mode !== "edit" || !areaId) {
+      if (mode !== "edit") {
+        setEditLayout(null);
+      }
+      prevModeForLayoutRef.current = mode;
+      return;
+    }
+
+    const enteredEdit = prevModeForLayoutRef.current !== "edit";
+    prevModeForLayoutRef.current = mode;
+
+    if (!enteredEdit) {
+      return;
+    }
+
+    const area = state.areas.find((a) => a.id === areaId);
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (const t of state.tables.filter((x) => x.areaId === areaId)) {
+      positions[t.id] = { x: t.positionX, y: t.positionY };
+    }
+    setEditLayout({
+      gridColumns: area?.floorGridColumns ?? DEFAULT_GRID_COLUMNS,
+      gridRows: area?.floorGridRows ?? DEFAULT_GRID_ROWS,
+      nodeSpacing: area?.floorNodeSpacing ?? DEFAULT_NODE_SPACING,
+      positions,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- draft snapshot only when entering edit; remote updates handled after save
+  }, [mode, areaId, state.areas, state.tables, releaseFloorLayoutEditLock]);
+
+  useEffect(() => {
+    if (!resyncEditLayoutAfterSaveRef.current || mode !== "edit" || !areaId) {
+      return;
+    }
+    resyncEditLayoutAfterSaveRef.current = false;
+    const area = state.areas.find((a) => a.id === areaId);
+    const positions: Record<string, { x: number; y: number }> = {};
+    for (const t of state.tables.filter((x) => x.areaId === areaId)) {
+      positions[t.id] = { x: t.positionX, y: t.positionY };
+    }
+    setEditLayout({
+      gridColumns: area?.floorGridColumns ?? DEFAULT_GRID_COLUMNS,
+      gridRows: area?.floorGridRows ?? DEFAULT_GRID_ROWS,
+      nodeSpacing: area?.floorNodeSpacing ?? DEFAULT_NODE_SPACING,
+      positions,
+    });
+  }, [state.tables, state.areas, mode, areaId]);
+
+  useEffect(() => {
+    if (!areaId || isLoading || isEditMode) {
       return;
     }
     if (gridSaveTimerRef.current) {
@@ -248,7 +380,7 @@ export default function FloorMapPage() {
         clearTimeout(gridSaveTimerRef.current);
       }
     };
-  }, [areaId, gridColumns, gridRows, nodeSpacing, isLoading, saveAreaFloorGrid]);
+  }, [areaId, gridColumns, gridRows, nodeSpacing, isLoading, saveAreaFloorGrid, isEditMode]);
 
   useEffect(() => {
     if (!areaId || !hasSupabase) {
@@ -305,42 +437,87 @@ export default function FloorMapPage() {
     [areaId, state.tables]
   );
 
+  const layoutTablesInArea = useMemo(() => {
+    if (!isEditMode || !editLayout) {
+      return tablesInArea;
+    }
+    return tablesInArea.map((t) => {
+      const p = editLayout.positions[t.id];
+      if (!p) {
+        return t;
+      }
+      return { ...t, positionX: p.x, positionY: p.y };
+    });
+  }, [isEditMode, editLayout, tablesInArea]);
+
+  const effectiveGridColumns =
+    isEditMode && editLayout ? editLayout.gridColumns : gridColumns;
+  const effectiveGridRows = isEditMode && editLayout ? editLayout.gridRows : gridRows;
+  const effectiveNodeSpacing = isEditMode && editLayout ? editLayout.nodeSpacing : nodeSpacing;
+
+  const isLayoutDirty = useMemo(() => {
+    if (!isEditMode || !editLayout || !areaId) {
+      return false;
+    }
+    const area = state.areas.find((a) => a.id === areaId);
+    if (!area) {
+      return false;
+    }
+    if (
+      editLayout.gridColumns !== (area.floorGridColumns ?? DEFAULT_GRID_COLUMNS) ||
+      editLayout.gridRows !== (area.floorGridRows ?? DEFAULT_GRID_ROWS) ||
+      editLayout.nodeSpacing !== (area.floorNodeSpacing ?? DEFAULT_NODE_SPACING)
+    ) {
+      return true;
+    }
+    for (const t of tablesInArea) {
+      const p = editLayout.positions[t.id];
+      if (!p || p.x !== t.positionX || p.y !== t.positionY) {
+        return true;
+      }
+    }
+    return false;
+  }, [isEditMode, editLayout, areaId, state.areas, tablesInArea]);
+
   const visibleTables = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    return tablesInArea.filter((table) => {
+    return layoutTablesInArea.filter((table) => {
       const hitKeyword = !keyword || table.name.toLowerCase().includes(keyword);
       const hitStatus = statusFilter === "all" || table.status === statusFilter;
       return hitKeyword && hitStatus;
     });
-  }, [search, statusFilter, tablesInArea]);
+  }, [search, statusFilter, layoutTablesInArea]);
 
   const tableMap = useMemo(
     () => Object.fromEntries(visibleTables.map((table) => [table.id, table])),
     [visibleTables]
   );
   const placedTables = useMemo(
-    () => visibleTables.filter((table) => isTableInGrid(table, gridColumns, gridRows)),
-    [gridColumns, gridRows, visibleTables]
+    () =>
+      visibleTables.filter((table) =>
+        isTableInGrid(table, effectiveGridColumns, effectiveGridRows)
+      ),
+    [effectiveGridColumns, effectiveGridRows, visibleTables]
   );
   const paletteTables = useMemo(
     () =>
       visibleTables
-        .filter((table) => !isTableInGrid(table, gridColumns, gridRows))
+        .filter((table) => !isTableInGrid(table, effectiveGridColumns, effectiveGridRows))
         .sort((first, second) => first.name.localeCompare(second.name, "vi")),
-    [gridColumns, gridRows, visibleTables]
+    [effectiveGridColumns, effectiveGridRows, visibleTables]
   );
 
   const basePositionMap = useMemo(() => {
     const grouped = new Map<string, DiningTable[]>();
     for (const table of placedTables) {
-      const mapped = getTableGridPosition(table, gridColumns, gridRows);
+      const mapped = getTableGridPosition(table, effectiveGridColumns, effectiveGridRows);
       const key = `${mapped.row}-${mapped.col}`;
       const current = grouped.get(key) ?? [];
       current.push(table);
       grouped.set(key, current);
     }
     return grouped;
-  }, [gridColumns, gridRows, placedTables]);
+  }, [effectiveGridColumns, effectiveGridRows, placedTables]);
 
   const tableByNode = useMemo(() => {
     const grouped = new Map<string, DiningTable[]>();
@@ -364,70 +541,100 @@ export default function FloorMapPage() {
     return grouped;
   }, [basePositionMap, dragState, tableMap]);
 
-  const commitDrop = async (tableId: string, row: number, col: number) => {
+  const commitDrop = (tableId: string, row: number, col: number) => {
     const source = tableMap[tableId];
-    if (!source) {
-      return;
-    }
-    const current = getTableGridPosition(source, gridColumns, gridRows);
-    if (current.row === row && current.col === col) {
-      return;
-    }
-    try {
-      await updateTablePosition(source.id, col, row);
-      notifications.show({
-        color: "green",
-        message: `Đã đặt ${source.name} vào node C${col + 1}-R${row + 1}.`,
-      });
-    } catch (error) {
-      notifications.show({
-        color: "red",
-        message: error instanceof Error ? error.message : "Không thể cập nhật vị trí bàn.",
-      });
-    } finally {
+    if (!source || !editLayout) {
       setDragState(null);
+      return;
     }
+    const current = getTableGridPosition(source, effectiveGridColumns, effectiveGridRows);
+    if (current.row === row && current.col === col) {
+      setDragState(null);
+      return;
+    }
+    setEditLayout((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      return {
+        ...prev,
+        positions: { ...prev.positions, [source.id]: { x: col, y: row } },
+      };
+    });
+    setDragState(null);
   };
 
-  const commitPlacement = async (tableId: string, row: number, col: number) => {
+  const commitPlacement = (tableId: string, row: number, col: number) => {
     const source = state.tables.find((t) => t.id === tableId);
-    if (!source) {
+    if (!source || !editLayout) {
       return;
     }
-    const current = getTableGridPosition(source, gridColumns, gridRows);
+    const current = getTableGridPosition(source, effectiveGridColumns, effectiveGridRows);
     if (
-      isTableInGrid(source, gridColumns, gridRows) &&
+      isTableInGrid(source, effectiveGridColumns, effectiveGridRows) &&
       current.row === row &&
       current.col === col
     ) {
       return;
     }
-    try {
-      await updateTablePosition(tableId, col, row);
-      notifications.show({
-        color: "green",
-        message: `Đã đặt ${source.name} vào node C${col + 1}-R${row + 1}.`,
-      });
-    } catch (error) {
-      notifications.show({
-        color: "red",
-        message: error instanceof Error ? error.message : "Không thể cập nhật vị trí bàn.",
-      });
-    }
+    setEditLayout((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      return {
+        ...prev,
+        positions: { ...prev.positions, [tableId]: { x: col, y: row } },
+      };
+    });
   };
 
-  const removeTableToStorage = async (table: DiningTable) => {
+  const removeTableToStorage = (table: DiningTable) => {
+    if (!editLayout) {
+      return;
+    }
+    setEditLayout((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      return {
+        ...prev,
+        positions: {
+          ...prev.positions,
+          [table.id]: { x: STORAGE_OFF_GRID, y: STORAGE_OFF_GRID },
+        },
+      };
+    });
+  };
+
+  const handleSaveFloorLayout = async () => {
+    if (!areaId || !editLayout || !isLayoutDirty) {
+      return;
+    }
+    setIsSavingLayout(true);
     try {
-      await updateTablePosition(table.id, STORAGE_OFF_GRID, STORAGE_OFF_GRID);
-      notifications.show({
-        color: "green",
-        message: `Đã chuyển ${table.name} vào kho bàn.`,
+      const tablePositions = tablesInArea.map((t) => {
+        const p = editLayout.positions[t.id];
+        return {
+          tableId: t.id,
+          x: p?.x ?? t.positionX,
+          y: p?.y ?? t.positionY,
+        };
       });
+      await saveFloorLayout(areaId, {
+        floorGridColumns: editLayout.gridColumns,
+        floorGridRows: editLayout.gridRows,
+        floorNodeSpacing: editLayout.nodeSpacing,
+        tablePositions,
+      });
+      resyncEditLayoutAfterSaveRef.current = true;
+      notifications.show({ color: "green", message: "Đã lưu sơ đồ xuống máy chủ." });
     } catch (error) {
       notifications.show({
         color: "red",
-        message: error instanceof Error ? error.message : "Không thể cập nhật vị trí bàn.",
+        message: error instanceof Error ? error.message : "Không thể lưu sơ đồ.",
       });
+    } finally {
+      setIsSavingLayout(false);
     }
   };
 
@@ -461,15 +668,17 @@ export default function FloorMapPage() {
 
   const gridNodes = useMemo(
     () =>
-      Array.from({ length: gridRows * gridColumns }, (_, index) => ({
-        row: Math.floor(index / gridColumns),
-        col: index % gridColumns,
+      Array.from({ length: effectiveGridRows * effectiveGridColumns }, (_, index) => ({
+        row: Math.floor(index / effectiveGridColumns),
+        col: index % effectiveGridColumns,
       })),
-    [gridColumns, gridRows]
+    [effectiveGridColumns, effectiveGridRows]
   );
 
-  const canvasWidth = CANVAS_PADDING * 2 + Math.max(0, gridColumns - 1) * nodeSpacing;
-  const canvasHeight = CANVAS_PADDING * 2 + Math.max(0, gridRows - 1) * nodeSpacing;
+  const canvasWidth =
+    CANVAS_PADDING * 2 + Math.max(0, effectiveGridColumns - 1) * effectiveNodeSpacing;
+  const canvasHeight =
+    CANVAS_PADDING * 2 + Math.max(0, effectiveGridRows - 1) * effectiveNodeSpacing;
 
   const fitCanvasToViewport = useCallback(() => {
     const viewport = viewportRef.current;
@@ -487,7 +696,12 @@ export default function FloorMapPage() {
     let centerX = canvasWidth / 2;
     let centerY = canvasHeight / 2;
 
-    const tableBounds = getPlacedTableBounds(placedTables, gridColumns, gridRows, nodeSpacing);
+    const tableBounds = getPlacedTableBounds(
+      placedTables,
+      effectiveGridColumns,
+      effectiveGridRows,
+      effectiveNodeSpacing
+    );
     if (tableBounds) {
       const minX = tableBounds.minX - FIT_TABLE_BOUNDS_PADDING;
       const minY = tableBounds.minY - FIT_TABLE_BOUNDS_PADDING;
@@ -511,11 +725,21 @@ export default function FloorMapPage() {
       x: vw / 2 - centerX * nextScale,
       y: vh / 2 - centerY * nextScale,
     });
-  }, [canvasHeight, canvasWidth, gridColumns, gridRows, nodeSpacing, placedTables]);
+  }, [
+    canvasHeight,
+    canvasWidth,
+    effectiveGridColumns,
+    effectiveGridRows,
+    effectiveNodeSpacing,
+    placedTables,
+  ]);
 
-  const trimRedundantGrid = useCallback(async () => {
-    const placed = tablesInArea.filter((table) =>
-      isTableInGrid(table, gridColumns, gridRows)
+  const trimRedundantGrid = useCallback(() => {
+    if (!editLayout) {
+      return;
+    }
+    const placed = layoutTablesInArea.filter((table) =>
+      isTableInGrid(table, effectiveGridColumns, effectiveGridRows)
     );
     if (placed.length === 0) {
       notifications.show({
@@ -539,8 +763,8 @@ export default function FloorMapPage() {
     const newCols = clamp(Math.max(spanC, 4), 4, 24);
     const newRows = clamp(Math.max(spanR, 4), 4, 18);
     const alreadyTight =
-      newCols === gridColumns &&
-      newRows === gridRows &&
+      newCols === effectiveGridColumns &&
+      newRows === effectiveGridRows &&
       minC === 0 &&
       minR === 0;
     if (alreadyTight) {
@@ -552,33 +776,95 @@ export default function FloorMapPage() {
     }
     setIsTrimmingGrid(true);
     try {
-      await Promise.all(
-        placed.map((table) =>
-          updateTablePosition(
-            table.id,
-            table.positionX - minC,
-            table.positionY - minR
-          )
-        )
-      );
-      setGridColumns(newCols);
-      setGridRows(newRows);
-      if (areaId) {
-        await saveAreaFloorGrid(areaId, newCols, newRows, nodeSpacing);
-      }
+      setEditLayout((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        const nextPositions = { ...prev.positions };
+        for (const table of placed) {
+          const p = nextPositions[table.id];
+          if (p) {
+            nextPositions[table.id] = { x: p.x - minC, y: p.y - minR };
+          }
+        }
+        return {
+          ...prev,
+          gridColumns: newCols,
+          gridRows: newRows,
+          positions: nextPositions,
+        };
+      });
       notifications.show({
         color: "green",
-        message: `Đã thu lưới còn ${newCols} × ${newRows} (căn bàn về góc trên-trái).`,
-      });
-    } catch (error) {
-      notifications.show({
-        color: "red",
-        message: error instanceof Error ? error.message : "Không thể thu gọn lưới.",
+        message: `Đã thu lưới còn ${newCols} × ${newRows} (căn bàn về góc trên-trái). Chọn Lưu để ghi xuống máy chủ.`,
       });
     } finally {
       setIsTrimmingGrid(false);
     }
-  }, [areaId, gridColumns, gridRows, nodeSpacing, saveAreaFloorGrid, tablesInArea, updateTablePosition]);
+  }, [editLayout, layoutTablesInArea, effectiveGridColumns, effectiveGridRows]);
+
+  const openAreaMetadataEdit = useCallback(() => {
+    if (!areaId) {
+      return;
+    }
+    const area = state.areas.find((a) => a.id === areaId);
+    if (!area) {
+      return;
+    }
+    setAreaEditBranchId(area.branchId);
+    setAreaEditName(area.name);
+    setAreaEditCapacity(area.capacity);
+    setAreaEditOpen(true);
+  }, [areaId, state.areas]);
+
+  const handleSaveAreaMetadata = async () => {
+    if (!areaId || !areaEditName.trim() || !areaEditBranchId) {
+      notifications.show({ color: "red", message: "Vui lòng nhập đầy đủ thông tin." });
+      return;
+    }
+    setAreaEditSaving(true);
+    try {
+      const result = await updateArea(areaId, {
+        branchId: areaEditBranchId,
+        name: areaEditName.trim(),
+        capacity: areaEditCapacity,
+      });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        setAreaEditOpen(false);
+      }
+    } finally {
+      setAreaEditSaving(false);
+    }
+  };
+
+  const handleConfirmDeleteArea = async () => {
+    if (!areaId) {
+      return;
+    }
+    setAreaDeleteLoading(true);
+    try {
+      const result = await deleteArea(areaId);
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        setAreaDeleteOpen(false);
+        setMode("view");
+        setPendingPlacementTableId(null);
+        setDragState(null);
+        setIsToolsPanelOpen(false);
+        setIsSearchPanelOpen(false);
+        setActiveAreaId(null);
+      }
+    } finally {
+      setAreaDeleteLoading(false);
+    }
+  };
 
   useLayoutEffect(() => {
     fitCanvasToViewport();
@@ -606,8 +892,16 @@ export default function FloorMapPage() {
   };
 
   const nearestNode = (x: number, y: number) => {
-    const col = clamp(Math.round((x - CANVAS_PADDING) / nodeSpacing), 0, gridColumns - 1);
-    const row = clamp(Math.round((y - CANVAS_PADDING) / nodeSpacing), 0, gridRows - 1);
+    const col = clamp(
+      Math.round((x - CANVAS_PADDING) / effectiveNodeSpacing),
+      0,
+      effectiveGridColumns - 1
+    );
+    const row = clamp(
+      Math.round((y - CANVAS_PADDING) / effectiveNodeSpacing),
+      0,
+      effectiveGridRows - 1
+    );
     return { row, col };
   };
 
@@ -759,13 +1053,13 @@ export default function FloorMapPage() {
     if (!viewport) {
       return;
     }
-    const base = getTableGridPosition(table, gridColumns, gridRows);
+    const base = getTableGridPosition(table, effectiveGridColumns, effectiveGridRows);
     viewport.setPointerCapture(event.pointerId);
     setDragState({
       pointerId: event.pointerId,
       tableId: table.id,
-      row: clamp(base.row, 0, gridRows - 1),
-      col: clamp(base.col, 0, gridColumns - 1),
+      row: clamp(base.row, 0, effectiveGridRows - 1),
+      col: clamp(base.col, 0, effectiveGridColumns - 1),
     });
   };
 
@@ -895,14 +1189,21 @@ export default function FloorMapPage() {
           <PortalPageTitle>Sơ đồ nhà hàng</PortalPageTitle>
           <Text c="dimmed">
             {isEditMode
-              ? "Kéo bàn trên lưới hoặc chạm bàn trong kho rồi chạm ô để đặt. Cuộn/chụm để zoom."
+              ? "Chỉnh sơ đồ trên lưới, rồi bấm Lưu sơ đồ để ghi xuống máy chủ — người khác sẽ thấy ngay sau khi lưu. Cuộn/chụm để zoom."
               : "Chạm bàn để đổi trạng thái. Kéo nền để xem sơ đồ, cuộn/chụm để zoom."}
           </Text>
         </div>
         {isEditMode ? (
-          <Badge variant="light">
-            Node Grid {gridColumns} x {gridRows}
-          </Badge>
+          <Group gap="xs">
+            <Badge variant="light">
+              Node Grid {effectiveGridColumns} × {effectiveGridRows}
+            </Badge>
+            {isLayoutDirty ? (
+              <Badge color="orange" variant="light">
+                Chưa lưu
+              </Badge>
+            ) : null}
+          </Group>
         ) : null}
       </Group>
 
@@ -943,8 +1244,8 @@ export default function FloorMapPage() {
             >
               <svg className={classes.gridSvg} viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}>
                 {gridNodes.map((node) => {
-                  const x = CANVAS_PADDING + node.col * nodeSpacing;
-                  const y = CANVAS_PADDING + node.row * nodeSpacing;
+                  const x = CANVAS_PADDING + node.col * effectiveNodeSpacing;
+                  const y = CANVAS_PADDING + node.row * effectiveNodeSpacing;
                   return (
                     <circle
                       key={`${node.row}-${node.col}`}
@@ -959,8 +1260,8 @@ export default function FloorMapPage() {
               {gridNodes.map((node) => {
                 const key = `${node.row}-${node.col}`;
                 const tables = tableByNode.get(key) ?? [];
-                const x = CANVAS_PADDING + node.col * nodeSpacing;
-                const y = CANVAS_PADDING + node.row * nodeSpacing;
+                const x = CANVAS_PADDING + node.col * effectiveNodeSpacing;
+                const y = CANVAS_PADDING + node.row * effectiveNodeSpacing;
                 return tables.map((table, stackIndex) => {
                   const stackKey = `${table.id}-${node.row}-${node.col}-${stackIndex}`;
                   const style = {
@@ -1027,7 +1328,7 @@ export default function FloorMapPage() {
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                           event.stopPropagation();
-                          void removeTableToStorage(table);
+                          removeTableToStorage(table);
                         }}
                       >
                         <X size={14} />
@@ -1112,44 +1413,77 @@ export default function FloorMapPage() {
                         <Group align="end" gap="xs" wrap="nowrap">
                           <NumberInput
                             label="Cột"
-                            value={gridColumns}
+                            value={editLayout?.gridColumns ?? gridColumns}
                             onChange={(value) =>
-                              setGridColumns(clamp(Number(value) || DEFAULT_GRID_COLUMNS, 4, 24))
+                              setEditLayout((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      gridColumns: clamp(
+                                        Number(value) || DEFAULT_GRID_COLUMNS,
+                                        4,
+                                        24
+                                      ),
+                                    }
+                                  : prev
+                              )
                             }
                             min={4}
                             max={24}
                             clampBehavior="strict"
                             style={{ flex: 1 }}
+                            disabled={!editLayout}
                           />
                           <NumberInput
                             label="Hàng"
-                            value={gridRows}
+                            value={editLayout?.gridRows ?? gridRows}
                             onChange={(value) =>
-                              setGridRows(clamp(Number(value) || DEFAULT_GRID_ROWS, 4, 18))
+                              setEditLayout((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      gridRows: clamp(Number(value) || DEFAULT_GRID_ROWS, 4, 18),
+                                    }
+                                  : prev
+                              )
                             }
                             min={4}
                             max={18}
                             clampBehavior="strict"
                             style={{ flex: 1 }}
+                            disabled={!editLayout}
                           />
                         </Group>
                         <NumberInput
                           label="Khoảng cách node"
-                          value={nodeSpacing}
+                          value={editLayout?.nodeSpacing ?? nodeSpacing}
                           onChange={(value) =>
-                            setNodeSpacing(clamp(Number(value) || DEFAULT_NODE_SPACING, 64, 160))
+                            setEditLayout((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    nodeSpacing: clamp(
+                                      Number(value) || DEFAULT_NODE_SPACING,
+                                      64,
+                                      160
+                                    ),
+                                  }
+                                : prev
+                            )
                           }
                           min={64}
                           max={160}
                           step={4}
                           clampBehavior="strict"
+                          disabled={!editLayout}
                         />
                         <Button
                           variant="light"
                           size="xs"
                           leftSection={<Minimize2 size={14} />}
                           loading={isTrimmingGrid}
-                          onClick={() => void trimRedundantGrid()}
+                          onClick={() => trimRedundantGrid()}
+                          disabled={!editLayout}
                         >
                           Thu gọn lưới thừa
                         </Button>
@@ -1164,6 +1498,18 @@ export default function FloorMapPage() {
                       </Stack>
                     </div>
                   </div>
+                ) : null}
+
+                {isEditMode ? (
+                  <Button
+                    size="sm"
+                    leftSection={<Save size={16} />}
+                    loading={isSavingLayout}
+                    disabled={!editLayout || !isLayoutDirty}
+                    onClick={() => void handleSaveFloorLayout()}
+                  >
+                    Lưu sơ đồ
+                  </Button>
                 ) : null}
 
                 <SegmentedControl
@@ -1195,6 +1541,14 @@ export default function FloorMapPage() {
                       })();
                       return;
                     }
+                    if (mode === "edit" && isLayoutDirty) {
+                      if (
+                        typeof window !== "undefined" &&
+                        !window.confirm("Bỏ các thay đổi sơ đồ chưa lưu?")
+                      ) {
+                        return;
+                      }
+                    }
                     setMode("view");
                     setPendingPlacementTableId(null);
                     setIsToolsPanelOpen(false);
@@ -1215,17 +1569,40 @@ export default function FloorMapPage() {
                   className={classes.toolbarModeControl}
                 />
 
-                <Select
-                  label="Khu vực"
-                  value={areaId}
-                  onChange={setActiveAreaId}
-                  data={availableAreas.map((area) => ({
-                    value: area.id,
-                    label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
-                  }))}
-                  searchable
-                  className={classes.toolbarAreaSelect}
-                />
+                <div className={classes.toolbarAreaRow}>
+                  <Select
+                    label="Khu vực"
+                    value={areaId}
+                    onChange={setActiveAreaId}
+                    data={availableAreas.map((area) => ({
+                      value: area.id,
+                      label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
+                    }))}
+                    searchable
+                    className={classes.toolbarAreaSelect}
+                  />
+                  <Group gap={4} className={classes.toolbarAreaActions} wrap="nowrap">
+                    <ActionIcon
+                      variant="light"
+                      size="lg"
+                      aria-label="Sửa khu vực"
+                      disabled={!areaId || !hasSupabase}
+                      onClick={openAreaMetadataEdit}
+                    >
+                      <Pencil size={16} />
+                    </ActionIcon>
+                    <ActionIcon
+                      variant="light"
+                      color="red"
+                      size="lg"
+                      aria-label="Xóa khu vực"
+                      disabled={!areaId || !hasSupabase}
+                      onClick={() => setAreaDeleteOpen(true)}
+                    >
+                      <Trash2 size={16} />
+                    </ActionIcon>
+                  </Group>
+                </div>
                 <ActionIcon
                   variant="light"
                   size="lg"
@@ -1355,6 +1732,63 @@ export default function FloorMapPage() {
           </div>
         </div>
       </PortalSectionCard>
+
+      <Modal
+        opened={areaEditOpen}
+        onClose={() => setAreaEditOpen(false)}
+        title="Sửa khu vực"
+        size="md"
+      >
+        <Stack gap="sm">
+          <Select
+            label="Chi nhánh"
+            value={areaEditBranchId}
+            onChange={(value) => setAreaEditBranchId(value ?? "")}
+            data={branchSelectData}
+          />
+          <TextInput
+            label="Tên khu vực"
+            value={areaEditName}
+            onChange={(event) => setAreaEditName(event.currentTarget.value)}
+          />
+          <NumberInput
+            label="Sức chứa"
+            value={areaEditCapacity}
+            onChange={(value) => setAreaEditCapacity(Number(value || 1))}
+            min={1}
+          />
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={() => setAreaEditOpen(false)}>
+              Hủy
+            </Button>
+            <Button loading={areaEditSaving} onClick={() => void handleSaveAreaMetadata()}>
+              Lưu
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={areaDeleteOpen}
+        onClose={() => setAreaDeleteOpen(false)}
+        title="Xóa khu vực"
+        size="sm"
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Xóa khu vực này? Chỉ xóa được khi không còn bàn và không còn đặt bàn (hiện:{" "}
+            {selectedAreaTableCount} bàn, {selectedAreaBookingCount} đặt bàn).
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setAreaDeleteOpen(false)}>
+              Hủy
+            </Button>
+            <Button color="red" loading={areaDeleteLoading} onClick={() => void handleConfirmDeleteArea()}>
+              Xóa
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }

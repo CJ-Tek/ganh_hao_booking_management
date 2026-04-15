@@ -34,22 +34,14 @@ export default function BookingsPage() {
     createBooking,
     updateBookingStatus,
     checkInBooking,
-    currentUser,
   } = useAppContext();
+
+  const branchId = filteredBranchIds[0] ?? null;
+  const branchName =
+    branchId ? state.branches.find((b) => b.id === branchId)?.name ?? "—" : "—";
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
-  const [branchId, setBranchId] = useState<string | null>(filteredBranchIds[0] ?? null);
-
-  useEffect(() => {
-    if (currentUser?.role === "manager") {
-      return;
-    }
-    const next = filteredBranchIds[0] ?? null;
-    setBranchId(next);
-    setAreaId(null);
-    setTableId(null);
-  }, [currentUser?.role, filteredBranchIds]);
   const [areaId, setAreaId] = useState<string | null>(null);
   const [tableId, setTableId] = useState<string | null>(null);
   const [guestCount, setGuestCount] = useState<number>(4);
@@ -66,6 +58,12 @@ export default function BookingsPage() {
   const [page, setPage] = useState(1);
   const pageSize = 8;
 
+  useEffect(() => {
+    setAreaId(null);
+    setTableId(null);
+    setPage(1);
+  }, [filteredBranchIds]);
+
   const filteredAreas = state.areas.filter((area) => area.branchId === branchId);
   const filteredTables = useMemo(() => {
     const keyword = tableSearch.trim().toLowerCase();
@@ -77,13 +75,8 @@ export default function BookingsPage() {
   }, [areaId, state.tables, tableSearch, tableStatusFilter]);
 
   const branchBookings = useMemo(
-    () =>
-      state.bookings.filter(
-        (booking) =>
-          filteredBranchIds.includes(booking.branchId) &&
-          (currentUser?.role !== "manager" || booking.branchId === branchId)
-      ),
-    [branchId, currentUser?.role, filteredBranchIds, state.bookings]
+    () => state.bookings.filter((booking) => filteredBranchIds.includes(booking.branchId)),
+    [filteredBranchIds, state.bookings]
   );
 
   const sortedBookings = useMemo(() => {
@@ -156,18 +149,9 @@ export default function BookingsPage() {
         <Grid.Col span={{ base: 12, lg: 5 }}>
           <PortalSectionCard>
             <Stack>
-              <Select
-                label="Chi nhánh"
-                value={branchId}
-                onChange={(value) => {
-                  setBranchId(value);
-                  setAreaId(null);
-                  setTableId(null);
-                }}
-                data={state.branches
-                  .filter((branch) => filteredBranchIds.includes(branch.id))
-                  .map((branch) => ({ value: branch.id, label: branch.name }))}
-              />
+              <Text size="sm" c="dimmed">
+                Chi nhánh làm việc: {branchName}
+              </Text>
               <TextInput
                 label="Tên khách"
                 value={customerName}

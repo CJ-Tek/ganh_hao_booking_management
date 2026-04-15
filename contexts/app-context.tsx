@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -21,6 +22,7 @@ import { initialState } from "@/lib/mock-data";
 import {
   addAreaInSupabase,
   addUserInSupabase,
+  deleteAreaInSupabase,
   deleteUserInSupabase,
   updateUserInSupabase,
   checkInBookingInSupabase,
@@ -34,8 +36,11 @@ import {
   deleteTablesInSupabase,
   renewFloorLayoutLockInSupabase,
   releaseFloorLayoutLockInSupabase,
+  type SaveFloorLayoutInput,
+  saveFloorLayoutToSupabase,
   tryAcquireFloorLayoutLockInSupabase,
   updateAreaFloorLayoutInSupabase,
+  updateAreaInSupabase,
   updateBookingStatusInSupabase,
   updateBranchInSupabase,
   updateTablePositionInSupabase,
@@ -43,6 +48,8 @@ import {
   upsertTableInSupabase,
   upsertTablesBatchInSupabase,
 } from "@/lib/supabase-store";
+import { supabase } from "@/lib/supabase";
+import { isFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
 import {
   AppStateSnapshot,
   AppUser,
@@ -91,6 +98,11 @@ interface AppContextValue {
   updateTableStatus: (tableId: string, status: TableStatus) => Promise<void>;
   updateTablePosition: (tableId: string, x: number, y: number) => Promise<void>;
   addArea: (branchId: string, name: string, capacity: number) => Promise<void>;
+  updateArea: (
+    areaId: string,
+    input: { branchId?: string; name?: string; capacity?: number }
+  ) => Promise<ActionResult>;
+  deleteArea: (areaId: string) => Promise<ActionResult>;
   addUser: (payload: {
     username: string;
     password: string;
@@ -116,6 +128,7 @@ interface AppContextValue {
     rows: number,
     nodeSpacing: number
   ) => Promise<void>;
+  saveFloorLayout: (areaId: string, input: SaveFloorLayoutInput) => Promise<void>;
   acquireFloorLayoutEditLock: (
     areaId: string
   ) => Promise<{ ok: true } | { ok: false; holderFullName: string }>;
@@ -132,15 +145,25 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 /**
  * Branch IDs used to scope bookings, tables, areas, dashboard, etc.
- * Admin / Quản lý tổng: exactly the active branch (must switch in header to work on another).
- * Quản lý chi nhánh: all branches they are assigned to.
+ * Admin / Quản lý tổng: exactly the active branch (switch in header or after login pick).
+ * Quản lý chi nhánh: one branch at a time — assigned branch if only one; otherwise the active
+ * branch (switch via menu "Chọn chi nhánh" → /select-branch).
  */
 function userScopeBranchIds(user: AppUser | null, activeBranchId?: string): string[] {
   if (!user) {
     return [];
   }
   if (user.role === "manager") {
-    return user.branchIds;
+    if (user.branchIds.length === 0) {
+      return [];
+    }
+    if (user.branchIds.length === 1) {
+      return user.branchIds;
+    }
+    if (activeBranchId && user.branchIds.includes(activeBranchId)) {
+      return [activeBranchId];
+    }
+    return [user.branchIds[0]];
   }
   if (shouldPickBranchOnLogin(user.role) && isBranchPickRequired()) {
     return [];
@@ -259,8 +282,12 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const setActiveBranchId = (branchId: string) => {
-    if (currentUser && shouldPickBranchOnLogin(currentUser.role)) {
-      persistActiveBranch(currentUser, branchId);
+    if (currentUser) {
+      if (shouldPickBranchOnLogin(currentUser.role)) {
+        persistActiveBranch(currentUser, branchId);
+      } else if (currentUser.role === "manager" && currentUser.branchIds.length > 1) {
+        persistActiveBranch(currentUser, branchId);
+      }
     }
     setState((prev) => ({ ...prev, activeBranchId: branchId }));
   };
@@ -378,6 +405,72 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }
     await addAreaInSupabase(branchId, name, capacity);
     await reload();
+  };
+
+  const updateArea = async (
+    areaId: string,
+    input: { branchId?: string; name?: string; capacity?: number }
+  ) => {
+    const applyLocal = () => {
+      setState((prev) => ({
+        ...prev,
+        areas: prev.areas.map((a) =>
+          a.id === areaId
+            ? {
+                ...a,
+                ...(input.name !== undefined ? { name: input.name } : {}),
+                ...(input.capacity !== undefined ? { capacity: input.capacity } : {}),
+                ...(input.branchId !== undefined ? { branchId: input.branchId } : {}),
+              }
+            : a
+        ),
+        tables:
+          input.branchId !== undefined
+            ? prev.tables.map((t) =>
+                t.areaId === areaId ? { ...t, branchId: input.branchId! } : t
+              )
+            : prev.tables,
+        bookings:
+          input.branchId !== undefined
+            ? prev.bookings.map((b) =>
+                b.areaId === areaId ? { ...b, branchId: input.branchId! } : b
+              )
+            : prev.bookings,
+      }));
+    };
+
+    if (!hasSupabase) {
+      applyLocal();
+      return { ok: true, message: "Đã cập nhật khu vực." };
+    }
+    const result = await updateAreaInSupabase(areaId, input);
+    if (result.ok) {
+      await reload();
+    }
+    return result;
+  };
+
+  const deleteArea = async (areaId: string) => {
+    const tablesInArea = state.tables.filter((t) => t.areaId === areaId);
+    const bookingsInArea = state.bookings.filter((b) => b.areaId === areaId);
+    if (!hasSupabase) {
+      if (tablesInArea.length > 0 || bookingsInArea.length > 0) {
+        return {
+          ok: false,
+          message: `Không thể xóa: còn ${tablesInArea.length} bàn và ${bookingsInArea.length} đặt bàn gắn khu vực này.`,
+        };
+      }
+      setState((prev) => ({
+        ...prev,
+        areas: prev.areas.filter((a) => a.id !== areaId),
+      }));
+      return { ok: true, message: "Đã xóa khu vực." };
+    }
+    const result = await deleteAreaInSupabase(areaId);
+    if (result.ok) {
+      await reload();
+    }
+    return result;
   };
 
   const addUser = async (payload: {
@@ -552,6 +645,87 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     [hasSupabase]
   );
 
+  const saveFloorLayout = useCallback(
+    async (areaId: string, input: SaveFloorLayoutInput) => {
+      const floorGridColumns = Math.min(24, Math.max(4, Math.round(input.floorGridColumns)));
+      const floorGridRows = Math.min(18, Math.max(4, Math.round(input.floorGridRows)));
+      const floorNodeSpacing = Math.min(160, Math.max(64, Math.round(input.floorNodeSpacing)));
+      const tablePositions = input.tablePositions.map((p) => ({
+        tableId: p.tableId,
+        x: Math.round(p.x),
+        y: Math.round(p.y),
+      }));
+      const posById = new Map(tablePositions.map((p) => [p.tableId, p]));
+
+      if (!hasSupabase) {
+        setState((prev) => ({
+          ...prev,
+          areas: prev.areas.map((a) =>
+            a.id === areaId
+              ? { ...a, floorGridColumns, floorGridRows, floorNodeSpacing }
+              : a
+          ),
+          tables: prev.tables.map((t) => {
+            const pos = posById.get(t.id);
+            if (!pos || t.areaId !== areaId) {
+              return t;
+            }
+            return { ...t, positionX: pos.x, positionY: pos.y };
+          }),
+        }));
+        return;
+      }
+      await saveFloorLayoutToSupabase(areaId, {
+        floorGridColumns,
+        floorGridRows,
+        floorNodeSpacing,
+        tablePositions,
+      });
+      await reload();
+    },
+    [hasSupabase, reload]
+  );
+
+  const reloadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!hasSupabase || !supabase) {
+      return;
+    }
+    const client = supabase;
+    const scheduleReload = () => {
+      if (isFloorLayoutRealtimeReloadBlocked()) {
+        return;
+      }
+      if (reloadDebounceRef.current) {
+        clearTimeout(reloadDebounceRef.current);
+      }
+      reloadDebounceRef.current = setTimeout(() => {
+        reloadDebounceRef.current = null;
+        void reload();
+      }, 280);
+    };
+    const channel = client
+      .channel("app-data-tables-areas")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "tables" },
+        scheduleReload
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "areas" },
+        scheduleReload
+      )
+      .subscribe();
+    return () => {
+      if (reloadDebounceRef.current) {
+        clearTimeout(reloadDebounceRef.current);
+        reloadDebounceRef.current = null;
+      }
+      void client.removeChannel(channel);
+    };
+  }, [hasSupabase, reload]);
+
   const acquireFloorLayoutEditLock = useCallback(
     async (areaId: string) => {
       if (!hasSupabase || !currentUser) {
@@ -610,11 +784,14 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     updateTableStatus,
     updateTablePosition,
     addArea,
+    updateArea,
+    deleteArea,
     addUser,
     updateUser,
     deleteUser,
     markNotificationRead,
     saveAreaFloorGrid,
+    saveFloorLayout,
     acquireFloorLayoutEditLock,
     renewFloorLayoutEditLock,
     releaseFloorLayoutEditLock,

@@ -29,20 +29,13 @@ export default function TablesPage() {
     upsertTablesBatch,
     deleteTables,
     updateTableStatus,
-    currentUser,
   } = useAppContext();
 
-  const [branchId, setBranchId] = useState(filteredBranchIds[0] ?? "");
-  const [areaId, setAreaId] = useState("");
+  const branchId = filteredBranchIds[0] ?? "";
+  const branchName =
+    branchId ? state.branches.find((b) => b.id === branchId)?.name ?? "—" : "—";
 
-  useEffect(() => {
-    if (currentUser?.role === "manager") {
-      return;
-    }
-    const next = filteredBranchIds[0] ?? "";
-    setBranchId(next);
-    setAreaId("");
-  }, [currentUser?.role, filteredBranchIds]);
+  const [areaId, setAreaId] = useState("");
   const [activeTab, setActiveTab] = useState<string | null>("single");
 
   const [singleName, setSingleName] = useState("");
@@ -68,6 +61,11 @@ export default function TablesPage() {
     columnAccessor: "name",
     direction: "asc",
   });
+
+  useEffect(() => {
+    setAreaId("");
+    setPage(1);
+  }, [filteredBranchIds]);
 
   const branchNameById = useMemo(
     () => Object.fromEntries(state.branches.map((item) => [item.id, item.name])),
@@ -243,18 +241,14 @@ export default function TablesPage() {
             1) Chọn phạm vi thao tác, 2) dùng tab để thêm/xóa hàng loạt, 3) kiểm soát danh sách bàn bên dưới.
           </Text>
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
-            <Select
-              label="Chi nhánh thao tác"
-              value={branchId}
-              onChange={(value) => {
-                setBranchId(value ?? "");
-                setAreaId("");
-                setPage(1);
-              }}
-              data={state.branches
-                .filter((branch) => filteredBranchIds.includes(branch.id))
-                .map((branch) => ({ value: branch.id, label: branch.name }))}
-            />
+            <Stack gap={4}>
+              <Text size="xs" fw={600}>
+                Chi nhánh thao tác
+              </Text>
+              <Text size="sm" c="dimmed">
+                {branchName}
+              </Text>
+            </Stack>
             <Select
               label="Khu vực thao tác"
               value={areaId}
