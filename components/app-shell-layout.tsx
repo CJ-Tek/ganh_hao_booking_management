@@ -10,15 +10,18 @@ import {
   Burger,
   Button,
   Divider,
+  Drawer,
   Group,
   Image,
   NavLink,
+  Paper,
   Popover,
   ScrollArea,
   Select,
   Stack,
   Text,
   Title,
+  UnstyledButton,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import {
@@ -27,6 +30,7 @@ import {
   LayoutDashboard,
   LogOut,
   Map,
+  MoreHorizontal,
   Settings,
   SquareMenu,
   Users,
@@ -38,9 +42,19 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useMemo } from "react";
 import { useAppContext } from "@/contexts/app-context";
+import { usePortalCompact } from "@/lib/use-portal-compact";
 import classes from "./app-shell-layout.module.css";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode; adminOnly?: boolean };
+
+const MANAGER_DOCK_HREFS = ["/dashboard", "/bookings", "/floor-map", "/customers"] as const;
+
+const managerDockShortLabel: Record<(typeof MANAGER_DOCK_HREFS)[number], string> = {
+  "/dashboard": "Tổng quan",
+  "/bookings": "Đặt bàn",
+  "/floor-map": "Sơ đồ",
+  "/customers": "Khách",
+};
 
 const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard size={16} /> },
@@ -66,8 +80,10 @@ const navItems: NavItem[] = [
 
 export function AppShellLayout({ children }: { children: React.ReactNode }) {
   const [opened, { toggle, close }] = useDisclosure();
+  const [managerMoreOpen, { open: openManagerMore, close: closeManagerMore }] = useDisclosure(false);
   const pathname = usePathname();
   const router = useRouter();
+  const isCompact = usePortalCompact();
   const {
     currentUser,
     state,
@@ -114,7 +130,27 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
       ];
     }
     return base;
-  }, [currentUser?.branchIds.length, currentUser?.role]);
+  }, [currentUser]);
+
+  const dockHrefSet = useMemo(() => new Set<string>(MANAGER_DOCK_HREFS), []);
+
+  const managerDockItems = useMemo(() => {
+    if (currentUser?.role !== "manager") {
+      return [];
+    }
+    return MANAGER_DOCK_HREFS.map((href) => shownNavItems.find((item) => item.href === href)).filter(
+      (item): item is NavItem => Boolean(item)
+    );
+  }, [currentUser?.role, shownNavItems]);
+
+  const managerMoreNavItems = useMemo(() => {
+    if (currentUser?.role !== "manager") {
+      return [];
+    }
+    return shownNavItems.filter((item) => !dockHrefSet.has(item.href));
+  }, [currentUser?.role, dockHrefSet, shownNavItems]);
+
+  const showManagerDock = currentUser?.role === "manager" && isCompact;
 
   const portalLabel =
     currentUser?.role === "manager" ? "Cổng quản lý chi nhánh" : "Cổng quản lý tổng";
@@ -295,7 +331,133 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
         </Stack>
       </AppShell.Navbar>
 
-      <AppShell.Main>{children}</AppShell.Main>
+      <AppShell.Main
+        pb={
+          showManagerDock
+            ? "calc(58px + env(safe-area-inset-bottom, 0px))"
+            : undefined
+        }
+      >
+        {children}
+      </AppShell.Main>
+
+      {showManagerDock ? (
+        <>
+          <Paper
+            component="nav"
+            withBorder
+            radius={0}
+            px="xs"
+            pt={6}
+            pb="max(6px, env(safe-area-inset-bottom, 0px))"
+            aria-label="Truy cập nhanh"
+            style={{
+              position: "fixed",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 200,
+              background: "var(--mantine-color-body)",
+            }}
+          >
+            <Group justify="space-between" gap={4} wrap="nowrap" grow>
+              {managerDockItems.map((item) => {
+                const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                const shortLabel =
+                  managerDockShortLabel[item.href as (typeof MANAGER_DOCK_HREFS)[number]] ??
+                  item.label;
+                return (
+                  <UnstyledButton
+                    key={item.href}
+                    component={Link}
+                    href={item.href}
+                    onClick={() => {
+                      close();
+                      closeManagerMore();
+                    }}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      borderRadius: 10,
+                      padding: "6px 2px",
+                      background: active ? "var(--mantine-color-brand-light)" : undefined,
+                      color: active ? "var(--mantine-color-brand-filled)" : undefined,
+                    }}
+                  >
+                    <Stack gap={2} align="center">
+                      <Box
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          opacity: active ? 1 : 0.85,
+                        }}
+                      >
+                        {item.icon}
+                      </Box>
+                      <Text size="10px" fw={active ? 700 : 500} ta="center" lineClamp={2} lh={1.2}>
+                        {shortLabel}
+                      </Text>
+                    </Stack>
+                  </UnstyledButton>
+                );
+              })}
+              <UnstyledButton
+                type="button"
+                onClick={() => {
+                  openManagerMore();
+                  close();
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  borderRadius: 10,
+                  padding: "6px 2px",
+                }}
+              >
+                <Stack gap={2} align="center">
+                  <MoreHorizontal size={18} strokeWidth={2} />
+                  <Text size="10px" fw={500} ta="center" lineClamp={1}>
+                    Thêm
+                  </Text>
+                </Stack>
+              </UnstyledButton>
+            </Group>
+          </Paper>
+
+          <Drawer
+            opened={managerMoreOpen}
+            onClose={closeManagerMore}
+            position="bottom"
+            size="auto"
+            title="Truy cập nhanh"
+            padding="md"
+            radius="md"
+          >
+            <Stack gap="xs">
+              {managerMoreNavItems.map((item) => (
+                <NavLink
+                  key={item.href}
+                  component={Link}
+                  href={item.href}
+                  label={item.label}
+                  leftSection={item.icon}
+                  active={pathname.startsWith(item.href)}
+                  onClick={() => closeManagerMore()}
+                />
+              ))}
+              <NavLink
+                component={Link}
+                href="/notifications"
+                label="Thông báo"
+                leftSection={<Bell size={16} />}
+                active={pathname.startsWith("/notifications")}
+                onClick={() => closeManagerMore()}
+              />
+            </Stack>
+          </Drawer>
+        </>
+      ) : null}
     </AppShell>
   );
 }

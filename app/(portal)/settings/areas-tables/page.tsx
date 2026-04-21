@@ -2,7 +2,9 @@
 
 import {
   ActionIcon,
+  Badge,
   Button,
+  Card,
   Group,
   Modal,
   NumberInput,
@@ -24,6 +26,7 @@ import {
 } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
+import { usePortalCompact } from "@/lib/use-portal-compact";
 
 type AreaRow = {
   id: string;
@@ -38,6 +41,7 @@ type AreaRow = {
 export default function AreasTablesSettingsPage() {
   const { state, filteredBranchIds, addArea, updateArea, deleteArea, hasSupabase } =
     useAppContext();
+  const isCompact = usePortalCompact();
   const branchId = filteredBranchIds[0] ?? "";
   const branchName =
     branchId ? state.branches.find((b) => b.id === branchId)?.name ?? "—" : "—";
@@ -184,9 +188,13 @@ export default function AreasTablesSettingsPage() {
     }
   };
 
+  const areaTotalPages = Math.max(1, Math.ceil(sortedAreas.length / pageSize));
+
   return (
     <Stack>
-      <PortalPageTitle>Cấu hình khu vực & sức chứa</PortalPageTitle>
+      <PortalPageTitle order={isCompact ? 3 : 2}>
+        {isCompact ? "Khu vực & bàn" : "Cấu hình khu vực & sức chứa"}
+      </PortalPageTitle>
       <PortalStickyPanel>
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
           <Stack gap={4}>
@@ -198,18 +206,26 @@ export default function AreasTablesSettingsPage() {
             </Text>
           </Stack>
           <TextInput
-            label="Tên khu vực"
+            label="Tên khu vực mới"
+            placeholder="VD: Tầng 1"
             value={name}
             onChange={(event) => setName(event.currentTarget.value)}
+            size={isCompact ? "md" : "sm"}
           />
           <NumberInput
             label="Sức chứa"
             value={capacity}
             onChange={(value) => setCapacity(Number(value || 1))}
             min={1}
+            size={isCompact ? "md" : "sm"}
           />
           <PortalStickyAction>
-            <Button fullWidth onClick={() => void handleAddArea()} mt={{ base: 0, lg: 26 }}>
+            <Button
+              fullWidth
+              size={isCompact ? "md" : "sm"}
+              onClick={() => void handleAddArea()}
+              mt={{ base: 0, lg: 26 }}
+            >
               Thêm khu vực
             </Button>
           </PortalStickyAction>
@@ -217,78 +233,151 @@ export default function AreasTablesSettingsPage() {
       </PortalStickyPanel>
 
       <PortalSectionCard>
-        <Text fw={600} mb="sm">
+        <Text fw={600} mb="sm" size={isCompact ? "sm" : "md"}>
           Danh sách khu vực
         </Text>
         <TextInput
           label="Tìm khu vực"
-          placeholder="Tên khu vực hoặc chi nhánh"
+          placeholder="Tên hoặc chi nhánh"
           value={search}
           onChange={(event) => {
             setSearch(event.currentTarget.value);
             setPage(1);
           }}
           mb="sm"
+          size={isCompact ? "md" : "sm"}
         />
-        <DataTable
-          minHeight={240}
-          scrollAreaProps={portalDataTableScrollAreaProps}
-          withTableBorder
-          records={pagedAreas}
-          totalRecords={sortedAreas.length}
-          recordsPerPage={pageSize}
-          page={Math.min(page, Math.max(1, Math.ceil(sortedAreas.length / pageSize)))}
-          onPageChange={setPage}
-          sortStatus={sortStatus}
-          onSortStatusChange={(next) => {
-            setSortStatus(next);
-            setPage(1);
-          }}
-          columns={[
-            {
-              accessor: "branchName",
-              title: "Chi nhánh",
-              sortable: true,
-            },
-            { accessor: "name", title: "Khu vực", sortable: true },
-            { accessor: "capacity", title: "Sức chứa", sortable: true },
-            {
-              accessor: "tableCount",
-              title: "Số bàn",
-              sortable: true,
-            },
-            {
-              accessor: "bookingCount",
-              title: "Đặt bàn",
-              sortable: true,
-            },
-            {
-              accessor: "actions",
-              title: "Thao tác",
-              render: (area) => (
-                <Group gap={4} wrap="nowrap">
-                  <ActionIcon
-                    variant="subtle"
-                    aria-label="Sửa khu vực"
-                    disabled={!hasSupabase}
-                    onClick={() => openEdit(area)}
-                  >
-                    <Pencil size={16} />
-                  </ActionIcon>
-                  <ActionIcon
-                    variant="subtle"
-                    color="red"
-                    aria-label="Xóa khu vực"
-                    disabled={!hasSupabase}
-                    onClick={() => setDeleteTarget(area)}
-                  >
-                    <Trash2 size={16} />
-                  </ActionIcon>
-                </Group>
-              ),
-            },
-          ]}
-        />
+        {isCompact ? (
+          <Stack gap="sm">
+            {pagedAreas.length === 0 ? (
+              <Text c="dimmed" size="sm">
+                Không có khu vực phù hợp.
+              </Text>
+            ) : (
+              pagedAreas.map((area) => (
+                <Card key={area.id} withBorder radius="md" padding="md">
+                  <Stack gap="sm">
+                    <Group justify="space-between" align="flex-start" wrap="nowrap">
+                      <div style={{ minWidth: 0 }}>
+                        <Text fw={800}>{area.name}</Text>
+                        <Text size="xs" c="dimmed">
+                          {area.branchName}
+                        </Text>
+                      </div>
+                      <Group gap={6}>
+                        <ActionIcon
+                          variant="light"
+                          aria-label="Sửa khu vực"
+                          disabled={!hasSupabase}
+                          onClick={() => openEdit(area)}
+                        >
+                          <Pencil size={16} />
+                        </ActionIcon>
+                        <ActionIcon
+                          variant="light"
+                          color="red"
+                          aria-label="Xóa khu vực"
+                          disabled={!hasSupabase}
+                          onClick={() => setDeleteTarget(area)}
+                        >
+                          <Trash2 size={16} />
+                        </ActionIcon>
+                      </Group>
+                    </Group>
+                    <Group gap="xs">
+                      <Badge variant="light">{area.capacity} chỗ</Badge>
+                      <Badge variant="light">{area.tableCount} bàn</Badge>
+                      <Badge variant="light">{area.bookingCount} đặt</Badge>
+                    </Group>
+                  </Stack>
+                </Card>
+              ))
+            )}
+            {sortedAreas.length > pageSize ? (
+              <Group justify="center" gap="xs" mt="xs">
+                <Button
+                  variant="default"
+                  size="compact-sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Trước
+                </Button>
+                <Text size="sm" c="dimmed">
+                  {page}/{areaTotalPages}
+                </Text>
+                <Button
+                  variant="default"
+                  size="compact-sm"
+                  disabled={page >= areaTotalPages}
+                  onClick={() => setPage((p) => Math.min(areaTotalPages, p + 1))}
+                >
+                  Sau
+                </Button>
+              </Group>
+            ) : null}
+          </Stack>
+        ) : (
+          <DataTable
+            minHeight={240}
+            scrollAreaProps={portalDataTableScrollAreaProps}
+            withTableBorder
+            records={pagedAreas}
+            totalRecords={sortedAreas.length}
+            recordsPerPage={pageSize}
+            page={Math.min(page, areaTotalPages)}
+            onPageChange={setPage}
+            sortStatus={sortStatus}
+            onSortStatusChange={(next) => {
+              setSortStatus(next);
+              setPage(1);
+            }}
+            columns={[
+              {
+                accessor: "branchName",
+                title: "Chi nhánh",
+                sortable: true,
+              },
+              { accessor: "name", title: "Khu vực", sortable: true },
+              { accessor: "capacity", title: "Sức chứa", sortable: true },
+              {
+                accessor: "tableCount",
+                title: "Số bàn",
+                sortable: true,
+              },
+              {
+                accessor: "bookingCount",
+                title: "Đặt bàn",
+                sortable: true,
+              },
+              {
+                accessor: "actions",
+                title: "Thao tác",
+                render: (area) => (
+                  <Group gap={4} wrap="nowrap">
+                    <ActionIcon
+                      variant="subtle"
+                      aria-label="Sửa khu vực"
+                      disabled={!hasSupabase}
+                      onClick={() => openEdit(area)}
+                    >
+                      <Pencil size={16} />
+                    </ActionIcon>
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      aria-label="Xóa khu vực"
+                      disabled={!hasSupabase}
+                      onClick={() => setDeleteTarget(area)}
+                    >
+                      <Trash2 size={16} />
+                    </ActionIcon>
+                  </Group>
+                ),
+              },
+            ]}
+          />
+        )}
       </PortalSectionCard>
 
       <Modal

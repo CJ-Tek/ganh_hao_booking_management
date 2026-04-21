@@ -1,10 +1,10 @@
 .pageRoot {
-  min-height: calc(100dvh - 88px);
+  min-height: calc(100dvh - 88px - var(--manager-dock-reserve, 0px));
 }
 
 .canvasFrame {
   position: relative;
-  height: calc(100dvh - 210px);
+  height: calc(100dvh - 210px - var(--manager-dock-reserve, 0px));
   min-height: 620px;
   border: 1px solid #cbd5e1;
   border-radius: 12px;
@@ -254,7 +254,7 @@
 
 @media (max-width: 62em) {
   .canvasFrame {
-    height: calc(100dvh - 190px);
+    height: calc(100dvh - 190px - var(--manager-dock-reserve, 0px));
     min-height: 560px;
   }
 
@@ -278,12 +278,12 @@
 
 @media (max-width: 48em) {
   .pageRoot {
-    min-height: calc(100dvh - 72px);
+    min-height: calc(100dvh - 72px - var(--manager-dock-reserve, 0px));
   }
 
   .canvasFrame {
-    height: calc(100dvh - 176px);
-    min-height: 500px;
+    height: calc(100dvh - 176px - var(--manager-dock-reserve, 0px));
+    min-height: 480px;
   }
 
   .canvasViewport {

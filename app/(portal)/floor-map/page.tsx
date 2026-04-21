@@ -31,9 +31,18 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
+import { usePortalCompact } from "@/lib/use-portal-compact";
 import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { type DiningTable, type TableStatus } from "@/lib/types";
@@ -178,6 +187,8 @@ export default function FloorMapPage() {
     updateArea,
     deleteArea,
   } = useAppContext();
+  const isCompact = usePortalCompact();
+  const reserveManagerDock = currentUser?.role === "manager" && isCompact;
   const [activeAreaId, setActiveAreaId] = useState<string | null>(null);
   const [mode, setMode] = useState<CanvasMode>("view");
   const [search, setSearch] = useState("");
@@ -1183,11 +1194,18 @@ export default function FloorMapPage() {
   };
 
   return (
-    <Stack className={classes.pageRoot}>
-      <Group justify="space-between" align="end">
-        <div>
-          <PortalPageTitle>Sơ đồ nhà hàng</PortalPageTitle>
-          <Text c="dimmed">
+    <Stack
+      className={classes.pageRoot}
+      style={
+        reserveManagerDock
+          ? ({ ["--manager-dock-reserve" as string]: "58px" } as CSSProperties)
+          : undefined
+      }
+    >
+      <Group justify="space-between" align="end" wrap="wrap">
+        <div style={{ minWidth: 0 }}>
+          <PortalPageTitle order={isCompact ? 3 : 2}>Sơ đồ nhà hàng</PortalPageTitle>
+          <Text c="dimmed" size={isCompact ? "xs" : "sm"}>
             {isEditMode
               ? "Chỉnh sơ đồ trên lưới, rồi bấm Lưu sơ đồ để ghi xuống máy chủ — người khác sẽ thấy ngay sau khi lưu. Cuộn/chụm để zoom."
               : "Chạm bàn để đổi trạng thái. Kéo nền để xem sơ đồ, cuộn/chụm để zoom."}

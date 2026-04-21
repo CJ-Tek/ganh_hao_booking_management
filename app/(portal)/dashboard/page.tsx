@@ -3,6 +3,8 @@
 import dayjs from "dayjs";
 import {
   Badge,
+  Button,
+  Card,
   Grid,
   Group,
   RingProgress,
@@ -15,12 +17,14 @@ import { DataTable, type DataTableSortStatus } from "mantine-datatable";
 import { useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
+import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
-import { bookingStatusLabel, tableStatusLabel } from "@/lib/display";
+import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
 
 export default function DashboardPage() {
   const { state, filteredBranchIds } = useAppContext();
+  const isCompact = usePortalCompact();
   const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Booking>>({
     columnAccessor: "bookingAt",
     direction: "desc",
@@ -80,36 +84,40 @@ export default function DashboardPage() {
     [page, pageSize, sortedHistoryBookings]
   );
 
-  return (
-    <Stack>
-      <Group justify="space-between">
-        <div>
-          <PortalPageTitle>Dashboard tổng quan</PortalPageTitle>
-          <Text c="dimmed">Chi nhánh đang theo dõi: {branchNames.join(", ")}</Text>
-        </div>
-      </Group>
+  const historyTotalPages = Math.max(1, Math.ceil(sortedHistoryBookings.length / pageSize));
 
-      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }}>
-        <PortalSectionCard>
-          <Text size="sm" c="dimmed">
+  return (
+    <Stack gap="md">
+      <div>
+        <PortalPageTitle order={isCompact ? 3 : 2}>
+          {isCompact ? "Tổng quan" : "Dashboard tổng quan"}
+        </PortalPageTitle>
+        <Text c="dimmed" size={isCompact ? "xs" : "sm"}>
+          Chi nhánh: {branchNames.join(", ")}
+        </Text>
+      </div>
+
+      <SimpleGrid cols={{ base: 2, sm: 2, lg: 4 }} spacing={isCompact ? "sm" : "md"}>
+        <PortalSectionCard padding={isCompact ? "sm" : "md"}>
+          <Text size="xs" c="dimmed">
             Tổng booking
           </Text>
           <Title order={2}>{branchBookings.length}</Title>
         </PortalSectionCard>
-        <PortalSectionCard>
-          <Text size="sm" c="dimmed">
-            Booking check-in
+        <PortalSectionCard padding={isCompact ? "sm" : "md"}>
+          <Text size="xs" c="dimmed">
+            Đã check-in
           </Text>
           <Title order={2}>{checkedInCount}</Title>
         </PortalSectionCard>
-        <PortalSectionCard>
-          <Text size="sm" c="dimmed">
-            Bàn đang phục vụ
+        <PortalSectionCard padding={isCompact ? "sm" : "md"}>
+          <Text size="xs" c="dimmed">
+            Bàn phục vụ
           </Text>
           <Title order={2}>{statusCounts.occupied}</Title>
         </PortalSectionCard>
-        <PortalSectionCard>
-          <Text size="sm" c="dimmed">
+        <PortalSectionCard padding={isCompact ? "sm" : "md"}>
+          <Text size="xs" c="dimmed">
             Bàn trống
           </Text>
           <Title order={2}>{statusCounts.available}</Title>
@@ -118,12 +126,14 @@ export default function DashboardPage() {
 
       <Grid>
         <Grid.Col span={{ base: 12, lg: 4 }}>
-          <PortalSectionCard h="100%">
-            <Text fw={600}>Tỷ lệ bàn có khách</Text>
-            <Group mt="lg" justify="center">
+          <PortalSectionCard h="100%" padding={isCompact ? "sm" : "md"}>
+            <Text fw={600} size={isCompact ? "sm" : "md"}>
+              Bàn theo trạng thái
+            </Text>
+            <Group mt="md" justify="center">
               <RingProgress
-                size={180}
-                thickness={16}
+                size={isCompact ? 140 : 180}
+                thickness={isCompact ? 14 : 16}
                 sections={[
                   {
                     value:
@@ -134,13 +144,13 @@ export default function DashboardPage() {
                   },
                 ]}
                 label={
-                  <Text ta="center" fw={700} size="lg">
+                  <Text ta="center" fw={700} size={isCompact ? "md" : "lg"}>
                     {statusCounts.occupied}/{branchTables.length}
                   </Text>
                 }
               />
             </Group>
-            <Stack mt="lg" gap={4}>
+            <Stack mt="md" gap={6}>
               {Object.entries(statusCounts).map(([status, value]) => (
                 <Group key={status} justify="space-between">
                   <Text size="sm">{tableStatusLabel[status as keyof typeof statusCounts]}</Text>
@@ -151,48 +161,112 @@ export default function DashboardPage() {
           </PortalSectionCard>
         </Grid.Col>
         <Grid.Col span={{ base: 12, lg: 8 }}>
-          <PortalSectionCard>
-            <Text fw={600} mb="sm">
-              Lịch sử booking theo nhân viên
+          <PortalSectionCard padding={isCompact ? "sm" : "md"}>
+            <Text fw={600} mb="sm" size={isCompact ? "sm" : "md"}>
+              Booking gần đây
             </Text>
-            <DataTable
-              minHeight={260}
-              scrollAreaProps={portalDataTableScrollAreaProps}
-              withTableBorder
-              records={pagedHistoryBookings}
-              totalRecords={sortedHistoryBookings.length}
-              recordsPerPage={pageSize}
-              page={Math.min(page, Math.max(1, Math.ceil(sortedHistoryBookings.length / pageSize)))}
-              onPageChange={setPage}
-              sortStatus={sortStatus}
-              onSortStatusChange={(next) => {
-                setSortStatus(next);
-                setPage(1);
-              }}
-              noRecordsText="Chưa có booking nào."
-              columns={[
-                { accessor: "id", title: "Mã", sortable: true },
-                {
-                  accessor: "bookingAt",
-                  title: "Giờ đặt",
-                  sortable: true,
-                  render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
-                },
-                {
-                  accessor: "createdByUserId",
-                  title: "Người tạo",
-                  sortable: true,
-                  render: (booking) =>
-                    state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "Không rõ",
-                },
-                {
-                  accessor: "status",
-                  title: "Trạng thái",
-                  sortable: true,
-                  render: (booking) => <Badge variant="light">{bookingStatusLabel[booking.status]}</Badge>,
-                },
-              ]}
-            />
+            {isCompact ? (
+              <Stack gap="sm">
+                {pagedHistoryBookings.length === 0 ? (
+                  <Text c="dimmed" size="sm">
+                    Chưa có booking nào.
+                  </Text>
+                ) : (
+                  pagedHistoryBookings.map((booking) => {
+                    const creator =
+                      state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
+                      "Không rõ";
+                    return (
+                      <Card key={booking.id} withBorder radius="md" padding="sm">
+                        <Group justify="space-between" align="flex-start" wrap="nowrap">
+                          <Stack gap={4} style={{ minWidth: 0 }}>
+                            <Text size="xs" c="dimmed">
+                              Mã {booking.id}
+                            </Text>
+                            <Text size="sm" fw={600}>
+                              {dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}
+                            </Text>
+                            <Text size="xs" c="dimmed" lineClamp={1}>
+                              Tạo bởi {creator}
+                            </Text>
+                          </Stack>
+                          <Badge color={bookingStatusColor[booking.status]} variant="light">
+                            {bookingStatusLabel[booking.status]}
+                          </Badge>
+                        </Group>
+                      </Card>
+                    );
+                  })
+                )}
+                {sortedHistoryBookings.length > pageSize ? (
+                  <Group justify="center" gap="xs">
+                    <Button
+                      variant="default"
+                      size="compact-sm"
+                      disabled={page <= 1}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    >
+                      Trước
+                    </Button>
+                    <Text size="sm" c="dimmed">
+                      {page}/{historyTotalPages}
+                    </Text>
+                    <Button
+                      variant="default"
+                      size="compact-sm"
+                      disabled={page >= historyTotalPages}
+                      onClick={() => setPage((p) => Math.min(historyTotalPages, p + 1))}
+                    >
+                      Sau
+                    </Button>
+                  </Group>
+                ) : null}
+              </Stack>
+            ) : (
+              <DataTable
+                minHeight={260}
+                scrollAreaProps={portalDataTableScrollAreaProps}
+                withTableBorder
+                records={pagedHistoryBookings}
+                totalRecords={sortedHistoryBookings.length}
+                recordsPerPage={pageSize}
+                page={Math.min(page, historyTotalPages)}
+                onPageChange={setPage}
+                sortStatus={sortStatus}
+                onSortStatusChange={(next) => {
+                  setSortStatus(next);
+                  setPage(1);
+                }}
+                noRecordsText="Chưa có booking nào."
+                columns={[
+                  { accessor: "id", title: "Mã", sortable: true },
+                  {
+                    accessor: "bookingAt",
+                    title: "Giờ đặt",
+                    sortable: true,
+                    render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+                  },
+                  {
+                    accessor: "createdByUserId",
+                    title: "Người tạo",
+                    sortable: true,
+                    render: (booking) =>
+                      state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
+                      "Không rõ",
+                  },
+                  {
+                    accessor: "status",
+                    title: "Trạng thái",
+                    sortable: true,
+                    render: (booking) => (
+                      <Badge color={bookingStatusColor[booking.status]} variant="light">
+                        {bookingStatusLabel[booking.status]}
+                      </Badge>
+                    ),
+                  },
+                ]}
+              />
+            )}
           </PortalSectionCard>
         </Grid.Col>
       </Grid>
