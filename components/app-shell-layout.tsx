@@ -92,7 +92,46 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     logout,
     markNotificationRead,
     hasSupabase,
+    realtimeStatus,
   } = useAppContext();
+  const realtimeBadge = useMemo(() => {
+    if (!hasSupabase) {
+      return null;
+    }
+    if (typeof window !== "undefined" && !window.navigator.onLine) {
+      return (
+        <Badge color="gray" variant="light">
+          Offline
+        </Badge>
+      );
+    }
+    if (realtimeStatus === "connected") {
+      return (
+        <Badge color="green" variant="light">
+          Realtime
+        </Badge>
+      );
+    }
+    if (realtimeStatus === "connecting") {
+      return (
+        <Badge color="yellow" variant="light">
+          Đang kết nối
+        </Badge>
+      );
+    }
+    if (realtimeStatus === "error") {
+      return (
+        <Badge color="red" variant="light">
+          Lỗi realtime
+        </Badge>
+      );
+    }
+    return (
+      <Badge color="gray" variant="light">
+        Không kết nối
+      </Badge>
+    );
+  }, [hasSupabase, realtimeStatus]);
 
   /** All branches this account may switch to (header); data scope uses `filteredBranchIds` only. */
   const branchSwitcherOptions = useMemo(
@@ -167,7 +206,10 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             <Burger opened={opened} onClick={toggle} hiddenFrom="md" size="sm" />
             <Image src="/logo/horizontal.png" alt="Logo Gành Hào" h={34} w="auto" />
             <Stack gap={0} className={classes.brandCopy}>
-              <Title order={5}>Hệ thống quản lý đặt bàn</Title>
+              <Group gap={6} wrap="nowrap">
+                <Title order={5}>Hệ thống quản lý đặt bàn</Title>
+                {realtimeBadge}
+              </Group>
               <Text size="xs" c="dimmed">
                 {portalLabel}
               </Text>

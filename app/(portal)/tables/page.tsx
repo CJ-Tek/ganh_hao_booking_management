@@ -1,12 +1,16 @@
 "use client";
 
 import {
+  ActionIcon,
   Badge,
   Button,
   Card,
+  Collapse,
   Group,
+  Modal,
   MultiSelect,
   NumberInput,
+  Paper,
   Select,
   SimpleGrid,
   Stack,
@@ -16,6 +20,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { DataTable, type DataTableSortStatus } from "mantine-datatable";
+import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
@@ -24,6 +29,8 @@ import { getAreaSeatBudget } from "@/lib/area-capacity";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type DiningTable, TableStatus } from "@/lib/types";
+
+type BatchSeatGroup = { count: number; seats: number };
 
 function branchScopeKey(branchIds: string[]) {
   return [...branchIds].sort().join("|") || "none";
@@ -46,10 +53,9 @@ function TablesPageContent() {
 
   const isCompact = usePortalCompact();
   const [batchToolsOpen, setBatchToolsOpen] = useState(false);
+  const [stickyStatsOpen, setStickyStatsOpen] = useState(true);
 
   const branchId = filteredBranchIds[0] ?? "";
-  const branchName =
-    branchId ? state.branches.find((b) => b.id === branchId)?.name ?? "—" : "—";
 
   const [areaId, setAreaId] = useState("");
   const [activeTab, setActiveTab] = useState<string | null>("single");
@@ -58,9 +64,12 @@ function TablesPageContent() {
   const [singleSeats, setSingleSeats] = useState<number>(4);
 
   const [batchPrefix, setBatchPrefix] = useState("Bàn");
-  const [batchCount, setBatchCount] = useState<number>(24);
   const [batchStart, setBatchStart] = useState<number>(1);
-  const [batchSeats, setBatchSeats] = useState<number>(2);
+  const [batchGroups, setBatchGroups] = useState<BatchSeatGroup[]>([
+    { count: 4, seats: 2 },
+    { count: 3, seats: 4 },
+    { count: 2, seats: 5 },
+  ]);
 
   const [removeIds, setRemoveIds] = useState<string[]>([]);
   const [removeBySeats, setRemoveBySeats] = useState<number>(2);
@@ -97,13 +106,17 @@ function TablesPageContent() {
     [areaId, state.areas, state.tables]
   );
 
-  const maxBatchTablesByCapacity = useMemo(() => {
-    if (!areaSeatBudget) {
-      return undefined;
-    }
-    const perTable = Math.max(1, Number(batchSeats || 1));
-    return Math.floor(areaSeatBudget.remaining / perTable);
-  }, [areaSeatBudget, batchSeats]);
+  const batchPlan = useMemo(() => {
+    const groups = batchGroups
+      .map((g) => ({
+        count: Math.max(0, Math.floor(Number(g.count) || 0)),
+        seats: Math.max(1, Math.floor(Number(g.seats) || 1)),
+      }))
+      .filter((g) => g.count > 0);
+    const tableCount = groups.reduce((s, g) => s + g.count, 0);
+    const seatTotal = groups.reduce((s, g) => s + g.count * g.seats, 0);
+    return { groups, tableCount, seatTotal };
+  }, [batchGroups]);
 
   const baseRecords = useMemo(
     () =>
@@ -112,6 +125,11 @@ function TablesPageContent() {
         .filter((table) => (!branchId || table.branchId === branchId))
         .filter((table) => (!areaId || table.areaId === areaId)),
     [areaId, branchId, filteredBranchIds, state.tables]
+  );
+
+  const availableTableCount = useMemo(
+    () => baseRecords.filter((item) => item.status === "available").length,
+    [baseRecords]
   );
 
   const filteredRecords = useMemo(() => {
@@ -212,34 +230,48 @@ function TablesPageContent() {
       notifications.show({ color: "red", message: "Vui lòng chọn phạm vi thao tác và tiền tố tên bàn." });
       return;
     }
-    const quantity = Math.max(1, Number(batchCount || 1));
     const start = Math.max(1, Number(batchStart || 1));
-    const seatsPer = Math.max(1, Number(batchSeats || 1));
-    if (areaSeatBudget) {
-      const need = quantity * seatsPer;
-      if (need > areaSeatBudget.remaining) {
-        const maxQty = Math.floor(areaSeatBudget.remaining / seatsPer);
-        notifications.show({
-          color: "red",
-          message:
-            maxQty <= 0
-              ? `Không đủ sức chứa khu: còn ${areaSeatBudget.remaining} chỗ (${areaSeatBudget.used}/${areaSeatBudget.capacity} đã dùng).`
-              : `Vượt sức chứa khu: tối đa ${maxQty} bàn × ${seatsPer} ghế (còn ${areaSeatBudget.remaining} chỗ).`,
+    const { groups, tableCount, seatTotal } = batchPlan;
+    if (groups.length === 0) {
+      notifications.show({
+        color: "red",
+        message: "Thêm ít nhất một nhóm với số bàn > 0.",
+      });
+      return;
+    }
+    if (areaSeatBudget && seatTotal > areaSeatBudget.remaining) {
+      notifications.show({
+        color: "red",
+        message: `Vượt sức chứa khu: cần ${seatTotal} ghế nhưng còn ${areaSeatBudget.remaining} (${areaSeatBudget.used}/${areaSeatBudget.capacity} đã dùng).`,
+      });
+      return;
+    }
+    let nextNum = start;
+    const payload: Array<{
+      branchId: string;
+      areaId: string;
+      name: string;
+      seats: number;
+      status: "available";
+      positionX: number;
+      positionY: number;
+    }> = [];
+    for (const g of groups) {
+      for (let i = 0; i < g.count; i++) {
+        payload.push({
+          branchId,
+          areaId,
+          name: `${batchPrefix.trim()} ${nextNum}`,
+          seats: g.seats,
+          status: "available",
+          positionX: 0,
+          positionY: 0,
         });
-        return;
+        nextNum++;
       }
     }
-    const payload = Array.from({ length: quantity }, (_, index) => ({
-      branchId,
-      areaId,
-      name: `${batchPrefix.trim()} ${start + index}`,
-      seats: seatsPer,
-      status: "available" as const,
-      positionX: 0,
-      positionY: 0,
-    }));
     await upsertTablesBatch(payload);
-    notifications.show({ color: "green", message: `Đã thêm ${quantity} bàn mới.` });
+    notifications.show({ color: "green", message: `Đã thêm ${tableCount} bàn mới.` });
   };
 
   const handlePickRemovalsByRule = () => {
@@ -383,49 +415,114 @@ function TablesPageContent() {
       </Tabs.Panel>
 
       <Tabs.Panel value="batch-add" pt="md">
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 5 }} spacing="sm">
-          <TextInput
-            label="Tiền tố tên bàn"
-            value={batchPrefix}
-            onChange={(event) => setBatchPrefix(event.currentTarget.value)}
-            size={isCompact ? "md" : "sm"}
-          />
-          <NumberInput
-            label="Số lượng"
-            min={1}
-            max={maxBatchTablesByCapacity !== undefined && maxBatchTablesByCapacity > 0
-              ? maxBatchTablesByCapacity
-              : undefined}
-            value={batchCount}
-            onChange={(value) => setBatchCount(Number(value || 1))}
-            size={isCompact ? "md" : "sm"}
-          />
-          <NumberInput
-            label="Bắt đầu từ số"
-            min={1}
-            value={batchStart}
-            onChange={(value) => setBatchStart(Number(value || 1))}
-            size={isCompact ? "md" : "sm"}
-          />
-          <NumberInput
-            label="Số ghế"
-            min={1}
-            value={batchSeats}
-            onChange={(value) => setBatchSeats(Number(value || 1))}
-            size={isCompact ? "md" : "sm"}
-          />
+        <Stack gap="md">
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+            <TextInput
+              label="Tiền tố tên bàn"
+              value={batchPrefix}
+              onChange={(event) => setBatchPrefix(event.currentTarget.value)}
+              size={isCompact ? "md" : "sm"}
+            />
+            <NumberInput
+              label="Bắt đầu từ số"
+              min={1}
+              value={batchStart}
+              onChange={(value) => setBatchStart(Number(value || 1))}
+              size={isCompact ? "md" : "sm"}
+            />
+          </SimpleGrid>
+          <div>
+            <Text size="sm" fw={600}>
+              Nhóm bàn
+            </Text>
+            <Text size="xs" c="dimmed">
+              Mỗi dòng: số bàn và số ghế mỗi bàn (ví dụ 6 bàn × 2 ghế, rồi 4 bàn × 4 ghế). Tên bàn tăng dần
+              theo thứ tự nhóm.
+            </Text>
+          </div>
+          <Stack gap="xs">
+            {batchGroups.map((row, index) => (
+              <Group key={index} align="flex-end" wrap="nowrap" gap="sm">
+                <NumberInput
+                  label={index === 0 ? "Số bàn" : undefined}
+                  placeholder="0"
+                  min={0}
+                  value={row.count}
+                  onChange={(value) =>
+                    setBatchGroups((prev) =>
+                      prev.map((g, i) =>
+                        i === index ? { ...g, count: Math.max(0, Number(value ?? 0)) } : g
+                      )
+                    )
+                  }
+                  style={{ flex: 1 }}
+                  size={isCompact ? "md" : "sm"}
+                />
+                <NumberInput
+                  label={index === 0 ? "Ghế / bàn" : undefined}
+                  min={1}
+                  value={row.seats}
+                  onChange={(value) =>
+                    setBatchGroups((prev) =>
+                      prev.map((g, i) =>
+                        i === index ? { ...g, seats: Math.max(1, Number(value ?? 1)) } : g
+                      )
+                    )
+                  }
+                  style={{ flex: 1 }}
+                  size={isCompact ? "md" : "sm"}
+                />
+                <ActionIcon
+                  variant="light"
+                  color="red"
+                  aria-label="Xóa nhóm"
+                  disabled={batchGroups.length <= 1}
+                  size={isCompact ? "lg" : "md"}
+                  onClick={() =>
+                    setBatchGroups((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)))
+                  }
+                >
+                  <Trash2 size={18} />
+                </ActionIcon>
+              </Group>
+            ))}
+          </Stack>
           <Button
-            mt={{ base: 0, lg: 26 }}
+            variant="light"
+            leftSection={<Plus size={18} />}
+            size={isCompact ? "md" : "sm"}
+            onClick={() => setBatchGroups((prev) => [...prev, { count: 1, seats: 4 }])}
+          >
+            Thêm nhóm
+          </Button>
+          {batchPlan.tableCount > 0 ? (
+            <Text size="sm" c="dimmed">
+              Tổng dự kiến: {batchPlan.tableCount} bàn · {batchPlan.seatTotal} ghế
+              {areaSeatBudget && batchPlan.seatTotal > areaSeatBudget.remaining ? (
+                <Text span c="red" fw={600}>
+                  {" "}
+                  (vượt sức chứa còn lại)
+                </Text>
+              ) : null}
+            </Text>
+          ) : (
+            <Text size="sm" c="dimmed">
+              Nhập ít nhất một dòng có số bàn lớn hơn 0.
+            </Text>
+          )}
+          <Button
             disabled={Boolean(
               areaSeatBudget &&
                 (areaSeatBudget.remaining <= 0 ||
-                  (maxBatchTablesByCapacity !== undefined && maxBatchTablesByCapacity <= 0))
+                  batchPlan.tableCount === 0 ||
+                  batchPlan.seatTotal > areaSeatBudget.remaining)
             )}
+            size={isCompact ? "md" : "sm"}
             onClick={() => void handleBatchAdd()}
           >
             Thêm hàng loạt
           </Button>
-        </SimpleGrid>
+        </Stack>
       </Tabs.Panel>
 
       <Tabs.Panel value="batch-remove" pt="md">
@@ -485,29 +582,11 @@ function TablesPageContent() {
       </PortalPageTitle>
 
       <PortalStickyPanel>
-        <Stack gap="sm">
-          {!isCompact ? (
-            <Text size="sm" c="dimmed">
-              1) Chọn phạm vi thao tác, 2) dùng tab để thêm/xóa hàng loạt, 3) kiểm soát danh sách bàn bên dưới.
-            </Text>
-          ) : null}
-          <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
-            <Stack gap={4}>
-              <Text size="xs" fw={600}>
-                Chi nhánh
-              </Text>
-              <Text size="sm" c="dimmed">
-                {branchName}
-              </Text>
-            </Stack>
+        <Stack gap="md">
+          <Group align="flex-end" gap="sm" wrap="nowrap">
             <Select
               label="Khu vực"
               placeholder="Chọn khu"
-              description={
-                areaSeatBudget
-                  ? `Sức chứa khu: ${areaSeatBudget.capacity} chỗ tối đa · ${areaSeatBudget.used} đã gán ghế trên bàn · ${areaSeatBudget.remaining} còn lại`
-                  : "Chọn khu để xem sức chứa và thêm bàn"
-              }
               value={areaId}
               onChange={(value) => {
                 setAreaId(value ?? "");
@@ -515,30 +594,112 @@ function TablesPageContent() {
               }}
               data={areas.map((area) => ({ value: area.id, label: area.name }))}
               size={isCompact ? "md" : "sm"}
+              style={{ flex: 1, minWidth: 0 }}
             />
-            <TextInput
-              label="Tổng bàn (phạm vi)"
-              value={String(baseRecords.length)}
-              readOnly
-              size={isCompact ? "md" : "sm"}
-            />
-            <TextInput
-              label="Bàn trống"
-              value={String(baseRecords.filter((item) => item.status === "available").length)}
-              readOnly
-              size={isCompact ? "md" : "sm"}
-            />
-          </SimpleGrid>
+            <ActionIcon
+              variant="default"
+              size={isCompact ? "xl" : "lg"}
+              aria-label={stickyStatsOpen ? "Thu gọn chỉ số" : "Mở rộng chỉ số"}
+              onClick={() => setStickyStatsOpen((open) => !open)}
+            >
+              {stickyStatsOpen ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+            </ActionIcon>
+          </Group>
+          <Collapse expanded={stickyStatsOpen}>
+            <Stack gap="md">
+              {!isCompact ? (
+                <Text size="sm" c="dimmed">
+                  1) Chọn phạm vi thao tác, 2) dùng tab để thêm/xóa hàng loạt, 3) kiểm soát danh sách
+                  bàn bên dưới.
+                </Text>
+              ) : null}
+              <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+                <Paper withBorder radius="md" p="md" shadow="xs">
+                  <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb={6}>
+                    Tổng bàn
+                  </Text>
+                  <Text size="xl" fw={800} lh={1.15}>
+                    {baseRecords.length}
+                  </Text>
+                  <Text size="xs" c="dimmed" mt={6}>
+                    {areaId ? "Trong khu đã chọn" : "Toàn chi nhánh (chưa chọn khu)"}
+                  </Text>
+                </Paper>
+                <Paper withBorder radius="md" p="md" shadow="xs">
+                  <Text size="xs" c="dimmed" tt="uppercase" fw={600} mb={6}>
+                    Bàn trống
+                  </Text>
+                  <Text size="xl" fw={800} lh={1.15} c="green">
+                    {availableTableCount}
+                  </Text>
+                  <Text size="xs" c="dimmed" mt={6}>
+                    Trạng thái sẵn sàng
+                  </Text>
+                </Paper>
+              </SimpleGrid>
+              {areaSeatBudget ? (
+                <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="xs">
+                  <Paper withBorder radius="sm" p="sm" bg="var(--mantine-color-default-hover)">
+                    <Text size="xs" c="dimmed" mb={4}>
+                      Sức chứa tối đa
+                    </Text>
+                    <Text fw={700} size="md">
+                      {areaSeatBudget.capacity}
+                      <Text span size="xs" c="dimmed" fw={400}>
+                        {" "}
+                        chỗ
+                      </Text>
+                    </Text>
+                  </Paper>
+                  <Paper withBorder radius="sm" p="sm" bg="var(--mantine-color-default-hover)">
+                    <Text size="xs" c="dimmed" mb={4}>
+                      Đã gán trên bàn
+                    </Text>
+                    <Text fw={700} size="md">
+                      {areaSeatBudget.used}
+                      <Text span size="xs" c="dimmed" fw={400}>
+                        {" "}
+                        ghế
+                      </Text>
+                    </Text>
+                  </Paper>
+                  <Paper withBorder radius="sm" p="sm" bg="var(--mantine-color-default-hover)">
+                    <Text size="xs" c="dimmed" mb={4}>
+                      Còn lại
+                    </Text>
+                    <Text fw={700} size="md" c={areaSeatBudget.remaining <= 0 ? "red" : undefined}>
+                      {areaSeatBudget.remaining}
+                      <Text span size="xs" c="dimmed" fw={400}>
+                        {" "}
+                        chỗ
+                      </Text>
+                    </Text>
+                  </Paper>
+                </SimpleGrid>
+              ) : (
+                <Text size="xs" c="dimmed">
+                  Chọn khu vực để xem sức chứa và ngân sách ghế.
+                </Text>
+              )}
+            </Stack>
+          </Collapse>
         </Stack>
       </PortalStickyPanel>
 
       {isCompact ? (
-        <Stack gap="sm">
-          <Button variant="light" onClick={() => setBatchToolsOpen((o) => !o)}>
-            {batchToolsOpen ? "Ẩn công cụ thêm / xóa nhiều bàn" : "Thêm hoặc xóa nhiều bàn"}
+        <>
+          <Button variant="light" onClick={() => setBatchToolsOpen(true)}>
+            Thêm hoặc xóa nhiều bàn
           </Button>
-          {batchToolsOpen ? <PortalSectionCard>{batchTabs}</PortalSectionCard> : null}
-        </Stack>
+          <Modal
+            opened={batchToolsOpen}
+            onClose={() => setBatchToolsOpen(false)}
+            title="Thêm hoặc xóa nhiều bàn"
+            size="lg"
+          >
+            {batchTabs}
+          </Modal>
+        </>
       ) : (
         <PortalSectionCard>{batchTabs}</PortalSectionCard>
       )}
