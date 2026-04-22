@@ -17,7 +17,7 @@ export const seedUsers: AppUser[] = [
     password: "123456",
     fullName: "Quản trị hệ thống",
     role: "admin",
-    branchIds: ["cn-1", "cn-2"],
+    branchIds: ["cn-1", "cn-2", "cn-3"],
   },
   {
     id: "u-gm",
@@ -25,7 +25,7 @@ export const seedUsers: AppUser[] = [
     password: "123456",
     fullName: "Quản lý tổng",
     role: "general_manager",
-    branchIds: ["cn-1", "cn-2"],
+    branchIds: ["cn-1", "cn-2", "cn-3"],
   },
   {
     id: "u-mgr-1",
@@ -43,6 +43,14 @@ export const seedUsers: AppUser[] = [
     role: "manager",
     branchIds: ["cn-2"],
   },
+  {
+    id: "u-mgr-3",
+    username: "manager-3",
+    password: "123456",
+    fullName: "Quản lý Gành Hào 3",
+    role: "manager",
+    branchIds: ["cn-3"],
+  },
 ];
 
 export const seedBranches: Branch[] = [
@@ -55,6 +63,11 @@ export const seedBranches: Branch[] = [
     id: "cn-2",
     name: "Gành Hào Hồ Chí Minh",
     address: "12 Nguyễn Hữu Cảnh, Bình Thạnh",
+  },
+  {
+    id: "cn-3",
+    name: "Gành Hào Chi nhánh 3",
+    address: "Chưa cập nhật",
   },
 ];
 

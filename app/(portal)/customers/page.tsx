@@ -7,11 +7,12 @@ import {
   Card,
   Drawer,
   Group,
+  SegmentedControl,
   Stack,
   Text,
   TextInput,
 } from "@mantine/core";
-import { DataTable } from "mantine-datatable";
+import { DataTable, type DataTableSortStatus } from "mantine-datatable";
 import { Phone } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
@@ -24,13 +25,22 @@ import { Customer } from "@/lib/types";
 const LIST_PAGE_SIZE = 10;
 const DRAWER_BOOKING_PAGE_SIZE = 8;
 
+type CustomerFilter = "all" | "has_booking" | "no_booking";
+type CustomerRow = Customer & { bookingCount: number; latestBooking?: string };
+
 export default function CustomersPage() {
-  const { state, filteredBranchIds } = useAppContext();
+  const { state, filteredBranchIds, deleteCustomers } = useAppContext();
   const isCompact = usePortalCompact();
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<CustomerFilter>("all");
   const [listPage, setListPage] = useState(1);
   const [drawerBookingPage, setDrawerBookingPage] = useState(1);
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null);
+  const [selectedCustomers, setSelectedCustomers] = useState<CustomerRow[]>([]);
+  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<CustomerRow>>({
+    columnAccessor: "latestBooking",
+    direction: "desc",
+  });
 
   const customerStats = useMemo(
     () =>
@@ -52,9 +62,38 @@ export default function CustomersPage() {
           (item) =>
             item.fullName.toLowerCase().includes(query.toLowerCase()) ||
             item.phone.includes(query)
-        ),
-    [filteredBranchIds, query, state.bookings, state.customers]
+        )
+        .filter((item) => {
+          if (filter === "has_booking") return item.bookingCount > 0;
+          if (filter === "no_booking") return item.bookingCount === 0;
+          return true;
+        }),
+    [filteredBranchIds, filter, query, state.bookings, state.customers]
   );
+
+  const sortedCustomerStats = useMemo(() => {
+    const dir = sortStatus.direction === "asc" ? 1 : -1;
+    const accessor = sortStatus.columnAccessor;
+    const next = [...customerStats];
+    next.sort((a, b) => {
+      if (accessor === "fullName") {
+        return dir * a.fullName.localeCompare(b.fullName, "vi");
+      }
+      if (accessor === "phone") {
+        return dir * a.phone.localeCompare(b.phone, "vi");
+      }
+      if (accessor === "bookingCount") {
+        return dir * (a.bookingCount - b.bookingCount);
+      }
+      if (accessor === "latestBooking") {
+        const av = a.latestBooking ? dayjs(a.latestBooking).valueOf() : 0;
+        const bv = b.latestBooking ? dayjs(b.latestBooking).valueOf() : 0;
+        return dir * (av - bv);
+      }
+      return 0;
+    });
+    return next;
+  }, [customerStats, sortStatus.columnAccessor, sortStatus.direction]);
 
   const listTotalPages = Math.max(1, Math.ceil(customerStats.length / LIST_PAGE_SIZE));
   const listPageSafe = Math.min(listPage, listTotalPages);
@@ -100,15 +139,62 @@ export default function CustomersPage() {
         {isCompact ? "Khách hàng" : "Quản lý khách hàng"}
       </PortalPageTitle>
       <PortalStickyPanel>
-        <TextInput
-          placeholder="Tìm tên hoặc SĐT"
-          value={query}
-          onChange={(event) => {
-            setQuery(event.currentTarget.value);
-            setListPage(1);
-          }}
-          size={isCompact ? "md" : "sm"}
-        />
+        <Group gap="sm" wrap="wrap" align="flex-end">
+          <TextInput
+            placeholder="Tìm tên hoặc SĐT"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.currentTarget.value);
+              setListPage(1);
+            }}
+            size={isCompact ? "md" : "sm"}
+            style={{ flex: 1, minWidth: 240 }}
+          />
+          {!isCompact ? (
+            <>
+              <SegmentedControl
+                value={filter}
+                onChange={(value) => {
+                  setFilter(value as CustomerFilter);
+                  setListPage(1);
+                  setSelectedCustomers([]);
+                }}
+                data={[
+                  { label: "Tất cả", value: "all" },
+                  { label: "Có booking", value: "has_booking" },
+                  { label: "Chưa có booking", value: "no_booking" },
+                ]}
+                size="sm"
+              />
+              <Button
+                color="red"
+                variant="light"
+                size="sm"
+                disabled={selectedCustomers.length === 0}
+                onClick={async () => {
+                  const ids = selectedCustomers.map((c) => c.id);
+                  const hasBooking = state.bookings.some((b) => ids.includes(b.customerId));
+                  if (hasBooking) {
+                    window.alert("Không thể xóa: có khách hàng đã có booking.");
+                    return;
+                  }
+                  const ok = window.confirm(
+                    `Xóa ${selectedCustomers.length} khách hàng? (Chỉ xóa khách chưa có booking)`
+                  );
+                  if (!ok) return;
+                  const result = await deleteCustomers(ids);
+                  if (!result.ok) {
+                    window.alert(result.message);
+                    return;
+                  }
+                  setSelectedCustomers([]);
+                }}
+              >
+                Xóa ({selectedCustomers.length})
+              </Button>
+            </>
+          ) : null}
+        </Group>
       </PortalStickyPanel>
       {isCompact ? (
         <Stack gap="sm">
@@ -188,19 +274,25 @@ export default function CustomersPage() {
             minHeight={260}
             scrollAreaProps={portalDataTableScrollAreaProps}
             withTableBorder
-            records={customerStats}
+            idAccessor="id"
+            records={sortedCustomerStats}
             noRecordsText="Không tìm thấy khách hàng phù hợp."
             onRowClick={({ record }) => {
               setDrawerBookingPage(1);
               setSelectedCustomer(record);
             }}
+            selectedRecords={selectedCustomers}
+            onSelectedRecordsChange={setSelectedCustomers}
+            sortStatus={sortStatus}
+            onSortStatusChange={setSortStatus}
             columns={[
-              { accessor: "fullName", title: "Khách hàng" },
-              { accessor: "phone", title: "Điện thoại" },
-              { accessor: "bookingCount", title: "Số booking" },
+              { accessor: "fullName", title: "Khách hàng", sortable: true },
+              { accessor: "phone", title: "Điện thoại", sortable: true },
+              { accessor: "bookingCount", title: "Số booking", sortable: true },
               {
                 accessor: "latestBooking",
                 title: "Booking gần nhất",
+                sortable: true,
                 render: (row) =>
                   row.latestBooking ? dayjs(row.latestBooking).format("DD/MM/YYYY HH:mm") : "-",
               },

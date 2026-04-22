@@ -34,6 +34,7 @@ import {
   markNotificationReadInSupabase,
   deleteTableInSupabase,
   deleteTablesInSupabase,
+  deleteCustomersInSupabase,
   renewFloorLayoutLockInSupabase,
   releaseFloorLayoutLockInSupabase,
   type SaveFloorLayoutInput,
@@ -94,6 +95,7 @@ interface AppContextValue {
   createBooking: (input: CreateBookingInput) => Promise<ActionResult>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   checkInBooking: (bookingId: string) => Promise<void>;
+  deleteCustomers: (customerIds: string[]) => Promise<ActionResult>;
   upsertTable: (table: Omit<DiningTable, "id"> & { id?: string }) => Promise<void>;
   upsertTablesBatch: (tables: Array<Omit<DiningTable, "id"> & { id?: string }>) => Promise<void>;
   deleteTable: (tableId: string) => Promise<void>;
@@ -360,6 +362,29 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return;
     }
     await checkInBookingInSupabase(bookingId);
+  };
+
+  const deleteCustomers = async (customerIds: string[]) => {
+    const ids = customerIds.filter((id) => id.trim().length > 0);
+    if (ids.length === 0) {
+      return { ok: true, message: "Khong co khach hang de xoa." };
+    }
+
+    const hasBooking = state.bookings.some((b) => ids.includes(b.customerId));
+    if (hasBooking) {
+      return { ok: false, message: "Khong the xoa: khach hang da co booking." };
+    }
+
+    if (!hasSupabase) {
+      setState((prev) => ({
+        ...prev,
+        customers: prev.customers.filter((c) => !ids.includes(c.id)),
+      }));
+      return { ok: true, message: "Da xoa khach hang." };
+    }
+
+    const result = await deleteCustomersInSupabase(ids);
+    return result;
   };
 
   const upsertTable = async (table: Omit<DiningTable, "id"> & { id?: string }) => {
@@ -1002,6 +1027,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     createBooking,
     updateBookingStatus,
     checkInBooking,
+    deleteCustomers,
     upsertTable,
     upsertTablesBatch,
     deleteTable,

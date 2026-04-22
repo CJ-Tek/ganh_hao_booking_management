@@ -281,6 +281,32 @@ export async function updateBookingStatusInSupabase(
   await client.from("bookings").update({ status }).eq("id", bookingId);
 }
 
+export async function deleteCustomersInSupabase(customerIds: string[]): Promise<Result> {
+  const client = ensureClient();
+  const ids = customerIds.filter((id) => id.trim().length > 0);
+  if (ids.length === 0) {
+    return { ok: true, message: "Khong co khach hang de xoa." };
+  }
+
+  const { data: bookingRefs, error: bookingRefsError } = await client
+    .from("bookings")
+    .select("id, customer_id")
+    .in("customer_id", ids)
+    .limit(1);
+  if (bookingRefsError) {
+    return { ok: false, message: bookingRefsError.message };
+  }
+  if (bookingRefs && bookingRefs.length > 0) {
+    return { ok: false, message: "Khong the xoa: khach hang da co booking." };
+  }
+
+  const { error } = await client.from("customers").delete().in("id", ids);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  return { ok: true, message: "Da xoa khach hang." };
+}
+
 export async function checkInBookingInSupabase(bookingId: string): Promise<void> {
   const client = ensureClient();
   const { data: target } = await client
