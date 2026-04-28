@@ -18,7 +18,7 @@ import {
   setBranchPickRequired,
   shouldPickBranchOnLogin,
 } from "@/lib/branch-pick";
-import { initialState } from "@/lib/mock-data";
+import { initialState } from "@/lib/initial-state";
 import {
   addAreaInSupabase,
   addUserInSupabase,
@@ -50,7 +50,6 @@ import {
   upsertTablesBatchInSupabase,
 } from "@/lib/supabase-store";
 import { supabase } from "@/lib/supabase";
-import { isFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
 import {
   AppStateSnapshot,
   AppUser,
@@ -183,7 +182,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const [state, setState] = useState<AppStateSnapshot>(initialState);
   const [isLoading, setIsLoading] = useState(true);
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeConnectionStatus>(() =>
-    isSupabaseEnabled() ? "connecting" : "disconnected"
+    isSupabaseEnabled() ? "connected" : "disconnected"
   );
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     if (typeof window === "undefined") {
@@ -247,6 +246,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }));
   }, [hasSupabase, currentUser]);
 
+  const lastReloadAtRef = useRef<number>(0);
+  const reloadInFlightRef = useRef(false);
+
   useEffect(() => {
     const run = async () => {
       try {
@@ -257,6 +259,28 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     };
     void run();
   }, [reload]);
+
+  useEffect(() => {
+    if (!hasSupabase || !supabase) {
+      return;
+    }
+
+    let cancelled = false;
+    const interval = setInterval(() => {
+      if (cancelled) return;
+      if (reloadInFlightRef.current) return;
+      reloadInFlightRef.current = true;
+      lastReloadAtRef.current = Date.now();
+      Promise.resolve(reload()).finally(() => {
+        reloadInFlightRef.current = false;
+      });
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [hasSupabase, reload]);
 
   useEffect(() => {
     if (currentUser) {
@@ -343,11 +367,61 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return { ok: false, message: "Chua ket noi Supabase. Vui long cau hinh .env.local." };
     }
 
-    const result = await createBookingInSupabase({
-      ...input,
-      createdByUserId: currentUser.id,
-    });
-    return result;
+    // Optimistic: immediately reflect the most visible effect (table becomes "hold")
+    // so UI updates without waiting for the next polling reload.
+    const tableBefore = state.tables.find((t) => t.id === input.tableId);
+    if (tableBefore) {
+      setState((prev) => ({
+        ...prev,
+        tables: prev.tables.map((t) =>
+          t.id === input.tableId ? { ...t, status: "hold" } : t
+        ),
+      }));
+    }
+
+    try {
+      const result = await createBookingInSupabase({
+        ...input,
+        createdByUserId: currentUser.id,
+      });
+
+      if (!result.ok && tableBefore) {
+        setState((prev) => ({
+          ...prev,
+          tables: prev.tables.map((t) =>
+            t.id === tableBefore.id ? { ...t, status: tableBefore.status } : t
+          ),
+        }));
+      }
+
+      // Pull a fresh snapshot immediately so the new booking/customer appears without
+      // waiting for the 5s polling tick (still no browser refresh).
+      if (result.ok) {
+        if (!reloadInFlightRef.current) {
+          reloadInFlightRef.current = true;
+          lastReloadAtRef.current = Date.now();
+          try {
+            await reload();
+          } finally {
+            reloadInFlightRef.current = false;
+          }
+        } else {
+          // If a poll reload is already in flight, skip; next tick/snapshot will include it.
+        }
+      }
+
+      return result;
+    } catch (error) {
+      if (tableBefore) {
+        setState((prev) => ({
+          ...prev,
+          tables: prev.tables.map((t) =>
+            t.id === tableBefore.id ? { ...t, status: tableBefore.status } : t
+          ),
+        }));
+      }
+      return { ok: false, message: error instanceof Error ? error.message : "Khong tao duoc booking." };
+    }
   };
 
   const updateBookingStatus = async (bookingId: string, status: BookingStatus) => {
@@ -405,7 +479,31 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase) {
       return;
     }
-    await updateTableStatusInSupabase(tableId, status);
+    let prevTable: DiningTable | undefined;
+    setState((prev) => {
+      prevTable = prev.tables.find((t) => t.id === tableId);
+      if (!prevTable || prevTable.status === status) {
+        return prev;
+      }
+      return {
+        ...prev,
+        tables: prev.tables.map((t) => (t.id === tableId ? { ...t, status } : t)),
+      };
+    });
+
+    try {
+      await updateTableStatusInSupabase(tableId, status);
+    } catch (error) {
+      if (prevTable) {
+        setState((prev) => ({
+          ...prev,
+          tables: prev.tables.map((t) =>
+            t.id === prevTable!.id ? { ...t, status: prevTable!.status } : t
+          ),
+        }));
+      }
+      throw error;
+    }
   };
 
   const deleteTable = async (tableId: string) => {
@@ -531,6 +629,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return { ok: false, message: "Chua ket noi Supabase." };
     }
     const result = await addUserInSupabase(payload);
+    if (result.ok) {
+      // Realtime for `app_users` might be disabled; ensure UI reflects the new user.
+      await reload();
+    }
     return result;
   };
 
@@ -608,6 +710,24 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }
     const result = await updateUserInSupabase(userId, payload);
     if (result.ok) {
+      setState((prev) => ({
+        ...prev,
+        users: prev.users.map((u) =>
+          u.id === userId
+            ? {
+                ...u,
+                username: payload.username,
+                fullName: payload.fullName,
+                role: payload.role,
+                branchIds: payload.branchIds,
+                password:
+                  payload.password && payload.password.trim().length > 0
+                    ? payload.password.trim()
+                    : u.password,
+              }
+            : u
+        ),
+      }));
       applySession();
     }
     return result;
@@ -632,6 +752,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return { ok: true, message: "Đã xóa tài khoản." };
     }
     const result = await deleteUserInSupabase(userId);
+    if (result.ok) {
+      // Realtime for `app_users` might be disabled; ensure UI reflects deletion.
+      await reload();
+    }
     return result;
   };
 
@@ -722,258 +846,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     [hasSupabase, reload]
   );
 
-  const reloadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!hasSupabase || !supabase) {
-      return;
-    }
-    const client = supabase;
-
-    type RealtimeEvent = "INSERT" | "UPDATE" | "DELETE";
-    type RealtimePayload = {
-      eventType: RealtimeEvent;
-      new: Record<string, unknown> | null;
-      old: Record<string, unknown> | null;
-    };
-
-    const branchFilter =
-      filteredBranchIds.length > 0
-        ? `branch_id=in.(${filteredBranchIds.map((id) => `"${id}"`).join(",")})`
-        : null;
-
-    const upsertById = <T extends { id: string }>(list: T[], item: T) => {
-      const index = list.findIndex((row) => row.id === item.id);
-      if (index === -1) {
-        return [item, ...list];
-      }
-      const next = [...list];
-      next[index] = item;
-      return next;
-    };
-
-    const removeById = <T extends { id: string }>(list: T[], id: string) =>
-      list.filter((row) => row.id !== id);
-
-    const scheduleReload = () => {
-      if (reloadDebounceRef.current) {
-        clearTimeout(reloadDebounceRef.current);
-      }
-      reloadDebounceRef.current = setTimeout(() => {
-        reloadDebounceRef.current = null;
-        void reload();
-      }, 420);
-    };
-
-    const applyRealtimeMutation = (table: string, payload: RealtimePayload) => {
-      const eventType = payload.eventType;
-      const rowNew = payload.new;
-      const rowOld = payload.old;
-
-      // Avoid overwriting draft floor edits; previously we blocked realtime-triggered reloads.
-      if (isFloorLayoutRealtimeReloadBlocked() && (table === "tables" || table === "areas")) {
-        return;
-      }
-
-      setState((prev) => {
-        const source =
-          (eventType === "DELETE" ? rowOld : rowNew) as Record<string, unknown> | null;
-
-        if (table === "tables") {
-          const id = source?.id;
-          if (typeof id !== "string") return prev;
-          if (eventType === "DELETE") {
-            return { ...prev, tables: removeById(prev.tables, id) };
-          }
-          const mapped: DiningTable = {
-            id,
-            branchId: String(source?.branch_id ?? ""),
-            areaId: String(source?.area_id ?? ""),
-            name: String(source?.name ?? ""),
-            seats: Number(source?.seats ?? 0),
-            status: (source?.status as TableStatus) ?? "available",
-            positionX: Number(source?.position_x ?? 0),
-            positionY: Number(source?.position_y ?? 0),
-          };
-          return { ...prev, tables: upsertById(prev.tables, mapped) };
-        }
-
-        if (table === "areas") {
-          const id = source?.id;
-          if (typeof id !== "string") return prev;
-          if (eventType === "DELETE") {
-            return { ...prev, areas: removeById(prev.areas, id) };
-          }
-          const mapped = {
-            id,
-            branchId: String(source?.branch_id ?? ""),
-            name: String(source?.name ?? ""),
-            capacity: Number(source?.capacity ?? 0),
-            floorGridColumns:
-              typeof source?.floor_grid_columns === "number" ? source.floor_grid_columns : 12,
-            floorGridRows: typeof source?.floor_grid_rows === "number" ? source.floor_grid_rows : 8,
-            floorNodeSpacing:
-              typeof source?.floor_node_spacing === "number" ? source.floor_node_spacing : 96,
-          };
-          return { ...prev, areas: upsertById(prev.areas, mapped) };
-        }
-
-        if (table === "bookings") {
-          const id = source?.id;
-          if (typeof id !== "string") return prev;
-          if (eventType === "DELETE") {
-            return { ...prev, bookings: removeById(prev.bookings, id) };
-          }
-          const mapped = {
-            id,
-            customerId: String(source?.customer_id ?? ""),
-            branchId: String(source?.branch_id ?? ""),
-            areaId: String(source?.area_id ?? ""),
-            tableId: String(source?.table_id ?? ""),
-            guestCount: Number(source?.guest_count ?? 0),
-            bookingAt: String(source?.booking_at ?? ""),
-            note: source?.note ? String(source.note) : undefined,
-            createdByUserId: String(source?.created_by_user_id ?? ""),
-            status: (source?.status as BookingStatus) ?? "confirmed",
-          };
-          return { ...prev, bookings: upsertById(prev.bookings, mapped) };
-        }
-
-        if (table === "customers") {
-          const id = source?.id;
-          if (typeof id !== "string") return prev;
-          if (eventType === "DELETE") {
-            return { ...prev, customers: removeById(prev.customers, id) };
-          }
-          const mapped = {
-            id,
-            fullName: String(source?.full_name ?? ""),
-            phone: String(source?.phone ?? ""),
-            note: source?.note ? String(source.note) : undefined,
-          };
-          return { ...prev, customers: upsertById(prev.customers, mapped) };
-        }
-
-        if (table === "internal_notifications") {
-          const id = source?.id;
-          if (typeof id !== "string") return prev;
-          if (eventType === "DELETE") {
-            return { ...prev, notifications: removeById(prev.notifications, id) };
-          }
-          const mapped = {
-            id,
-            title: String(source?.title ?? ""),
-            message: String(source?.message ?? ""),
-            createdAt: String(source?.created_at ?? ""),
-            isRead: Boolean(source?.is_read),
-            branchId: source?.branch_id ? String(source.branch_id) : undefined,
-          };
-          // Newest first like fetchSnapshot ordering.
-          const next = upsertById(prev.notifications, mapped).sort(
-            (a, b) => new Date(b.createdAt).valueOf() - new Date(a.createdAt).valueOf()
-          );
-          return { ...prev, notifications: next };
-        }
-
-        if (table === "branches") {
-          const id = source?.id;
-          if (typeof id !== "string") return prev;
-          if (eventType === "DELETE") {
-            return { ...prev, branches: removeById(prev.branches, id) };
-          }
-          const mapped = {
-            id,
-            name: String(source?.name ?? ""),
-            address: String(source?.address ?? ""),
-          };
-          return { ...prev, branches: upsertById(prev.branches, mapped) };
-        }
-
-        if (table === "app_users") {
-          const id = source?.id;
-          if (typeof id !== "string") return prev;
-          if (eventType === "DELETE") {
-            return { ...prev, users: removeById(prev.users, id) };
-          }
-          const mapped = {
-            id,
-            username: String(source?.username ?? ""),
-            password: String(source?.password ?? ""),
-            fullName: String(source?.full_name ?? ""),
-            role: source?.role as Role,
-            branchIds: (source?.branch_ids ?? []) as string[],
-          };
-          return { ...prev, users: upsertById(prev.users, mapped) };
-        }
-
-        return prev;
-      });
-    };
-
-    const channel = client
-      .channel("app-data-realtime")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "tables", ...(branchFilter ? { filter: branchFilter } : {}) },
-        (payload) => applyRealtimeMutation("tables", payload as unknown as RealtimePayload)
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "areas", ...(branchFilter ? { filter: branchFilter } : {}) },
-        (payload) => applyRealtimeMutation("areas", payload as unknown as RealtimePayload)
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "bookings", ...(branchFilter ? { filter: branchFilter } : {}) },
-        (payload) => applyRealtimeMutation("bookings", payload as unknown as RealtimePayload)
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "customers" },
-        (payload) => applyRealtimeMutation("customers", payload as unknown as RealtimePayload)
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "internal_notifications",
-          ...(branchFilter ? { filter: branchFilter } : {}),
-        },
-        (payload) => applyRealtimeMutation("internal_notifications", payload as unknown as RealtimePayload)
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "branches" },
-        (payload) => applyRealtimeMutation("branches", payload as unknown as RealtimePayload)
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "app_users" },
-        (payload) => applyRealtimeMutation("app_users", payload as unknown as RealtimePayload)
-      )
-      .subscribe((status) => {
-        // When reconnecting after a drop, pull a snapshot to avoid missing events.
-        if (status === "SUBSCRIBED") {
-          setRealtimeStatus("connected");
-          scheduleReload();
-          return;
-        }
-        if (status === "CHANNEL_ERROR") {
-          setRealtimeStatus("error");
-          return;
-        }
-        if (status === "TIMED_OUT" || status === "CLOSED") {
-          setRealtimeStatus(typeof window !== "undefined" && !window.navigator.onLine ? "disconnected" : "connecting");
-        }
-      });
-    return () => {
-      if (reloadDebounceRef.current) {
-        clearTimeout(reloadDebounceRef.current);
-        reloadDebounceRef.current = null;
-      }
-      void client.removeChannel(channel);
-    };
-  }, [hasSupabase, reload, filteredBranchIds]);
+  // Realtime subscriptions removed in favor of silent polling refresh.
 
   const acquireFloorLayoutEditLock = useCallback(
     async (areaId: string) => {

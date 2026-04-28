@@ -45,8 +45,6 @@ export default function LoginPage() {
     }
   };
 
-  const demoAccounts = ["admin", "manager-all", "manager-1", "manager-2"];
-
   return (
     <Center mih="100dvh" bg="linear-gradient(180deg, #f4f8fd 0%, #eaf2fb 100%)">
       <Container w={420}>
@@ -96,28 +94,6 @@ export default function LoginPage() {
                 </Button>
               </Stack>
             </form>
-
-            <Stack gap={2}>
-              <Text size="xs" c="dimmed">
-                Tài khoản demo:
-              </Text>
-              <Group gap="xs">
-                {demoAccounts.map((account) => (
-                  <Button
-                    key={account}
-                    variant="subtle"
-                    size="xs"
-                    px={2}
-                    onClick={() => setUsername(account)}
-                  >
-                    {account}
-                  </Button>
-                ))}
-              </Group>
-              <Text size="xs" c="dimmed">
-                Mật khẩu chung: 123456
-              </Text>
-            </Stack>
           </Stack>
         </Card>
       </Container>

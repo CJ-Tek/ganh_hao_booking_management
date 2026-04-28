@@ -14,8 +14,11 @@ import {
   Stack,
   Text,
   TextInput,
+  Textarea,
 } from "@mantine/core";
+import { DateTimePicker } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
+import dayjs from "dayjs";
 import {
   ChevronDown,
   ChevronUp,
@@ -175,6 +178,7 @@ export default function FloorMapPage() {
     state,
     filteredBranchIds,
     updateTableStatus,
+    createBooking,
     currentUser,
     isLoading,
     hasSupabase,
@@ -215,6 +219,15 @@ export default function FloorMapPage() {
   const [areaDeleteLoading, setAreaDeleteLoading] = useState(false);
   const [editLayout, setEditLayout] = useState<FloorEditLayout | null>(null);
   const [isSavingLayout, setIsSavingLayout] = useState(false);
+  const [registerModalOpen, setRegisterModalOpen] = useState(false);
+  const [registerTable, setRegisterTable] = useState<DiningTable | null>(null);
+  const [registerCustomerName, setRegisterCustomerName] = useState("");
+  const [registerCustomerPhone, setRegisterCustomerPhone] = useState("");
+  const [registerGuestCount, setRegisterGuestCount] = useState<number>(4);
+  const [registerBookingAt, setRegisterBookingAt] = useState<string | null>(dayjs().toISOString());
+  const [registerNote, setRegisterNote] = useState("");
+  const [registerSaving, setRegisterSaving] = useState(false);
+  const [isTableMenuOpen, setIsTableMenuOpen] = useState(false);
   const isEditMode = mode === "edit";
   const editBlockedByOther = Boolean(layoutLockHolderName);
 
@@ -667,6 +680,54 @@ export default function FloorMapPage() {
     }
   };
 
+  const openRegisterCustomer = (table: DiningTable) => {
+    setRegisterTable(table);
+    setRegisterGuestCount(Math.max(1, table.seats || 1));
+    setRegisterBookingAt(dayjs().toISOString());
+    setRegisterNote("");
+    setRegisterModalOpen(true);
+  };
+
+  const handleRegisterCustomer = async () => {
+    if (!registerTable || !registerCustomerName.trim() || !registerCustomerPhone.trim() || !registerBookingAt) {
+      notifications.show({ color: "red", message: "Vui lòng nhập tên khách, số điện thoại và thời gian đến." });
+      return;
+    }
+    setRegisterSaving(true);
+    try {
+      const result = await createBooking({
+        customerName: registerCustomerName.trim(),
+        customerPhone: registerCustomerPhone.trim(),
+        branchId: registerTable.branchId,
+        areaId: registerTable.areaId,
+        tableId: registerTable.id,
+        guestCount: Math.max(1, Number(registerGuestCount || 1)),
+        bookingAt: dayjs(registerBookingAt).toISOString(),
+        note: registerNote.trim() || undefined,
+      });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        setRegisterModalOpen(false);
+        setRegisterTable(null);
+        setRegisterCustomerName("");
+        setRegisterCustomerPhone("");
+        setRegisterGuestCount(4);
+        setRegisterBookingAt(dayjs().toISOString());
+        setRegisterNote("");
+      }
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Không thể tạo booking.",
+      });
+    } finally {
+      setRegisterSaving(false);
+    }
+  };
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -933,6 +994,9 @@ export default function FloorMapPage() {
   };
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isEditMode && isTableMenuOpen) {
+      return;
+    }
     const placementTap = placementTapRef.current;
     if (placementTap && event.pointerId === placementTap.pointerId) {
       const dist = Math.hypot(
@@ -978,7 +1042,7 @@ export default function FloorMapPage() {
 
   const handleViewportPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
     const viewport = viewportRef.current;
-    if (viewport) {
+    if (viewport?.hasPointerCapture?.(event.pointerId)) {
       viewport.releasePointerCapture(event.pointerId);
     }
 
@@ -1012,6 +1076,9 @@ export default function FloorMapPage() {
   };
 
   const handleViewportPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isEditMode && isTableMenuOpen) {
+      return;
+    }
     if (isTableBlockTarget(event.target)) {
       return;
     }
@@ -1043,6 +1110,13 @@ export default function FloorMapPage() {
       originX: offset.x,
       originY: offset.y,
     };
+  };
+
+  const handleViewportLostPointerCapture = () => {
+    panStateRef.current = null;
+    placementTapRef.current = null;
+    paletteGestureRef.current = null;
+    setDragState(null);
   };
 
   const handleTablePointerDown = (
@@ -1168,12 +1242,18 @@ export default function FloorMapPage() {
   };
 
   const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (!isEditMode && isTableMenuOpen) {
+      return;
+    }
     event.preventDefault();
     const delta = event.deltaY > 0 ? -SCALE_STEP : SCALE_STEP;
     zoomAt(scale + delta, event.clientX, event.clientY);
   };
 
   const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (!isEditMode && isTableMenuOpen) {
+      return;
+    }
     if (event.touches.length !== 2) {
       pinchRef.current = null;
       return;
@@ -1249,6 +1329,7 @@ export default function FloorMapPage() {
             onPointerMove={handlePointerMove}
             onPointerUp={handleViewportPointerUp}
             onPointerCancel={handleViewportPointerUp}
+            onLostPointerCapture={handleViewportLostPointerCapture}
             onWheel={handleWheel}
             onTouchMove={handleTouchMove}
           >
@@ -1288,7 +1369,18 @@ export default function FloorMapPage() {
                   };
                   if (!isEditMode) {
                     return (
-                      <Menu key={stackKey} position="bottom-start" withinPortal closeOnItemClick>
+                      <Menu
+                        key={stackKey}
+                        position="bottom-start"
+                        withinPortal
+                        closeOnItemClick
+                        onOpen={() => {
+                          setIsTableMenuOpen(true);
+                          panStateRef.current = null;
+                          placementTapRef.current = null;
+                        }}
+                        onClose={() => setIsTableMenuOpen(false)}
+                      >
                         <Menu.Target>
                           <div
                             data-table-block="true"
@@ -1310,6 +1402,14 @@ export default function FloorMapPage() {
                           </div>
                         </Menu.Target>
                         <Menu.Dropdown>
+                          <Menu.Label>Khách</Menu.Label>
+                          <Menu.Item
+                            disabled={!hasSupabase || isLoading}
+                            onClick={() => openRegisterCustomer(table)}
+                          >
+                            Đăng ký khách
+                          </Menu.Item>
+                          <Menu.Divider />
                           <Menu.Label>Đổi trạng thái</Menu.Label>
                           {(["available", "hold", "arriving", "occupied"] as TableStatus[]).map(
                             (status) => (
@@ -1750,6 +1850,66 @@ export default function FloorMapPage() {
           </div>
         </div>
       </PortalSectionCard>
+
+      <Modal
+        opened={registerModalOpen}
+        onClose={() => setRegisterModalOpen(false)}
+        title={registerTable ? `Đăng ký khách - ${registerTable.name}` : "Đăng ký khách"}
+        size="md"
+      >
+        <Stack gap="sm">
+          {registerTable ? (
+            <Text size="sm" c="dimmed">
+              Bàn: <strong>{registerTable.name}</strong> · {registerTable.seats} ghế
+            </Text>
+          ) : null}
+          <TextInput
+            label="Tên khách"
+            placeholder="Họ và tên"
+            value={registerCustomerName}
+            onChange={(event) => setRegisterCustomerName(event.currentTarget.value)}
+          />
+          <TextInput
+            label="Số điện thoại"
+            placeholder="09…"
+            inputMode="tel"
+            value={registerCustomerPhone}
+            onChange={(event) => setRegisterCustomerPhone(event.currentTarget.value)}
+          />
+          <DateTimePicker
+            value={registerBookingAt}
+            onChange={setRegisterBookingAt}
+            label="Thời gian đến"
+            valueFormat="DD/MM/YYYY HH:mm"
+          />
+          <NumberInput
+            label="Số khách"
+            value={registerGuestCount}
+            onChange={(value) => setRegisterGuestCount(Number(value || 1))}
+            min={1}
+          />
+          <Textarea
+            label="Ghi chú"
+            placeholder="Tùy chọn"
+            value={registerNote}
+            onChange={(event) => setRegisterNote(event.currentTarget.value)}
+            autosize
+            minRows={2}
+          />
+          <Group justify="flex-end" mt="md">
+            <Button variant="default" onClick={() => setRegisterModalOpen(false)}>
+              Hủy
+            </Button>
+            <Button
+              loading={registerSaving}
+              disabled={!registerTable || !hasSupabase || isLoading}
+              onClick={() => void handleRegisterCustomer()}
+            >
+              Tạo booking
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <Modal
         opened={areaEditOpen}

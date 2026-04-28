@@ -1,5 +1,5 @@
 import dayjs from "dayjs";
-import { initialState } from "./mock-data";
+import { initialState } from "./initial-state";
 import { supabase } from "./supabase";
 import {
   AppStateSnapshot,
