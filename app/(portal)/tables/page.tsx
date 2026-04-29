@@ -337,7 +337,7 @@ function TablesPageContent() {
                 {branchNameById[row.branchId]}
               </Text>
               <SimpleGrid cols={2} spacing="xs">
-                {(["available", "hold", "arriving", "occupied"] as TableStatus[]).map((status) => (
+                {(["available", "hold", "occupied", "locked"] as TableStatus[]).map((status) => (
                   <Button
                     key={status}
                     size="compact-sm"
@@ -725,7 +725,7 @@ function TablesPageContent() {
             }}
             data={[
               { value: "all", label: "Tất cả" },
-              ...(["available", "hold", "arriving", "occupied"] as TableStatus[]).map((status) => ({
+              ...(["available", "hold", "occupied", "locked"] as TableStatus[]).map((status) => ({
                 value: status,
                 label: tableStatusLabel[status],
               })),
@@ -807,7 +807,7 @@ function TablesPageContent() {
                   title: "Cập nhật nhanh",
                   render: (row) => (
                     <Group gap={6} wrap="wrap">
-                      {(["available", "hold", "arriving", "occupied"] as TableStatus[]).map((status) => (
+                      {(["available", "hold", "occupied", "locked"] as TableStatus[]).map((status) => (
                         <Button
                           key={status}
                           size="compact-xs"

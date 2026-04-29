@@ -57,20 +57,26 @@ Xác nhận — Lưu & thông báo
 ```
 Bước 1 · Xác nhận       — Kiểm tra thông tin khách, ghi chú đặc biệt
     ↓
-Bước 2 · Check-in       — Dẫn khách vào bàn, bàn chuyển trạng thái "đang vào"
+Bước 2 · Check-in       — Dẫn khách vào bàn, bàn chuyển trạng thái "Đã ngồi"
     ↓
 Bước 3 · Cập nhật bàn   — Broadcast real-time → Floor Map & Calendar tự cập nhật
     ↓
 Bước 4 · Thông báo      — Tự động thông báo bếp, nhắc nhân viên phục vụ, ghi lịch sử
     ↓
-Bước 5 · Hoàn tất       — Bàn trạng thái "Có khách", đồng hồ đếm thời gian ngồi bắt đầu
+Bước 5 · Hoàn tất       — Duy trì trạng thái bàn và theo dõi thời gian ngồi
 ```
 
-**Trạng thái bàn trong flow check-in:**
-- `hold` → Đặt trước (chờ khách)
-- `arriving` → Đang dẫn khách vào (trạng thái trung gian, ngăn assign nhầm)
-- `occupied` → Có khách (đang phục vụ)
-- `available` → Trống (sau check-out)
+**Trạng thái bàn chuẩn toàn hệ thống:**
+- `available` → Trống
+- `hold` → Giữ chỗ
+- `occupied` → Đã ngồi
+- `locked` → Khóa
+
+**Quy tắc tự động + thủ công:**
+- Tạo booking với "Giữ chỗ" (giờ tương lai) → tự động `hold`
+- Tạo booking với "Vào bàn ngay" (giờ hiện tại) hoặc check-in → tự động `occupied`
+- Hủy booking cuối cùng của bàn (không còn booking active) → tự động `available`
+- Người dùng vẫn có thể đổi tay trạng thái sang `available` / `hold` / `occupied` / `locked`
 
 ---
 

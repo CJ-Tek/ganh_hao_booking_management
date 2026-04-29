@@ -47,9 +47,9 @@ export default function DashboardPage() {
 
   const statusCounts = {
     hold: branchTables.filter((table) => table.status === "hold").length,
-    arriving: branchTables.filter((table) => table.status === "arriving").length,
     occupied: branchTables.filter((table) => table.status === "occupied").length,
     available: branchTables.filter((table) => table.status === "available").length,
+    locked: branchTables.filter((table) => table.status === "locked").length,
   };
 
   const sortedHistoryBookings = useMemo(() => {

@@ -2,16 +2,16 @@ import { BookingStatus, TableStatus } from "./types";
 
 export const tableStatusLabel: Record<TableStatus, string> = {
   available: "Trống",
-  hold: "Đặt trước",
-  arriving: "Đang dẫn khách vào",
-  occupied: "Có khách",
+  hold: "Giữ chỗ",
+  occupied: "Đã ngồi",
+  locked: "Khóa",
 };
 
 export const tableStatusColor: Record<TableStatus, string> = {
   available: "teal",
   hold: "yellow",
-  arriving: "blue",
   occupied: "grape",
+  locked: "gray",
 };
 
 export const bookingStatusLabel: Record<BookingStatus, string> = {

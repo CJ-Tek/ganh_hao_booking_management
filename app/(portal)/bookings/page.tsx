@@ -25,10 +25,10 @@ import {
   PortalStickyAction,
 } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
-import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
+import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { usePortalCompact } from "@/lib/use-portal-compact";
-import { type Booking } from "@/lib/types";
+import { type Booking, type TableStatus } from "@/lib/types";
 
 function branchScopeKey(branchIds: string[]) {
   return [...branchIds].sort().join("|") || "none";
@@ -79,6 +79,11 @@ function BookingsPageContent() {
       .sort((a, b) => a.name.localeCompare(b.name, "vi"));
   }, [areaId, state.tables, tableStatusFilter]);
 
+  const selectedTable = useMemo(
+    () => (tableId ? state.tables.find((t) => t.id === tableId) : undefined),
+    [tableId, state.tables]
+  );
+
   const branchBookings = useMemo(
     () => state.bookings.filter((booking) => filteredBranchIds.includes(booking.branchId)),
     [filteredBranchIds, state.bookings]
@@ -123,13 +128,21 @@ function BookingsPageContent() {
       notifications.show({ color: "red", message: "Vui lòng nhập đầy đủ thông tin." });
       return;
     }
+    const nextGuestCount = Math.max(1, guestCount);
+    if (selectedTable?.seats && nextGuestCount > selectedTable.seats) {
+      notifications.show({
+        color: "red",
+        message: `Số khách không được vượt quá sức chứa bàn (${selectedTable.seats} ghế).`,
+      });
+      return;
+    }
     const result = await createBooking({
       customerName,
       customerPhone,
       branchId,
       areaId,
       tableId,
-      guestCount,
+      guestCount: nextGuestCount,
       bookingAt: dayjs(bookingAt).toISOString(),
       note,
     });
@@ -185,10 +198,10 @@ function BookingsPageContent() {
           onChange={(value) => setTableStatusFilter(value ?? "all")}
           data={[
             { value: "all", label: "Tất cả" },
-            { value: "available", label: "Sẵn sàng" },
-            { value: "hold", label: "Đang giữ chỗ" },
-            { value: "arriving", label: "Sắp đến" },
-            { value: "occupied", label: "Đang có khách" },
+            ...(["available", "hold", "occupied", "locked"] as TableStatus[]).map((status) => ({
+              value: status,
+              label: tableStatusLabel[status],
+            })),
           ]}
           size={isCompact ? "md" : "sm"}
         />
@@ -213,6 +226,7 @@ function BookingsPageContent() {
           value={guestCount}
           onChange={(value) => setGuestCount(Number(value || 1))}
           min={1}
+          max={selectedTable?.seats}
           size={isCompact ? "md" : "sm"}
         />
         <Textarea

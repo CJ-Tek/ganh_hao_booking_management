@@ -9,7 +9,6 @@ import {
   Menu,
   Modal,
   NumberInput,
-  Paper,
   Radio,
   Select,
   SegmentedControl,
@@ -18,7 +17,7 @@ import {
   TextInput,
   Textarea,
 } from "@mantine/core";
-import { DateTimePicker } from "@mantine/dates";
+import { DatePickerInput, TimeInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
 import {
@@ -50,15 +49,15 @@ import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
-import { tableStatusColor, tableStatusLabel } from "@/lib/display";
+import { bookingStatusColor, bookingStatusLabel, tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { type DiningTable, type TableStatus } from "@/lib/types";
 import classes from "./page.module.css";
 
 const TABLE_STATUS_SURFACE_CLASS: Record<TableStatus, string> = {
   available: classes.statusSurface_available,
   hold: classes.statusSurface_hold,
-  arriving: classes.statusSurface_arriving,
   occupied: classes.statusSurface_occupied,
+  locked: classes.statusSurface_locked,
 };
 
 const DEFAULT_GRID_COLUMNS = 12;
@@ -195,6 +194,8 @@ export default function FloorMapPage() {
     filteredBranchIds,
     updateTableStatus,
     createBooking,
+    updateBookingStatus,
+    checkInBooking,
     currentUser,
     isLoading,
     hasSupabase,
@@ -243,13 +244,20 @@ export default function FloorMapPage() {
   const [registerCustomerName, setRegisterCustomerName] = useState("");
   const [registerCustomerPhone, setRegisterCustomerPhone] = useState("");
   const [registerGuestCount, setRegisterGuestCount] = useState<number>(4);
-  const [registerBookingAt, setRegisterBookingAt] = useState<string | null>(dayjs().toISOString());
+  const [registerBookingDate, setRegisterBookingDate] = useState<string | null>(
+    dayjs().format("YYYY-MM-DD")
+  );
+  const [registerBookingTime, setRegisterBookingTime] = useState<string>(
+    dayjs().format("HH:mm")
+  );
   const [registerNote, setRegisterNote] = useState("");
   const [registerSaving, setRegisterSaving] = useState(false);
+  const [detailTable, setDetailTable] = useState<DiningTable | null>(null);
+  const [detailBookingActionLoading, setDetailBookingActionLoading] = useState(false);
   /** Status menu uses portal — block canvas interaction while open */
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
 
-  const blockCanvasForOverlay = Boolean(registerTable) || statusMenuOpen;
+  const blockCanvasForOverlay = Boolean(registerTable || detailTable) || statusMenuOpen;
   const isEditMode = mode === "edit";
   const editBlockedByOther = Boolean(layoutLockHolderName);
 
@@ -277,6 +285,9 @@ export default function FloorMapPage() {
   const gridSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const areaIdRef = useRef<string | null>(null);
   const modeRef = useRef<CanvasMode>("view");
+  const fitCanvasToViewportRef = useRef<() => void>(() => {});
+  const prevModeForViewportFitRef = useRef<CanvasMode>("view");
+  const prevAreaIdForViewportFitRef = useRef<string | null>(null);
   const resyncEditLayoutAfterSaveRef = useRef(false);
   const prevAreaIdForLayoutRef = useRef<string | null>(null);
   const prevModeForLayoutRef = useRef<CanvasMode>("view");
@@ -310,6 +321,62 @@ export default function FloorMapPage() {
     return state.bookings.filter((b) => b.areaId === areaId).length;
   }, [areaId, state.bookings]);
 
+  const activeBookingForDetailTable = useMemo(() => {
+    if (!detailTable) {
+      return null;
+    }
+    const candidates = state.bookings
+      .filter((b) => b.tableId === detailTable.id && b.status !== "cancelled")
+      .sort((a, b) => dayjs(b.bookingAt).valueOf() - dayjs(a.bookingAt).valueOf());
+    return candidates[0] ?? null;
+  }, [detailTable, state.bookings]);
+
+  const activeBookingCustomerName = useMemo(() => {
+    if (!activeBookingForDetailTable) {
+      return "";
+    }
+    const customer = state.customers.find((c) => c.id === activeBookingForDetailTable.customerId);
+    return customer?.fullName ?? "";
+  }, [activeBookingForDetailTable, state.customers]);
+
+  const closeDetailModal = () => {
+    setDetailTable(null);
+  };
+
+  const handleDetailCheckIn = async () => {
+    if (!activeBookingForDetailTable) {
+      return;
+    }
+    if (activeBookingForDetailTable.status !== "confirmed") {
+      return;
+    }
+    setDetailBookingActionLoading(true);
+    try {
+      await checkInBooking(activeBookingForDetailTable.id);
+      closeDetailModal();
+    } finally {
+      setDetailBookingActionLoading(false);
+    }
+  };
+
+  const handleDetailCancelOrComplete = async () => {
+    if (!activeBookingForDetailTable) {
+      return;
+    }
+    if (activeBookingForDetailTable.status === "cancelled") {
+      return;
+    }
+    setDetailBookingActionLoading(true);
+    try {
+      // For "Vào bàn ngay" bookings, we treat "Hoàn thành" as the final step:
+      // remove the booking from the active flow by setting it to cancelled.
+      await updateBookingStatus(activeBookingForDetailTable.id, "cancelled");
+      closeDetailModal();
+    } finally {
+      setDetailBookingActionLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (activeAreaId && !availableAreas.some((a) => a.id === activeAreaId)) {
       setActiveAreaId(availableAreas[0]?.id ?? null);
@@ -335,7 +402,7 @@ export default function FloorMapPage() {
     setGridColumns(area.floorGridColumns ?? DEFAULT_GRID_COLUMNS);
     setGridRows(area.floorGridRows ?? DEFAULT_GRID_ROWS);
     setNodeSpacing(area.floorNodeSpacing ?? DEFAULT_NODE_SPACING);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- resync view grid when area/mode/loading changes, not on every snapshot
+    // Resync view grid when area/mode/loading changes; avoid re-drafting on every snapshot.
   }, [areaId, isLoading, mode, state.areas]);
 
   useEffect(() => {
@@ -390,7 +457,7 @@ export default function FloorMapPage() {
       nodeSpacing: area?.floorNodeSpacing ?? DEFAULT_NODE_SPACING,
       positions,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- draft snapshot only when entering edit; remote updates handled after save
+    // Draft snapshot only when entering edit; remote updates handled after save.
   }, [mode, areaId, state.areas, state.tables, releaseFloorLayoutEditLock]);
 
   useEffect(() => {
@@ -707,7 +774,8 @@ export default function FloorMapPage() {
     setRegisterCustomerName("");
     setRegisterCustomerPhone("");
     setRegisterGuestCount(4);
-    setRegisterBookingAt(dayjs().toISOString());
+    setRegisterBookingDate(dayjs().format("YYYY-MM-DD"));
+    setRegisterBookingTime(dayjs().format("HH:mm"));
     setRegisterNote("");
     setRegisterArrivalMode("immediate");
   }, []);
@@ -715,21 +783,28 @@ export default function FloorMapPage() {
   const openRegistrationForTable = (table: DiningTable) => {
     panStateRef.current = null;
     placementTapRef.current = null;
+    setDetailTable(null);
     setRegisterTable(table);
     setRegisterGuestCount(Math.max(1, table.seats || 1));
-    setRegisterBookingAt(dayjs().toISOString());
+    setRegisterBookingDate(dayjs().format("YYYY-MM-DD"));
+    setRegisterBookingTime(dayjs().format("HH:mm"));
     setRegisterNote("");
     setRegisterCustomerName("");
     setRegisterCustomerPhone("");
     setRegisterArrivalMode("immediate");
   };
 
-  const toggleRegistrationPanel = (table: DiningTable) => {
-    if (registerTable?.id === table.id) {
-      closeRegistrationPanel();
+  const handleViewOrRegisterForTable = (table: DiningTable) => {
+    if (table.status === "available") {
+      if (registerTable?.id === table.id) {
+        closeRegistrationPanel();
+        return;
+      }
+      openRegistrationForTable(table);
       return;
     }
-    openRegistrationForTable(table);
+    setRegisterTable(null);
+    setDetailTable(table);
   };
 
   const handleRegisterCustomer = async () => {
@@ -740,17 +815,50 @@ export default function FloorMapPage() {
       });
       return;
     }
-    if (registerArrivalMode === "hold" && !registerBookingAt) {
+    const nextGuestCount = Math.max(1, Number(registerGuestCount || 1));
+    if (registerTable.seats > 0 && nextGuestCount > registerTable.seats) {
       notifications.show({
         color: "red",
-        message: "Vui lòng chọn thời gian đến khi chọn Giữ chỗ.",
+        message: `Số khách không được vượt quá sức chứa bàn (${registerTable.seats} ghế).`,
       });
       return;
     }
-    const bookingAtIso =
-      registerArrivalMode === "immediate"
-        ? dayjs().toISOString()
-        : dayjs(registerBookingAt!).toISOString();
+    if (registerArrivalMode === "hold" && (!registerBookingDate || !registerBookingTime)) {
+      notifications.show({
+        color: "red",
+        message: "Vui lòng chọn ngày và giờ đến khi chọn Giữ chỗ.",
+      });
+      return;
+    }
+    let bookingAtIso: string;
+    if (registerArrivalMode === "immediate") {
+      bookingAtIso = dayjs().toISOString();
+    } else {
+      const [hour, minute] = registerBookingTime.split(":").map((value) => Number(value) || 0);
+      const now = dayjs();
+      let bookingAt = dayjs(registerBookingDate!, "YYYY-MM-DD")
+        .hour(hour)
+        .minute(minute)
+        .second(0)
+        .millisecond(0);
+
+      // If the user picked "Giữ chỗ" within the current minute, the seconds=0
+      // timestamp may fall slightly in the past (and would be marked as "Đã ngồi").
+      // So: if it is the same minute, bump by 1 second; otherwise require a future time.
+      if (!bookingAt.isAfter(now)) {
+        if (bookingAt.isSame(now, "minute")) {
+          bookingAt = now.add(1, "second");
+        } else {
+          notifications.show({
+            color: "red",
+            message: "Giữ chỗ cần thời gian đến sau thời điểm hiện tại.",
+          });
+          return;
+        }
+      }
+
+      bookingAtIso = bookingAt.toISOString();
+    }
     setRegisterSaving(true);
     try {
       const result = await createBooking({
@@ -759,7 +867,7 @@ export default function FloorMapPage() {
         branchId: registerTable.branchId,
         areaId: registerTable.areaId,
         tableId: registerTable.id,
-        guestCount: Math.max(1, Number(registerGuestCount || 1)),
+        guestCount: nextGuestCount,
         bookingAt: bookingAtIso,
         note: registerNote.trim() || undefined,
       });
@@ -858,6 +966,10 @@ export default function FloorMapPage() {
     effectiveNodeSpacing,
     placedTables,
   ]);
+
+  useEffect(() => {
+    fitCanvasToViewportRef.current = fitCanvasToViewport;
+  }, [fitCanvasToViewport]);
 
   const trimRedundantGrid = useCallback(() => {
     if (!editLayout) {
@@ -992,17 +1104,37 @@ export default function FloorMapPage() {
   };
 
   useLayoutEffect(() => {
-    fitCanvasToViewport();
+    const prevMode = prevModeForViewportFitRef.current;
+    const prevAreaId = prevAreaIdForViewportFitRef.current;
+
+    // Only auto-fit when the user intentionally changes the view context.
+    // This prevents unexpected zoom/jump when the app re-fetches/auto-updates data.
+    const shouldFit =
+      // first mount or area change
+      (areaId && prevAreaId !== areaId) ||
+      // entering view mode from edit mode
+      (mode === "view" && prevMode === "edit");
+
+    if (shouldFit) {
+      fitCanvasToViewportRef.current();
+    }
+
     const viewport = viewportRef.current;
     if (!viewport) {
       return;
     }
     const observer = new ResizeObserver(() => {
-      fitCanvasToViewport();
+      fitCanvasToViewportRef.current();
     });
     observer.observe(viewport);
     return () => observer.disconnect();
-  }, [fitCanvasToViewport, areaId]);
+  }, [areaId, mode]); // do not depend on fitCanvasToViewport (would re-fit on every status refresh)
+
+  // Remember last view context so we don't auto-fit on background data refresh.
+  useLayoutEffect(() => {
+    prevAreaIdForViewportFitRef.current = areaId;
+    prevModeForViewportFitRef.current = mode;
+  }, [areaId, mode]);
 
   const toWorldCoordinate = (clientX: number, clientY: number) => {
     const viewport = viewportRef.current;
@@ -1421,224 +1553,73 @@ export default function FloorMapPage() {
                     top: y - 28 + stackIndex * 8,
                   };
                   if (!isEditMode) {
-                    const isRegisterOpen = registerTable?.id === table.id;
                     return (
                       <div
                         key={stackKey}
-                        className={`${classes.tableFloorAnchor} ${isRegisterOpen ? classes.tableFloorAnchorExpanded : ""
-                          }`}
+                        className={classes.tableFloorAnchor}
                         style={style}
                       >
-                        {isRegisterOpen ? (
-                          <Paper
-                            data-register-panel=""
-                            radius="md"
-                            p="xs"
-                            withBorder
-                            shadow="md"
-                            className={classes.tableRegisterPanel}
-                          >
-                            <Stack
-                              gap={6}
-                              onClick={(event) => event.stopPropagation()}
-                            >
-                              <Group justify="space-between" gap="xs" wrap="nowrap">
-                                <Text fw={700} size="sm">
-                                  Đăng ký — {table.name}
-                                </Text>
-                                <ActionIcon
-                                  type="button"
-                                  variant="subtle"
-                                  size="sm"
-                                  aria-label="Đóng"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    closeRegistrationPanel();
-                                  }}
-                                >
-                                  <X size={16} />
-                                </ActionIcon>
-                              </Group>
-                              <Text size="xs" c="dimmed">
-                                {table.seats} ghế · {tableStatusLabel[table.status]}
-                              </Text>
-                              <Radio.Group
-                                label="Đặt bàn"
-                                size="xs"
-                                value={registerArrivalMode}
-                                onChange={(value) =>
-                                  setRegisterArrivalMode(
-                                    value === "hold" ? "hold" : "immediate"
-                                  )
-                                }
-                              >
-                                <Stack gap={4} mt={4}>
-                                  <Radio value="hold" label="Giữ chỗ" />
-                                  <Radio value="immediate" label="Vào bàn ngay" />
-                                </Stack>
-                              </Radio.Group>
-                              {registerArrivalMode === "hold" ? (
-                                <DateTimePicker
-                                  value={registerBookingAt}
-                                  onChange={setRegisterBookingAt}
-                                  label="Thời gian đến"
-                                  valueFormat="DD/MM/YYYY HH:mm"
-                                  size="xs"
-                                />
-                              ) : null}
-                              <TextInput
-                                label="Tên khách"
-                                placeholder="Họ và tên"
-                                value={registerCustomerName}
-                                onChange={(event) =>
-                                  setRegisterCustomerName(event.currentTarget.value)
-                                }
-                                size="xs"
-                              />
-                              <TextInput
-                                label="Số điện thoại"
-                                placeholder="09…"
-                                inputMode="tel"
-                                value={registerCustomerPhone}
-                                onChange={(event) =>
-                                  setRegisterCustomerPhone(event.currentTarget.value)
-                                }
-                                size="xs"
-                              />
-                              <NumberInput
-                                label="Số khách"
-                                value={registerGuestCount}
-                                onChange={(value) =>
-                                  setRegisterGuestCount(Number(value || 1))
-                                }
-                                min={1}
-                                size="xs"
-                              />
-                              <Textarea
-                                label="Ghi chú"
-                                placeholder="Tùy chọn"
-                                value={registerNote}
-                                onChange={(event) =>
-                                  setRegisterNote(event.currentTarget.value)
-                                }
-                                autosize
-                                minRows={2}
-                                size="xs"
-                              />
-                              <Menu
-                                withinPortal
-                                position="bottom-start"
-                                onOpen={() => {
-                                  panStateRef.current = null;
-                                  placementTapRef.current = null;
-                                  setStatusMenuOpen(true);
-                                }}
-                                onClose={() => setStatusMenuOpen(false)}
-                              >
-                                <Menu.Target>
-                                  <Button variant="light" size="xs">
-                                    Đổi trạng thái bàn
-                                  </Button>
-                                </Menu.Target>
-                                <Menu.Dropdown>
-                                  {(["available", "hold", "arriving", "occupied"] as TableStatus[]).map(
-                                    (nextStatus) => (
-                                      <Menu.Item
-                                        key={nextStatus}
-                                        disabled={table.status === nextStatus}
-                                        onClick={() => void handleStatusChange(table, nextStatus)}
-                                      >
-                                        {tableStatusLabel[nextStatus]}
-                                      </Menu.Item>
-                                    )
-                                  )}
-                                </Menu.Dropdown>
-                              </Menu>
-                              <Group justify="flex-end" gap={6}>
-                                <Button
-                                  variant="default"
-                                  size="xs"
-                                  onClick={() => closeRegistrationPanel()}
-                                >
-                                  Hủy
-                                </Button>
-                                <Button
-                                  loading={registerSaving}
-                                  disabled={!hasSupabase || isLoading}
-                                  size="xs"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    void handleRegisterCustomer();
-                                  }}
-                                >
-                                  Tạo booking
-                                </Button>
-                              </Group>
-                            </Stack>
-                          </Paper>
-                        ) : (
-                          <div
-                            data-table-block="true"
-                            data-table-status={table.status}
-                            className={`${classes.tableBlock} ${classes.tableBlockView} ${TABLE_STATUS_SURFACE_CLASS[table.status]} ${dragState?.tableId === table.id ? classes.tableBlockDragging : ""
-                              }`}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              toggleRegistrationPanel(table);
+                        <div
+                          data-table-block="true"
+                          data-table-status={table.status}
+                          className={`${classes.tableBlock} ${classes.tableBlockView} ${TABLE_STATUS_SURFACE_CLASS[table.status]} ${dragState?.tableId === table.id ? classes.tableBlockDragging : ""
+                            }`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleViewOrRegisterForTable(table);
+                          }}
+                        >
+                          <Menu
+                            withinPortal
+                            position="bottom-end"
+                            closeOnItemClick
+                            onOpen={() => {
+                              panStateRef.current = null;
+                              placementTapRef.current = null;
+                              setStatusMenuOpen(true);
                             }}
+                            onClose={() => setStatusMenuOpen(false)}
                           >
-                            <Menu
-                              withinPortal
-                              position="bottom-end"
-                              closeOnItemClick
-                              onOpen={() => {
-                                panStateRef.current = null;
-                                placementTapRef.current = null;
-                                setStatusMenuOpen(true);
-                              }}
-                              onClose={() => setStatusMenuOpen(false)}
-                            >
-                              <Menu.Target>
-                                <ActionIcon
-                                  type="button"
-                                  variant="subtle"
-                                  color="gray"
-                                  size="sm"
-                                  className={classes.tableBlockStatusMenuBtn}
-                                  aria-label="Đổi trạng thái"
-                                  data-table-status-menu=""
-                                  onClick={(event) => event.stopPropagation()}
-                                >
-                                  <MoreVertical size={14} />
-                                </ActionIcon>
-                              </Menu.Target>
-                              <Menu.Dropdown>
-                                {(["available", "hold", "arriving", "occupied"] as TableStatus[]).map(
-                                  (nextStatus) => (
-                                    <Menu.Item
-                                      key={nextStatus}
-                                      disabled={table.status === nextStatus}
-                                      onClick={() => void handleStatusChange(table, nextStatus)}
-                                    >
-                                      {tableStatusLabel[nextStatus]}
-                                    </Menu.Item>
-                                  )
-                                )}
-                              </Menu.Dropdown>
-                            </Menu>
-                            <Text fw={600} size="sm" lineClamp={1}>
-                              {table.name}
-                            </Text>
-                            <Text size="xs">{table.seats} ghế</Text>
-                            <Badge
-                              color={tableStatusColor[table.status]}
-                              variant="light"
-                              size="xs"
-                            >
-                              {tableStatusLabel[table.status]}
-                            </Badge>
-                          </div>
-                        )}
+                            <Menu.Target>
+                              <ActionIcon
+                                type="button"
+                                variant="subtle"
+                                color="gray"
+                                size="sm"
+                                className={classes.tableBlockStatusMenuBtn}
+                                aria-label="Đổi trạng thái"
+                                data-table-status-menu=""
+                                onClick={(event) => event.stopPropagation()}
+                              >
+                                <MoreVertical size={14} />
+                              </ActionIcon>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                                  {(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
+                                (nextStatus) => (
+                                  <Menu.Item
+                                    key={nextStatus}
+                                    disabled={table.status === nextStatus}
+                                    onClick={() => void handleStatusChange(table, nextStatus)}
+                                  >
+                                    {tableStatusLabel[nextStatus]}
+                                  </Menu.Item>
+                                )
+                              )}
+                            </Menu.Dropdown>
+                          </Menu>
+                          <Text fw={600} size="sm" lineClamp={1}>
+                            {table.name}
+                          </Text>
+                          <Text size="xs">{table.seats} ghế</Text>
+                          <Badge
+                            color={tableStatusColor[table.status]}
+                            variant="light"
+                            size="xs"
+                          >
+                            {tableStatusLabel[table.status]}
+                          </Badge>
+                        </div>
                       </div>
                     );
                   }
@@ -1714,7 +1695,7 @@ export default function FloorMapPage() {
                         onChange={(value) => setStatusFilter(value ?? "all")}
                         data={[
                           { value: "all", label: "Tất cả trạng thái" },
-                          ...(["available", "hold", "arriving", "occupied"] as TableStatus[]).map(
+                          ...(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
                             (status) => ({
                               value: status,
                               label: tableStatusLabel[status],
@@ -2068,6 +2049,160 @@ export default function FloorMapPage() {
           </div>
         </div>
       </PortalSectionCard>
+
+      <Modal
+        opened={Boolean(registerTable)}
+        onClose={closeRegistrationPanel}
+        title={registerTable ? `Đăng ký - ${registerTable.name}` : "Đăng ký"}
+        size="sm"
+        centered
+        overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
+      >
+        {registerTable ? (
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">
+              {registerTable.seats} ghế · {tableStatusLabel[registerTable.status]}
+            </Text>
+            <Radio.Group
+              label="Đặt bàn"
+              value={registerArrivalMode}
+              onChange={(value) =>
+                setRegisterArrivalMode(value === "hold" ? "hold" : "immediate")
+              }
+            >
+              <Stack gap={6} mt={4}>
+                <Radio value="hold" label="Giữ chỗ" />
+                <Radio value="immediate" label="Vào bàn ngay" />
+              </Stack>
+            </Radio.Group>
+            {registerArrivalMode === "hold" ? (
+              <Group grow align="end">
+                <DatePickerInput
+                  label="Ngày đến"
+                  value={registerBookingDate}
+                  onChange={setRegisterBookingDate}
+                  valueFormat="YYYY-MM-DD"
+                />
+                <TimeInput
+                  label="Giờ đến"
+                  value={registerBookingTime}
+                  onChange={(event) => setRegisterBookingTime(event.currentTarget.value)}
+                  withSeconds={false}
+                />
+              </Group>
+            ) : null}
+            <TextInput
+              label="Tên khách"
+              placeholder="Họ và tên"
+              value={registerCustomerName}
+              onChange={(event) => setRegisterCustomerName(event.currentTarget.value)}
+            />
+            <TextInput
+              label="Số điện thoại"
+              placeholder="09..."
+              inputMode="tel"
+              value={registerCustomerPhone}
+              onChange={(event) => setRegisterCustomerPhone(event.currentTarget.value)}
+            />
+            <NumberInput
+              label="Số khách"
+              value={registerGuestCount}
+              onChange={(value) => setRegisterGuestCount(Number(value || 1))}
+              min={1}
+              max={registerTable.seats || undefined}
+            />
+            <Textarea
+              label="Ghi chú"
+              placeholder="Tùy chọn"
+              value={registerNote}
+              onChange={(event) => setRegisterNote(event.currentTarget.value)}
+              autosize
+              minRows={2}
+            />
+            <Group justify="flex-end" gap={8}>
+              <Button variant="default" onClick={closeRegistrationPanel}>
+                Hủy
+              </Button>
+              <Button
+                loading={registerSaving}
+                disabled={!hasSupabase || isLoading}
+                onClick={() => void handleRegisterCustomer()}
+              >
+                Tạo booking
+              </Button>
+            </Group>
+          </Stack>
+        ) : null}
+      </Modal>
+
+      <Modal
+        opened={Boolean(detailTable)}
+        onClose={closeDetailModal}
+        title={detailTable ? `Thông tin booking - ${detailTable.name}` : "Thông tin booking"}
+        size="sm"
+        centered
+        overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
+      >
+        {detailTable && activeBookingForDetailTable ? (
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">
+              {detailTable.seats} ghế · {tableStatusLabel[detailTable.status]}
+            </Text>
+            <Text fw={600} size="sm">
+              Khách: {activeBookingCustomerName || "—"}
+            </Text>
+            <Text size="sm">
+              Giờ đến:{" "}
+              {dayjs(activeBookingForDetailTable.bookingAt).format("HH:mm DD/MM/YYYY")}
+            </Text>
+            <Text size="sm">Số khách: {activeBookingForDetailTable.guestCount}</Text>
+            {activeBookingForDetailTable.note ? (
+              <Text size="sm" c="dimmed">
+                Ghi chú: {activeBookingForDetailTable.note}
+              </Text>
+            ) : null}
+            <Badge
+              color={bookingStatusColor[activeBookingForDetailTable.status]}
+              variant="light"
+              w="fit-content"
+            >
+              {bookingStatusLabel[activeBookingForDetailTable.status]}
+            </Badge>
+            <Group justify="flex-end" gap="xs" mt="xs">
+              {detailTable.status !== "occupied" ? (
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="green"
+                  disabled={activeBookingForDetailTable.status !== "confirmed"}
+                  loading={detailBookingActionLoading}
+                  onClick={() => void handleDetailCheckIn()}
+                >
+                  Check-in
+                </Button>
+              ) : null}
+              <Button
+                size="xs"
+                variant={activeBookingForDetailTable.status === "checked_in" ? "filled" : "light"}
+                color={
+                  activeBookingForDetailTable.status === "checked_in" ? "green" : "red"
+                }
+                disabled={activeBookingForDetailTable.status === "cancelled"}
+                loading={detailBookingActionLoading}
+                onClick={() => void handleDetailCancelOrComplete()}
+              >
+                {activeBookingForDetailTable.status === "checked_in"
+                  ? "Hoàn thành"
+                  : "Hủy booking"}
+              </Button>
+            </Group>
+          </Stack>
+        ) : detailTable ? (
+          <Text size="sm" c="dimmed">
+            Chưa tìm thấy booking nào đang hoạt động cho bàn này.
+          </Text>
+        ) : null}
+      </Modal>
 
       <Modal
         opened={areaEditOpen}

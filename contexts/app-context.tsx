@@ -72,6 +72,11 @@ type CreateBookingInput = {
   note?: string;
 };
 
+function resolveAutoTableStatus(bookingAtIso: string): TableStatus {
+  const bookingAt = new Date(bookingAtIso).getTime();
+  return Number.isFinite(bookingAt) && bookingAt > Date.now() ? "hold" : "occupied";
+}
+
 type ActionResult = { ok: boolean; message: string };
 
 interface AppContextValue {
@@ -341,14 +346,15 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return { ok: false, message: "Chua ket noi Supabase. Vui long cau hinh .env.local." };
     }
 
-    // Optimistic: immediately reflect the most visible effect (table becomes "hold")
+    // Optimistic: immediately reflect auto table state from booking time.
     // so UI updates without waiting for the next polling reload.
     const tableBefore = state.tables.find((t) => t.id === input.tableId);
-    if (tableBefore) {
+    if (tableBefore && tableBefore.status !== "locked") {
+      const nextStatus = resolveAutoTableStatus(input.bookingAt);
       setState((prev) => ({
         ...prev,
         tables: prev.tables.map((t) =>
-          t.id === input.tableId ? { ...t, status: "hold" } : t
+          t.id === input.tableId ? { ...t, status: nextStatus } : t
         ),
       }));
     }
