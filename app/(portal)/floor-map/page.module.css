@@ -52,7 +52,7 @@
   position: absolute;
   width: 112px;
   z-index: 3;
-  border: 1px solid #bfdbfe;
+  border: 1px solid rgba(148, 163, 184, 0.5);
   border-radius: 8px;
   padding: 6px;
   padding-top: 22px;
@@ -60,11 +60,58 @@
   cursor: grab;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
   user-select: none;
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.15s ease;
+}
+
+/* Tint blocks by table status — matches Badge “light” / tableStatusColor in lib/display.ts */
+.statusSurface_available {
+  background-color: rgba(230, 252, 245, 0.95);
+  border-color: rgba(32, 201, 151, 0.55);
+}
+
+.statusSurface_hold {
+  background-color: rgba(255, 251, 230, 0.96);
+  border-color: rgba(250, 197, 21, 0.65);
+}
+
+.statusSurface_arriving {
+  background-color: rgba(231, 245, 255, 0.96);
+  border-color: rgba(51, 154, 240, 0.55);
+}
+
+.statusSurface_occupied {
+  background-color: rgba(245, 240, 252, 0.96);
+  border-color: rgba(151, 112, 215, 0.55);
+}
+
+.tableFloorAnchor {
+  position: absolute;
+  z-index: 4;
+}
+
+.tableFloorAnchorExpanded {
+  z-index: 20;
+}
+
+.tableRegisterPanel {
+  min-width: min(288px, 72vw);
+  max-width: 320px;
 }
 
 .tableBlockView {
+  position: relative;
   cursor: pointer;
   padding-top: 6px;
+}
+
+.tableBlockStatusMenuBtn {
+  position: absolute !important;
+  top: -2px;
+  right: -2px;
+  z-index: 2;
 }
 
 .tableBlockRemove {
@@ -230,13 +277,17 @@
 
 .paletteTableBlock {
   min-width: 136px;
-  border: 1px solid #bfdbfe;
+  border: 1px solid rgba(148, 163, 184, 0.5);
   border-radius: 8px;
   padding: 6px;
   background: #ffffff;
   cursor: grab;
   user-select: none;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.15s ease;
 }
 
 .paletteTableBlockPending {

@@ -92,46 +92,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     logout,
     markNotificationRead,
     hasSupabase,
-    realtimeStatus,
   } = useAppContext();
-  const realtimeBadge = useMemo(() => {
-    if (!hasSupabase) {
-      return null;
-    }
-    if (typeof window !== "undefined" && !window.navigator.onLine) {
-      return (
-        <Badge color="gray" variant="light">
-          Offline
-        </Badge>
-      );
-    }
-    if (realtimeStatus === "connected") {
-      return (
-        <Badge color="green" variant="light">
-          Realtime
-        </Badge>
-      );
-    }
-    if (realtimeStatus === "connecting") {
-      return (
-        <Badge color="yellow" variant="light">
-          Đang kết nối
-        </Badge>
-      );
-    }
-    if (realtimeStatus === "error") {
-      return (
-        <Badge color="red" variant="light">
-          Lỗi realtime
-        </Badge>
-      );
-    }
-    return (
-      <Badge color="gray" variant="light">
-        Không kết nối
-      </Badge>
-    );
-  }, [hasSupabase, realtimeStatus]);
 
   /** All branches this account may switch to (header); data scope uses `filteredBranchIds` only. */
   const branchSwitcherOptions = useMemo(
@@ -171,25 +132,32 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     return base;
   }, [currentUser]);
 
+  /** Bottom quick nav on narrow viewports (sync with `usePortalCompact` / navbar `breakpoint: "md"`).
+   *  Enabled for branch managers, general_manager, and admin. */
+  const usesMobileDock =
+    currentUser?.role === "manager" ||
+    currentUser?.role === "general_manager" ||
+    currentUser?.role === "admin";
+
   const dockHrefSet = useMemo(() => new Set<string>(MANAGER_DOCK_HREFS), []);
 
   const managerDockItems = useMemo(() => {
-    if (currentUser?.role !== "manager") {
+    if (!usesMobileDock) {
       return [];
     }
     return MANAGER_DOCK_HREFS.map((href) => shownNavItems.find((item) => item.href === href)).filter(
       (item): item is NavItem => Boolean(item)
     );
-  }, [currentUser?.role, shownNavItems]);
+  }, [usesMobileDock, shownNavItems]);
 
   const managerMoreNavItems = useMemo(() => {
-    if (currentUser?.role !== "manager") {
+    if (!usesMobileDock) {
       return [];
     }
     return shownNavItems.filter((item) => !dockHrefSet.has(item.href));
-  }, [currentUser?.role, dockHrefSet, shownNavItems]);
+  }, [usesMobileDock, dockHrefSet, shownNavItems]);
 
-  const showManagerDock = currentUser?.role === "manager" && isCompact;
+  const showManagerDock = usesMobileDock && isCompact;
 
   const portalLabel =
     currentUser?.role === "manager" ? "Cổng quản lý chi nhánh" : "Cổng quản lý tổng";
@@ -208,7 +176,6 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             <Stack gap={0} className={classes.brandCopy}>
               <Group gap={6} wrap="nowrap">
                 <Title order={5}>Hệ thống quản lý đặt bàn</Title>
-                {realtimeBadge}
               </Group>
               <Text size="xs" c="dimmed">
                 {portalLabel}

@@ -74,15 +74,12 @@ type CreateBookingInput = {
 
 type ActionResult = { ok: boolean; message: string };
 
-export type RealtimeConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
-
 interface AppContextValue {
   state: AppStateSnapshot;
   currentUser: AppUser | null;
   filteredBranchIds: string[];
   isLoading: boolean;
   hasSupabase: boolean;
-  realtimeStatus: RealtimeConnectionStatus;
   login: (username: string, password: string) => Promise<AppUser | null>;
   logout: () => void;
   reload: () => Promise<void>;
@@ -181,9 +178,6 @@ function userScopeBranchIds(user: AppUser | null, activeBranchId?: string): stri
 export function AppContextProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppStateSnapshot>(initialState);
   const [isLoading, setIsLoading] = useState(true);
-  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeConnectionStatus>(() =>
-    isSupabaseEnabled() ? "connected" : "disconnected"
-  );
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     if (typeof window === "undefined") {
       return null;
@@ -193,26 +187,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   });
 
   const hasSupabase = isSupabaseEnabled();
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const update = () => {
-      if (!hasSupabase) {
-        setRealtimeStatus("disconnected");
-        return;
-      }
-      setRealtimeStatus(window.navigator.onLine ? "connecting" : "disconnected");
-    };
-    update();
-    window.addEventListener("online", update);
-    window.addEventListener("offline", update);
-    return () => {
-      window.removeEventListener("online", update);
-      window.removeEventListener("offline", update);
-    };
-  }, [hasSupabase]);
 
   const reload = useCallback(async () => {
     const mergeActive = (
@@ -891,7 +865,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     filteredBranchIds,
     isLoading,
     hasSupabase,
-    realtimeStatus,
     login,
     logout,
     reload,
