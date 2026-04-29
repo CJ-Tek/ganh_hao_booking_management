@@ -1,7 +1,7 @@
 export type Role = "admin" | "general_manager" | "manager";
 
 export type TableStatus = "available" | "hold" | "occupied" | "locked";
-export type BookingStatus = "confirmed" | "cancelled" | "checked_in";
+export type BookingStatus = "confirmed" | "cancelled" | "checked_in" | "completed";
 
 export interface AppUser {
   id: string;

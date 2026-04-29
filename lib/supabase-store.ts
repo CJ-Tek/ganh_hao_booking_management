@@ -226,7 +226,7 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     .select("id")
     .eq("table_id", input.tableId)
     .eq("booking_at", normalizedAt)
-    .neq("status", "cancelled")
+    .in("status", ["confirmed", "checked_in"])
     .maybeSingle();
   if (conflictError) {
     return { ok: false, message: conflictError.message };
@@ -315,8 +315,11 @@ export async function updateBookingStatusInSupabase(
     .select("id, table_id")
     .eq("id", bookingId)
     .maybeSingle();
-  await client.from("bookings").update({ status }).eq("id", bookingId);
-  if (!booking || status !== "cancelled") {
+  const { error } = await client.from("bookings").update({ status }).eq("id", bookingId);
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!booking || (status !== "cancelled" && status !== "completed")) {
     return;
   }
   const { data: tableRow } = await client
@@ -331,7 +334,7 @@ export async function updateBookingStatusInSupabase(
     .from("bookings")
     .select("id")
     .eq("table_id", booking.table_id)
-    .neq("status", "cancelled")
+    .in("status", ["confirmed", "checked_in"])
     .neq("id", bookingId)
     .limit(1)
     .maybeSingle();

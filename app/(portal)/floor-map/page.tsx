@@ -326,7 +326,7 @@ export default function FloorMapPage() {
       return null;
     }
     const candidates = state.bookings
-      .filter((b) => b.tableId === detailTable.id && b.status !== "cancelled")
+      .filter((b) => b.tableId === detailTable.id && b.status !== "cancelled" && b.status !== "completed")
       .sort((a, b) => dayjs(b.bookingAt).valueOf() - dayjs(a.bookingAt).valueOf());
     return candidates[0] ?? null;
   }, [detailTable, state.bookings]);
@@ -363,14 +363,16 @@ export default function FloorMapPage() {
     if (!activeBookingForDetailTable) {
       return;
     }
-    if (activeBookingForDetailTable.status === "cancelled") {
+    if (activeBookingForDetailTable.status === "cancelled" || activeBookingForDetailTable.status === "completed") {
       return;
     }
     setDetailBookingActionLoading(true);
     try {
-      // For "Vào bàn ngay" bookings, we treat "Hoàn thành" as the final step:
-      // remove the booking from the active flow by setting it to cancelled.
-      await updateBookingStatus(activeBookingForDetailTable.id, "cancelled");
+      if (activeBookingForDetailTable.status === "checked_in") {
+        await updateBookingStatus(activeBookingForDetailTable.id, "completed");
+      } else {
+        await updateBookingStatus(activeBookingForDetailTable.id, "cancelled");
+      }
       closeDetailModal();
     } finally {
       setDetailBookingActionLoading(false);
@@ -2187,7 +2189,10 @@ export default function FloorMapPage() {
                 color={
                   activeBookingForDetailTable.status === "checked_in" ? "green" : "red"
                 }
-                disabled={activeBookingForDetailTable.status === "cancelled"}
+                disabled={
+                  activeBookingForDetailTable.status === "cancelled" ||
+                  activeBookingForDetailTable.status === "completed"
+                }
                 loading={detailBookingActionLoading}
                 onClick={() => void handleDetailCancelOrComplete()}
               >

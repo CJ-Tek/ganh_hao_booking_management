@@ -18,10 +18,12 @@ export const bookingStatusLabel: Record<BookingStatus, string> = {
   confirmed: "Đã xác nhận",
   cancelled: "Đã hủy",
   checked_in: "Đã check-in",
+  completed: "Hoàn thành",
 };
 
 export const bookingStatusColor: Record<BookingStatus, string> = {
   confirmed: "cyan",
   cancelled: "red",
   checked_in: "green",
+  completed: "teal",
 };

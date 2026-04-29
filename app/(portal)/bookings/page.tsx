@@ -268,7 +268,6 @@ function BookingsPageContent() {
         }}
         noRecordsText="Chưa có booking nào cho bộ lọc hiện tại."
         columns={[
-          { accessor: "id", title: "Mã", sortable: true },
           {
             accessor: "customerId",
             title: "Khách",
@@ -296,26 +295,28 @@ function BookingsPageContent() {
             accessor: "actions",
             title: "Thao tác",
             render: (booking) => (
-              <Group gap={6} wrap="wrap">
-                <Button
-                  size="compact-xs"
-                  variant="light"
-                  color="green"
-                  onClick={() => void checkInBooking(booking.id)}
-                  disabled={booking.status !== "confirmed"}
-                >
-                  Check-in
-                </Button>
-                <Button
-                  size="compact-xs"
-                  variant="light"
-                  color="red"
-                  onClick={() => void updateBookingStatus(booking.id, "cancelled")}
-                  disabled={booking.status === "cancelled"}
-                >
-                  Hủy
-                </Button>
-              </Group>
+              booking.status === "cancelled" || booking.status === "completed" ? null : (
+                <Group gap={6} wrap="wrap">
+                  <Button
+                    size="compact-xs"
+                    variant="light"
+                    color="green"
+                    onClick={() => void checkInBooking(booking.id)}
+                    disabled={booking.status !== "confirmed"}
+                  >
+                    Check-in
+                  </Button>
+                  <Button
+                    size="compact-xs"
+                    variant="light"
+                    color="red"
+                    onClick={() => void updateBookingStatus(booking.id, "cancelled")}
+                    disabled={booking.status === "cancelled" || booking.status === "completed"}
+                  >
+                    Hủy
+                  </Button>
+                </Group>
+              )
             ),
           },
         ]}
@@ -343,9 +344,6 @@ function BookingsPageContent() {
                     <Text fw={700} lineClamp={2}>
                       {customer}
                     </Text>
-                    <Text size="xs" c="dimmed">
-                      Mã {booking.id}
-                    </Text>
                   </div>
                   <Badge color={bookingStatusColor[booking.status]} variant="light" size="lg">
                     {bookingStatusLabel[booking.status]}
@@ -358,24 +356,28 @@ function BookingsPageContent() {
                   {area} · Bàn {table}
                 </Text>
                 <Group grow gap="xs">
-                  <Button
-                    size="sm"
-                    variant="light"
-                    color="green"
-                    onClick={() => void checkInBooking(booking.id)}
-                    disabled={booking.status !== "confirmed"}
-                  >
-                    Check-in
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="light"
-                    color="red"
-                    onClick={() => void updateBookingStatus(booking.id, "cancelled")}
-                    disabled={booking.status === "cancelled"}
-                  >
-                    Hủy
-                  </Button>
+                  {booking.status === "cancelled" || booking.status === "completed" ? null : (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="light"
+                        color="green"
+                        onClick={() => void checkInBooking(booking.id)}
+                        disabled={booking.status !== "confirmed"}
+                      >
+                        Check-in
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="light"
+                        color="red"
+                        onClick={() => void updateBookingStatus(booking.id, "cancelled")}
+                        disabled={booking.status === "cancelled" || booking.status === "completed"}
+                      >
+                        Hủy
+                      </Button>
+                    </>
+                  )}
                 </Group>
               </Stack>
             </Card>
