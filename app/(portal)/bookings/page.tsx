@@ -311,7 +311,6 @@ function BookingsPageContent() {
                     variant="light"
                     color="red"
                     onClick={() => void updateBookingStatus(booking.id, "cancelled")}
-                    disabled={booking.status === "cancelled" || booking.status === "completed"}
                   >
                     Hủy
                   </Button>
@@ -372,7 +371,6 @@ function BookingsPageContent() {
                         variant="light"
                         color="red"
                         onClick={() => void updateBookingStatus(booking.id, "cancelled")}
-                        disabled={booking.status === "cancelled" || booking.status === "completed"}
                       >
                         Hủy
                       </Button>
