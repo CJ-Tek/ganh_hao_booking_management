@@ -14,8 +14,10 @@ import {
   Text,
   TextInput,
   Textarea,
+  Tooltip,
 } from "@mantine/core";
 import { DateTimePicker } from "@mantine/dates";
+import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { DataTable, type DataTableSortStatus } from "mantine-datatable";
 import { useMemo, useState } from "react";
@@ -34,6 +36,49 @@ function branchScopeKey(branchIds: string[]) {
   return [...branchIds].sort().join("|") || "none";
 }
 
+/** Chuẩn hóa số điện thoại VN (+84 → 0…). */
+function normalizeVietnamPhone(raw: string): string {
+  let s = raw.replace(/[\s.-]/g, "");
+  if (s.startsWith("+84")) {
+    return `0${s.slice(3)}`;
+  }
+  if (s.startsWith("84") && s.length >= 10) {
+    return `0${s.slice(2)}`;
+  }
+  return s;
+}
+
+function isPlausibleVietnamPhone(normalized: string): boolean {
+  return /^0[1-9]\d{8,9}$/.test(normalized);
+}
+
+function BookingCheckInButton(props: {
+  size: "compact-xs" | "sm";
+  disabled: boolean;
+  onCheckIn: () => void;
+}) {
+  const { size, disabled, onCheckIn } = props;
+  const btn = (
+    <Button
+      size={size}
+      variant="light"
+      color="green"
+      onClick={() => void onCheckIn()}
+      disabled={disabled}
+    >
+      Check-in
+    </Button>
+  );
+  if (!disabled) {
+    return btn;
+  }
+  return (
+    <Tooltip label="Chỉ check-in khi booking đã xác nhận." withArrow>
+      <span style={{ display: "inline-flex" }}>{btn}</span>
+    </Tooltip>
+  );
+}
+
 export default function BookingsPage() {
   const { filteredBranchIds } = useAppContext();
   return <BookingsPageContent key={branchScopeKey(filteredBranchIds)} />;
@@ -46,6 +91,7 @@ function BookingsPageContent() {
     createBooking,
     updateBookingStatus,
     checkInBooking,
+    hasSupabase,
   } = useAppContext();
 
   const isCompact = usePortalCompact();
@@ -70,6 +116,53 @@ function BookingsPageContent() {
   });
   const [page, setPage] = useState(1);
   const pageSize = 8;
+
+  const openCancelBookingConfirm = (booking: Booking) => {
+    const customer = state.customers.find((c) => c.id === booking.customerId);
+    const name = customer?.fullName ?? "—";
+    const timeStr = dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY");
+    modals.openConfirmModal({
+      title: "Xác nhận hủy booking",
+      children: (
+        <Text size="sm">
+          Hủy booking của <strong>{name}</strong> · {timeStr}? Thao tác không hoàn tác.
+        </Text>
+      ),
+      labels: { cancel: "Quay lại", confirm: "Hủy booking" },
+      confirmProps: { color: "red" },
+      onConfirm: async () => {
+        if (!hasSupabase) {
+          notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
+          return;
+        }
+        try {
+          await updateBookingStatus(booking.id, "cancelled");
+          notifications.show({ color: "green", message: "Đã hủy booking." });
+        } catch (error) {
+          notifications.show({
+            color: "red",
+            message: error instanceof Error ? error.message : "Không hủy được booking.",
+          });
+        }
+      },
+    });
+  };
+
+  const runCheckIn = async (bookingId: string) => {
+    if (!hasSupabase) {
+      notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
+      return;
+    }
+    try {
+      await checkInBooking(bookingId);
+      notifications.show({ color: "green", message: "Đã check-in." });
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Check-in thất bại.",
+      });
+    }
+  };
 
   const filteredAreas = state.areas.filter((area) => area.branchId === branchId);
   const filteredTables = useMemo(() => {
@@ -145,6 +238,15 @@ function BookingsPageContent() {
       notifications.show({ color: "red", message: "Vui lòng nhập đầy đủ thông tin." });
       return;
     }
+    const phoneNorm = normalizeVietnamPhone(customerPhone.trim());
+    if (!isPlausibleVietnamPhone(phoneNorm)) {
+      notifications.show({
+        color: "red",
+        message:
+          "Số điện thoại không đúng định dạng Việt Nam (ví dụ 0912345678, +84912345678).",
+      });
+      return;
+    }
     const nextGuestCount = Math.max(1, guestCount);
     if (selectedTable?.seats && nextGuestCount > selectedTable.seats) {
       notifications.show({
@@ -155,7 +257,7 @@ function BookingsPageContent() {
     }
     const result = await createBooking({
       customerName,
-      customerPhone,
+      customerPhone: phoneNorm,
       branchId,
       areaId,
       tableId,
@@ -361,20 +463,16 @@ function BookingsPageContent() {
             render: (booking) => (
               booking.status === "cancelled" || booking.status === "completed" ? null : (
                 <Group gap={6} wrap="wrap">
-                  <Button
+                  <BookingCheckInButton
                     size="compact-xs"
-                    variant="light"
-                    color="green"
-                    onClick={() => void checkInBooking(booking.id)}
                     disabled={booking.status !== "confirmed"}
-                  >
-                    Check-in
-                  </Button>
+                    onCheckIn={() => runCheckIn(booking.id)}
+                  />
                   <Button
                     size="compact-xs"
                     variant="light"
                     color="red"
-                    onClick={() => void updateBookingStatus(booking.id, "cancelled")}
+                    onClick={() => openCancelBookingConfirm(booking)}
                   >
                     Hủy
                   </Button>
@@ -437,20 +535,16 @@ function BookingsPageContent() {
                 <Group grow gap="xs">
                   {booking.status === "cancelled" || booking.status === "completed" ? null : (
                     <>
-                      <Button
+                      <BookingCheckInButton
                         size="sm"
-                        variant="light"
-                        color="green"
-                        onClick={() => void checkInBooking(booking.id)}
                         disabled={booking.status !== "confirmed"}
-                      >
-                        Check-in
-                      </Button>
+                        onCheckIn={() => runCheckIn(booking.id)}
+                      />
                       <Button
                         size="sm"
                         variant="light"
                         color="red"
-                        onClick={() => void updateBookingStatus(booking.id, "cancelled")}
+                        onClick={() => openCancelBookingConfirm(booking)}
                       >
                         Hủy
                       </Button>
@@ -493,7 +587,7 @@ function BookingsPageContent() {
   return (
     <Stack gap="md">
       <PortalPageTitle order={isCompact ? 3 : 2}>
-        {isCompact ? "Đặt bàn" : "Booking - Tạo / sửa / hủy đặt bàn"}
+        {isCompact ? "Đặt bàn" : "Đặt bàn — Tạo / theo dõi / hủy"}
       </PortalPageTitle>
 
       {isCompact ? (

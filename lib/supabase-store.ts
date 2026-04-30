@@ -33,7 +33,7 @@ export function isSupabaseEnabled() {
 
 function ensureClient() {
   if (!supabase) {
-    throw new Error("Chua cau hinh Supabase.");
+    throw new Error("Chưa cấu hình Supabase.");
   }
   return supabase;
 }
@@ -50,7 +50,7 @@ export async function updateBranchInSupabase(
   if (error) {
     return { ok: false, message: error.message };
   }
-  return { ok: true, message: "Da cap nhat chi nhanh." };
+  return { ok: true, message: "Đã cập nhật chi nhánh." };
 }
 
 export async function fetchSnapshot(): Promise<AppStateSnapshot> {
@@ -91,7 +91,7 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
   ].filter(Boolean);
 
   if (errors.length > 0) {
-    throw new Error(errors[0]?.message ?? "Khong the tai du lieu Supabase.");
+    throw new Error(errors[0]?.message ?? "Không thể tải dữ liệu Supabase.");
   }
 
   return {
@@ -232,7 +232,7 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     return { ok: false, message: conflictError.message };
   }
   if (conflict) {
-    return { ok: false, message: "Ban da co booking cung khung gio." };
+    return { ok: false, message: "Đã có đặt bàn trùng khung giờ trên bàn này." };
   }
 
   const { data: currentCustomer } = await client
@@ -260,7 +260,7 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
       .select("id")
       .single();
     if (error || !data) {
-      return { ok: false, message: error?.message ?? "Khong tao duoc khach hang." };
+      return { ok: false, message: error?.message ?? "Không tạo được khách hàng." };
     }
     customerId = data.id;
   }
@@ -293,8 +293,8 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
   }
 
   await client.from("internal_notifications").insert({
-    title: "Booking moi",
-    message: `Da tao booking cho ${input.customerName} luc ${dayjs(normalizedAt).format(
+    title: "Đặt bàn mới",
+    message: `Đã tạo booking cho ${input.customerName} lúc ${dayjs(normalizedAt).format(
       "HH:mm DD/MM/YYYY"
     )}.`,
     created_at: dayjs().toISOString(),
@@ -302,7 +302,7 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     branch_id: input.branchId,
   });
 
-  return { ok: true, message: "Da tao booking thanh cong." };
+  return { ok: true, message: "Đã tạo booking thành công." };
 }
 
 export async function updateBookingStatusInSupabase(
@@ -347,7 +347,7 @@ export async function deleteCustomersInSupabase(customerIds: string[]): Promise<
   const client = ensureClient();
   const ids = customerIds.filter((id) => id.trim().length > 0);
   if (ids.length === 0) {
-    return { ok: true, message: "Khong co khach hang de xoa." };
+    return { ok: true, message: "Không có khách hàng để xóa." };
   }
 
   const { data: bookingRefs, error: bookingRefsError } = await client
@@ -359,43 +359,73 @@ export async function deleteCustomersInSupabase(customerIds: string[]): Promise<
     return { ok: false, message: bookingRefsError.message };
   }
   if (bookingRefs && bookingRefs.length > 0) {
-    return { ok: false, message: "Khong the xoa: khach hang da co booking." };
+    return { ok: false, message: "Không thể xóa: khách hàng đã có booking." };
   }
 
   const { error } = await client.from("customers").delete().in("id", ids);
   if (error) {
     return { ok: false, message: error.message };
   }
-  return { ok: true, message: "Da xoa khach hang." };
+  return { ok: true, message: "Đã xóa khách hàng." };
 }
 
 export async function checkInBookingInSupabase(bookingId: string): Promise<void> {
   const client = ensureClient();
-  const { data: target } = await client
+  const { data: target, error: loadErr } = await client
     .from("bookings")
     .select("id, branch_id, table_id")
     .eq("id", bookingId)
     .maybeSingle();
+  if (loadErr) {
+    throw new Error(loadErr.message);
+  }
   if (!target) {
-    return;
+    throw new Error("Không tìm thấy booking.");
   }
 
-  await client.from("bookings").update({ status: "checked_in" }).eq("id", bookingId);
-  const { data: tableRow } = await client
+  const { error: bookingErr } = await client
+    .from("bookings")
+    .update({ status: "checked_in" })
+    .eq("id", bookingId);
+  if (bookingErr) {
+    throw new Error(bookingErr.message);
+  }
+
+  const { data: tableRow, error: tableReadErr } = await client
     .from("tables")
-    .select("status")
+    .select("status, name")
     .eq("id", target.table_id)
     .maybeSingle();
-  if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-    await client.from("tables").update({ status: "occupied" }).eq("id", target.table_id);
+  if (tableReadErr) {
+    throw new Error(tableReadErr.message);
   }
-  await client.from("internal_notifications").insert({
-    title: "Check-in hoan tat",
-    message: `Booking ${target.id} da chuyen trang thai co khach.`,
+  if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+    const { error: tableUpdErr } = await client
+      .from("tables")
+      .update({ status: "occupied" })
+      .eq("id", target.table_id);
+    if (tableUpdErr) {
+      throw new Error(tableUpdErr.message);
+    }
+  }
+
+  const tableName =
+    typeof tableRow?.name === "string" ? tableRow.name.trim() : "";
+  const checkInMessage =
+    tableName.length > 0
+      ? `Đã check-in thành công. Bàn ${tableName} chuyển sang trạng thái có khách.`
+      : "Đã check-in thành công. Bàn chuyển sang trạng thái có khách.";
+
+  const { error: notifErr } = await client.from("internal_notifications").insert({
+    title: "Check-in hoàn tất",
+    message: checkInMessage,
     created_at: dayjs().toISOString(),
     is_read: false,
     branch_id: target.branch_id,
   });
+  if (notifErr) {
+    throw new Error(notifErr.message);
+  }
 }
 
 export async function upsertTableInSupabase(input: {
@@ -779,7 +809,7 @@ export async function addUserInSupabase(payload: {
     .eq("username", payload.username)
     .maybeSingle();
   if (existing) {
-    return { ok: false, message: "Ten dang nhap da ton tai." };
+    return { ok: false, message: "Tên đăng nhập đã tồn tại." };
   }
   const { error } = await client.from("app_users").insert({
     username: payload.username,
@@ -791,7 +821,7 @@ export async function addUserInSupabase(payload: {
   if (error) {
     return { ok: false, message: error.message };
   }
-  return { ok: true, message: "Da tao tai khoan moi." };
+  return { ok: true, message: "Đã tạo tài khoản mới." };
 }
 
 export async function updateUserInSupabase(
@@ -847,5 +877,25 @@ export async function deleteUserInSupabase(userId: string): Promise<Result> {
 
 export async function markNotificationReadInSupabase(id: string): Promise<void> {
   const client = ensureClient();
-  await client.from("internal_notifications").update({ is_read: true }).eq("id", id);
+  const { error } = await client
+    .from("internal_notifications")
+    .update({ is_read: true })
+    .eq("id", id);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function markNotificationsReadBatchInSupabase(ids: string[]): Promise<void> {
+  if (ids.length === 0) {
+    return;
+  }
+  const client = ensureClient();
+  const { error } = await client
+    .from("internal_notifications")
+    .update({ is_read: true })
+    .in("id", ids);
+  if (error) {
+    throw new Error(error.message);
+  }
 }

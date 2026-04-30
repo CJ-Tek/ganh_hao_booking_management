@@ -38,10 +38,14 @@ export default function LoginPage() {
       setIsSubmitting(false);
       return;
     }
-    if (user.role === "admin" || user.role === "general_manager") {
-      router.replace("/select-branch");
-    } else {
-      router.replace("/dashboard");
+    try {
+      if (user.role === "admin" || user.role === "general_manager") {
+        router.replace("/select-branch");
+      } else {
+        router.replace("/dashboard");
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 

@@ -16,8 +16,10 @@ import {
   Text,
   TextInput,
   Textarea,
+  Tooltip,
 } from "@mantine/core";
 import { DatePickerInput, TimeInput } from "@mantine/dates";
+import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
 import {
@@ -343,6 +345,42 @@ export default function FloorMapPage() {
     setDetailTable(null);
   };
 
+  const openDetailCancelBookingConfirm = () => {
+    const b = activeBookingForDetailTable;
+    if (
+      !b ||
+      b.status === "cancelled" ||
+      b.status === "completed" ||
+      b.status === "checked_in"
+    ) {
+      return;
+    }
+    modals.openConfirmModal({
+      title: "Xác nhận hủy booking",
+      children: (
+        <Text size="sm">Hủy booking này trên bàn? Thao tác không hoàn tác.</Text>
+      ),
+      labels: { cancel: "Quay lại", confirm: "Hủy booking" },
+      confirmProps: { color: "red" },
+      onConfirm: async () => {
+        if (!hasSupabase) {
+          notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
+          return;
+        }
+        try {
+          await updateBookingStatus(b.id, "cancelled");
+          notifications.show({ color: "green", message: "Đã hủy booking." });
+          closeDetailModal();
+        } catch (error) {
+          notifications.show({
+            color: "red",
+            message: error instanceof Error ? error.message : "Không hủy được booking.",
+          });
+        }
+      },
+    });
+  };
+
   const handleDetailCheckIn = async () => {
     if (!activeBookingForDetailTable) {
       return;
@@ -350,30 +388,46 @@ export default function FloorMapPage() {
     if (activeBookingForDetailTable.status !== "confirmed") {
       return;
     }
+    if (!hasSupabase) {
+      notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
+      return;
+    }
     setDetailBookingActionLoading(true);
     try {
       await checkInBooking(activeBookingForDetailTable.id);
+      notifications.show({ color: "green", message: "Đã check-in." });
       closeDetailModal();
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Check-in thất bại.",
+      });
     } finally {
       setDetailBookingActionLoading(false);
     }
   };
 
-  const handleDetailCancelOrComplete = async () => {
+  const handleDetailComplete = async () => {
     if (!activeBookingForDetailTable) {
       return;
     }
-    if (activeBookingForDetailTable.status === "cancelled" || activeBookingForDetailTable.status === "completed") {
+    if (activeBookingForDetailTable.status !== "checked_in") {
+      return;
+    }
+    if (!hasSupabase) {
+      notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
       return;
     }
     setDetailBookingActionLoading(true);
     try {
-      if (activeBookingForDetailTable.status === "checked_in") {
-        await updateBookingStatus(activeBookingForDetailTable.id, "completed");
-      } else {
-        await updateBookingStatus(activeBookingForDetailTable.id, "cancelled");
-      }
+      await updateBookingStatus(activeBookingForDetailTable.id, "completed");
+      notifications.show({ color: "green", message: "Đã hoàn thành booking." });
       closeDetailModal();
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Không hoàn thành được booking.",
+      });
     } finally {
       setDetailBookingActionLoading(false);
     }
@@ -2171,18 +2225,28 @@ export default function FloorMapPage() {
               {bookingStatusLabel[activeBookingForDetailTable.status]}
             </Badge>
             <Group justify="flex-end" gap="xs" mt="xs">
-              {detailTable.status !== "occupied" ? (
-                <Button
-                  size="xs"
-                  variant="light"
-                  color="green"
-                  disabled={activeBookingForDetailTable.status !== "confirmed"}
-                  loading={detailBookingActionLoading}
-                  onClick={() => void handleDetailCheckIn()}
-                >
-                  Check-in
-                </Button>
-              ) : null}
+              {detailTable.status !== "occupied" ? (() => {
+                const checkInDisabled = activeBookingForDetailTable.status !== "confirmed";
+                const checkInBtn = (
+                  <Button
+                    size="xs"
+                    variant="light"
+                    color="green"
+                    disabled={checkInDisabled}
+                    loading={detailBookingActionLoading}
+                    onClick={() => void handleDetailCheckIn()}
+                  >
+                    Check-in
+                  </Button>
+                );
+                return checkInDisabled ? (
+                  <Tooltip label="Chỉ check-in khi booking đã xác nhận." withArrow>
+                    <span style={{ display: "inline-flex" }}>{checkInBtn}</span>
+                  </Tooltip>
+                ) : (
+                  checkInBtn
+                );
+              })() : null}
               <Button
                 size="xs"
                 variant={activeBookingForDetailTable.status === "checked_in" ? "filled" : "light"}
@@ -2194,7 +2258,16 @@ export default function FloorMapPage() {
                   activeBookingForDetailTable.status === "completed"
                 }
                 loading={detailBookingActionLoading}
-                onClick={() => void handleDetailCancelOrComplete()}
+                onClick={() => {
+                  if (activeBookingForDetailTable.status === "checked_in") {
+                    void handleDetailComplete();
+                  } else if (
+                    activeBookingForDetailTable.status !== "cancelled" &&
+                    activeBookingForDetailTable.status !== "completed"
+                  ) {
+                    openDetailCancelBookingConfirm();
+                  }
+                }}
               >
                 {activeBookingForDetailTable.status === "checked_in"
                   ? "Hoàn thành"

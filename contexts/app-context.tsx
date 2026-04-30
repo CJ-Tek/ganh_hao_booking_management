@@ -32,6 +32,7 @@ import {
   isSupabaseEnabled,
   loginWithSupabase,
   markNotificationReadInSupabase,
+  markNotificationsReadBatchInSupabase,
   deleteTableInSupabase,
   deleteTablesInSupabase,
   deleteCustomersInSupabase,
@@ -128,6 +129,7 @@ interface AppContextValue {
   ) => Promise<ActionResult>;
   deleteUser: (userId: string) => Promise<ActionResult>;
   markNotificationRead: (id: string) => Promise<void>;
+  markAllScopedNotificationsRead: () => Promise<void>;
   saveAreaFloorGrid: (
     areaId: string,
     columns: number,
@@ -339,11 +341,11 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
 
   const createBooking = async (input: CreateBookingInput) => {
     if (!currentUser) {
-      return { ok: false, message: "Vui long dang nhap." };
+      return { ok: false, message: "Vui lòng đăng nhập." };
     }
 
     if (!hasSupabase) {
-      return { ok: false, message: "Chua ket noi Supabase. Vui long cau hinh .env.local." };
+      return { ok: false, message: "Chưa kết nối Supabase. Vui lòng cấu hình .env.local." };
     }
 
     // Optimistic: immediately reflect auto table state from booking time.
@@ -400,7 +402,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
           ),
         }));
       }
-      return { ok: false, message: error instanceof Error ? error.message : "Khong tao duoc booking." };
+      return { ok: false, message: error instanceof Error ? error.message : "Không tạo được booking." };
     }
   };
 
@@ -421,12 +423,12 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const deleteCustomers = async (customerIds: string[]) => {
     const ids = customerIds.filter((id) => id.trim().length > 0);
     if (ids.length === 0) {
-      return { ok: true, message: "Khong co khach hang de xoa." };
+      return { ok: true, message: "Không có khách hàng để xóa." };
     }
 
     const hasBooking = state.bookings.some((b) => ids.includes(b.customerId));
     if (hasBooking) {
-      return { ok: false, message: "Khong the xoa: khach hang da co booking." };
+      return { ok: false, message: "Không thể xóa: khách hàng đã có booking." };
     }
 
     if (!hasSupabase) {
@@ -434,7 +436,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         ...prev,
         customers: prev.customers.filter((c) => !ids.includes(c.id)),
       }));
-      return { ok: true, message: "Da xoa khach hang." };
+      return { ok: true, message: "Đã xóa khách hàng." };
     }
 
     const result = await deleteCustomersInSupabase(ids);
@@ -606,7 +608,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       };
     }
     if (!hasSupabase) {
-      return { ok: false, message: "Chua ket noi Supabase." };
+      return { ok: false, message: "Chưa kết nối Supabase." };
     }
     const result = await addUserInSupabase(payload);
     if (result.ok) {
@@ -741,6 +743,12 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
 
   const markNotificationRead = async (id: string) => {
     if (!hasSupabase) {
+      setState((prev) => ({
+        ...prev,
+        notifications: prev.notifications.map((item) =>
+          item.id === id ? { ...item, isRead: true } : item
+        ),
+      }));
       return;
     }
     await markNotificationReadInSupabase(id);
@@ -751,6 +759,34 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       ),
     }));
   };
+
+  const markAllScopedNotificationsRead = useCallback(async () => {
+    const ids = state.notifications
+      .filter(
+        (n) =>
+          !n.isRead && (!n.branchId || filteredBranchIds.includes(n.branchId))
+      )
+      .map((n) => n.id);
+    if (ids.length === 0) {
+      return;
+    }
+    if (!hasSupabase) {
+      setState((prev) => ({
+        ...prev,
+        notifications: prev.notifications.map((n) =>
+          ids.includes(n.id) ? { ...n, isRead: true } : n
+        ),
+      }));
+      return;
+    }
+    await markNotificationsReadBatchInSupabase(ids);
+    setState((prev) => ({
+      ...prev,
+      notifications: prev.notifications.map((n) =>
+        ids.includes(n.id) ? { ...n, isRead: true } : n
+      ),
+    }));
+  }, [filteredBranchIds, hasSupabase, state.notifications]);
 
   const saveAreaFloorGrid = useCallback(
     async (areaId: string, columns: number, rows: number, spacing: number) => {
@@ -893,6 +929,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     updateUser,
     deleteUser,
     markNotificationRead,
+    markAllScopedNotificationsRead,
     saveAreaFloorGrid,
     saveFloorLayout,
     acquireFloorLayoutEditLock,
@@ -907,7 +944,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
 export function useAppContext() {
   const context = useContext(AppContext);
   if (!context) {
-    throw new Error("useAppContext phai dung trong AppContextProvider");
+    throw new Error("useAppContext phải dùng trong AppContextProvider");
   }
   return context;
 }

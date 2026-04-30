@@ -1,7 +1,18 @@
 .notificationBadge {
   position: absolute;
-  top: -3px;
-  right: -3px;
+  top: -2px;
+  right: -2px;
+  pointer-events: none;
+  font-size: 10px;
+  min-width: 18px;
+  height: 18px;
+}
+
+.notificationBellWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .headerRoot {
@@ -17,9 +28,25 @@
 }
 
 .notificationItem {
-  border: 1px solid #e9ecef;
-  border-radius: 8px;
   cursor: pointer;
+  border-radius: var(--mantine-radius-md);
+  border: 1px solid light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-5));
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.notificationItem:hover {
+  border-color: light-dark(var(--mantine-color-gray-4), var(--mantine-color-dark-4));
+  background-color: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-7));
+}
+
+.notificationItemUnread {
+  border-left: 3px solid var(--mantine-color-brand-filled);
+  padding-left: calc(var(--mantine-spacing-xs) - 1px);
+  background-color: var(--mantine-color-brand-light);
+}
+
+.notificationItemUnread:hover {
+  background-color: var(--mantine-color-brand-light-hover);
 }
 
 @media (max-width: 48em) {

@@ -1,6 +1,5 @@
 "use client";
 
-import dayjs from "dayjs";
 import {
   ActionIcon,
   AppShell,
@@ -42,6 +41,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useMemo } from "react";
 import { useAppContext } from "@/contexts/app-context";
+import { formatNotificationTime } from "@/lib/format-notification-time";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import classes from "./app-shell-layout.module.css";
 
@@ -57,9 +57,9 @@ const managerDockShortLabel: Record<(typeof MANAGER_DOCK_HREFS)[number], string>
 };
 
 const navItems: NavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard size={16} /> },
+  { label: "Tổng quan", href: "/dashboard", icon: <LayoutDashboard size={16} /> },
   { label: "Sơ đồ nhà hàng", href: "/floor-map", icon: <Map size={16} /> },
-  { label: "Booking", href: "/bookings", icon: <BookOpenText size={16} /> },
+  { label: "Đặt bàn", href: "/bookings", icon: <BookOpenText size={16} /> },
   { label: "Lịch đặt bàn", href: "/calendar", icon: <CalendarDays size={16} /> },
   { label: "Quản lý bàn", href: "/tables", icon: <SquareMenu size={16} /> },
   { label: "Khách hàng", href: "/customers", icon: <Users size={16} /> },
@@ -71,7 +71,7 @@ const navItems: NavItem[] = [
     adminOnly: true,
   },
   {
-    label: "User management",
+    label: "Quản lý người dùng",
     href: "/settings/users",
     icon: <UserCog size={16} />,
     adminOnly: true,
@@ -91,6 +91,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     setActiveBranchId,
     logout,
     markNotificationRead,
+    markAllScopedNotificationsRead,
     hasSupabase,
   } = useAppContext();
 
@@ -112,6 +113,18 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   );
   const unreadNotifications = useMemo(
     () => scopedNotifications.filter((item) => !item.isRead),
+    [scopedNotifications]
+  );
+
+  const popoverPreviewCount = 8;
+  const previewNotifications = useMemo(
+    () =>
+      [...scopedNotifications].sort((a, b) => {
+        if (a.isRead !== b.isRead) {
+          return a.isRead ? 1 : -1;
+        }
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }),
     [scopedNotifications]
   );
   const shownNavItems = useMemo(() => {
@@ -196,53 +209,129 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 }))}
               />
             )}
-            <Popover width={340} position="bottom-end" withArrow shadow="md">
+            <Popover width={380} position="bottom-end" withArrow shadow="md">
               <Popover.Target>
-                <ActionIcon variant="light" size="lg">
-                  <Bell size={18} />
-                  {unreadNotifications.length > 0 && (
-                    <Badge size="xs" circle color="red" className={classes.notificationBadge}>
-                      {unreadNotifications.length}
-                    </Badge>
-                  )}
-                </ActionIcon>
-              </Popover.Target>
-              <Popover.Dropdown>
-                <Group justify="space-between" mb="xs">
-                  <Text fw={600}>Thông báo nội bộ</Text>
-                  <Button
-                    variant="subtle"
-                    size="compact-xs"
-                    onClick={() => router.push("/notifications")}
+                <Box className={classes.notificationBellWrap}>
+                  <ActionIcon
+                    variant="transparent"
+                    color="gray"
+                    size="lg"
+                    radius="md"
+                    aria-label="Thông báo nội bộ"
                   >
-                    Xem tất cả
-                  </Button>
-                </Group>
-                <ScrollArea h={220}>
-                  <Stack gap="xs">
-                    {scopedNotifications.slice(0, 5).map((item) => (
-                      <Box
-                        key={item.id}
-                        p="xs"
-                        className={classes.notificationItem}
-                        onClick={() => markNotificationRead(item.id)}
-                      >
-                        <Group justify="space-between" align="start">
-                          <Text fw={600} size="sm">
-                            {item.title}
-                          </Text>
-                          {!item.isRead && <Badge size="xs">Mới</Badge>}
-                        </Group>
-                        <Text size="xs" c="dimmed">
-                          {item.message}
-                        </Text>
-                        <Text size="xs" c="dimmed" mt={4}>
-                          {dayjs(item.createdAt).format("HH:mm DD/MM")}
-                        </Text>
-                      </Box>
-                    ))}
-                  </Stack>
+                    <Bell size={20} strokeWidth={1.75} />
+                  </ActionIcon>
+                  {unreadNotifications.length > 0 ? (
+                    <Badge
+                      size="xs"
+                      circle
+                      variant="filled"
+                      color="red"
+                      className={classes.notificationBadge}
+                    >
+                      {unreadNotifications.length > 99 ? "99+" : unreadNotifications.length}
+                    </Badge>
+                  ) : null}
+                </Box>
+              </Popover.Target>
+              <Popover.Dropdown p="sm">
+                <Stack gap="xs" mb="sm">
+                  <Group justify="space-between" gap="xs" wrap="nowrap" align="flex-start">
+                    <Stack gap={2} style={{ minWidth: 0 }}>
+                      <Text fw={700} size="sm" lh={1.3}>
+                        Thông báo
+                      </Text>
+                      <Text size="xs" c="dimmed" lineClamp={1}>
+                        {unreadNotifications.length === 0
+                          ? "Đã đọc hết trong phạm vi chi nhánh"
+                          : `${unreadNotifications.length} chưa đọc`}
+                      </Text>
+                    </Stack>
+                    <Button
+                      variant="light"
+                      size="compact-xs"
+                      onClick={() => router.push("/notifications")}
+                    >
+                      Xem tất cả
+                    </Button>
+                  </Group>
+                </Stack>
+
+                <ScrollArea h={scopedNotifications.length === 0 ? 80 : 280} type="auto">
+                  {scopedNotifications.length === 0 ? (
+                    <Text size="sm" c="dimmed" ta="center" py="md">
+                      Chưa có thông báo.
+                    </Text>
+                  ) : (
+                    <Stack gap={6}>
+                      {previewNotifications.slice(0, popoverPreviewCount).map((item) => {
+                        const branch = item.branchId
+                          ? state.branches.find((b) => b.id === item.branchId)
+                          : null;
+                        return (
+                          <Box
+                            key={item.id}
+                            p="sm"
+                            className={`${classes.notificationItem}${item.isRead ? "" : ` ${classes.notificationItemUnread}`}`}
+                            onClick={() => void markNotificationRead(item.id)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                void markNotificationRead(item.id);
+                              }
+                            }}
+                          >
+                            <Group justify="space-between" align="flex-start" gap="xs" wrap="nowrap">
+                              <Text fw={600} size="sm" lineClamp={2} style={{ flex: 1, minWidth: 0 }}>
+                                {item.title}
+                              </Text>
+                              {!item.isRead ? (
+                                <Badge size="xs" variant="dot" color="brand" style={{ flexShrink: 0 }}>
+                                  Mới
+                                </Badge>
+                              ) : null}
+                            </Group>
+                            <Text size="xs" c="dimmed" mt={6} lineClamp={3}>
+                              {item.message}
+                            </Text>
+                            <Group justify="space-between" gap="xs" mt={8} wrap="nowrap">
+                              <Text size="xs" c="dimmed">
+                                {formatNotificationTime(item.createdAt)}
+                              </Text>
+                              {branch ? (
+                                <Text size="xs" c="dimmed" lineClamp={1} maw={140} ta="right">
+                                  {branch.name}
+                                </Text>
+                              ) : null}
+                            </Group>
+                          </Box>
+                        );
+                      })}
+                    </Stack>
+                  )}
                 </ScrollArea>
+
+                {scopedNotifications.length > popoverPreviewCount ? (
+                  <Text size="xs" c="dimmed" ta="center" mt="xs">
+                    +{scopedNotifications.length - popoverPreviewCount} thông báo khác trong danh sách
+                  </Text>
+                ) : null}
+
+                {unreadNotifications.length > 0 ? (
+                  <>
+                    <Divider my="sm" />
+                    <Button
+                      variant="subtle"
+                      size="compact-sm"
+                      fullWidth
+                      onClick={() => void markAllScopedNotificationsRead()}
+                    >
+                      Đánh dấu tất cả đã đọc
+                    </Button>
+                  </>
+                ) : null}
               </Popover.Dropdown>
             </Popover>
 

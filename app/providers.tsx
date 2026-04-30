@@ -9,6 +9,7 @@ import {
   MantineProvider,
 } from "@mantine/core";
 import { DatesProvider } from "@mantine/dates";
+import { ModalsProvider } from "@mantine/modals";
 import { Notifications } from "@mantine/notifications";
 import { AppContextProvider } from "@/contexts/app-context";
 import "mantine-datatable/styles.css";
@@ -38,8 +39,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <MantineProvider theme={theme} defaultColorScheme="light">
       <DatesProvider settings={{ locale: "vi" }}>
-        <Notifications />
-        <AppContextProvider>{children}</AppContextProvider>
+        <ModalsProvider modalProps={{ centered: true }}>
+          <Notifications />
+          <AppContextProvider>{children}</AppContextProvider>
+        </ModalsProvider>
       </DatesProvider>
     </MantineProvider>
   );
