@@ -18,6 +18,7 @@ import { notifications } from "@mantine/notifications";
 import { useMemo, useRef, useState } from "react";
 import { matchAreaId, matchTableId, type AreaLite, type TableLite } from "@/lib/voice-booking/match";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
+import { tableStatusLabel } from "@/lib/display";
 
 type ActionResult = { ok: boolean; message: string };
 
@@ -149,7 +150,9 @@ export function VoiceBookingAssistant(props: {
     const filtered = areaId ? tables.filter((t) => t.areaId === areaId) : tables;
     return filtered.map((t) => ({
       value: t.id,
-      label: `${t.name} · ${t.seats} ghế${t.status ? ` · ${String(t.status)}` : ""}`,
+      label: `${t.name} · ${t.seats} ghế${
+        t.status ? ` · ${tableStatusLabel[t.status as keyof typeof tableStatusLabel] ?? String(t.status)}` : ""
+      }`,
     }));
   }, [tables, areaId]);
 
@@ -426,8 +429,8 @@ export function VoiceBookingAssistant(props: {
 
           {areaAvailability ? (
             <Text size="sm" c="dimmed">
-              Khu đã chọn: {areaAvailability.total} bàn · available {areaAvailability.byStatus.available ?? 0} · hold{" "}
-              {areaAvailability.byStatus.hold ?? 0} · occupied {areaAvailability.byStatus.occupied ?? 0} · locked{" "}
+              Tình trạng khu: {areaAvailability.total} bàn · Trống {areaAvailability.byStatus.available ?? 0} · Giữ chỗ{" "}
+              {areaAvailability.byStatus.hold ?? 0} · Đang ngồi {areaAvailability.byStatus.occupied ?? 0} · Khóa{" "}
               {areaAvailability.byStatus.locked ?? 0}
             </Text>
           ) : null}
