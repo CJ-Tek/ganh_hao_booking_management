@@ -26,11 +26,13 @@ import {
   PortalSectionCard,
   PortalStickyAction,
 } from "@/components/portal-page";
+import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking, type TableStatus } from "@/lib/types";
+import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
 
 function branchScopeKey(branchIds: string[]) {
   return [...branchIds].sort().join("|") || "none";
@@ -38,7 +40,7 @@ function branchScopeKey(branchIds: string[]) {
 
 /** Chuẩn hóa số điện thoại VN (+84 → 0…). */
 function normalizeVietnamPhone(raw: string): string {
-  let s = raw.replace(/[\s.-]/g, "");
+  const s = raw.replace(/[\s.-]/g, "");
   if (s.startsWith("+84")) {
     return `0${s.slice(3)}`;
   }
@@ -165,6 +167,23 @@ function BookingsPageContent() {
   };
 
   const filteredAreas = state.areas.filter((area) => area.branchId === branchId);
+  const branchTables = useMemo(
+    () => state.tables.filter((table) => table.branchId === branchId),
+    [branchId, state.tables]
+  );
+  const areaAvailability = useMemo(() => {
+    if (!areaId) return null;
+    const items = state.tables.filter((t) => t.areaId === areaId);
+    const counts = items.reduce(
+      (acc, t) => {
+        acc.total += 1;
+        acc.byStatus[t.status] = (acc.byStatus[t.status] ?? 0) + 1;
+        return acc;
+      },
+      { total: 0, byStatus: {} as Partial<Record<TableStatus, number>> }
+    );
+    return counts;
+  }, [areaId, state.tables]);
   const filteredTables = useMemo(() => {
     return state.tables
       .filter((table) => table.areaId === areaId)
@@ -256,7 +275,7 @@ function BookingsPageContent() {
       return;
     }
     const result = await createBooking({
-      customerName,
+      customerName: formatVietnamesePersonName(customerName),
       customerPhone: phoneNorm,
       branchId,
       areaId,
@@ -285,11 +304,26 @@ function BookingsPageContent() {
         <Text size="sm" c="dimmed">
           Chi nhánh: <strong>{branchName}</strong>
         </Text>
+        <Group justify="flex-start">
+          <VoiceBookingAssistant
+            branch={branchId ? { id: branchId, name: branchName } : null}
+            areas={filteredAreas.map((a) => ({ id: a.id, name: a.name }))}
+            tables={branchTables.map((t) => ({
+              id: t.id,
+              name: t.name,
+              seats: t.seats,
+              areaId: t.areaId,
+              status: t.status,
+            }))}
+            onCreateBooking={createBooking}
+          />
+        </Group>
         <TextInput
           label="Tên khách"
           placeholder="Họ và tên"
           value={customerName}
           onChange={(event) => setCustomerName(event.currentTarget.value)}
+          onBlur={() => setCustomerName((v) => formatVietnamesePersonName(v))}
           size={isCompact ? "md" : "sm"}
         />
         <TextInput
@@ -311,6 +345,13 @@ function BookingsPageContent() {
           data={filteredAreas.map((area) => ({ value: area.id, label: area.name }))}
           size={isCompact ? "md" : "sm"}
         />
+        {areaAvailability ? (
+          <Text size="sm" c="dimmed">
+            Tình trạng khu: {areaAvailability.total} bàn · Trống {areaAvailability.byStatus.available ?? 0} · Giữ chỗ{" "}
+            {areaAvailability.byStatus.hold ?? 0} · Đang ngồi {areaAvailability.byStatus.occupied ?? 0} · Khóa{" "}
+            {areaAvailability.byStatus.locked ?? 0}
+          </Text>
+        ) : null}
         <Select
           label="Trạng thái bàn (lọc)"
           value={tableStatusFilter}
@@ -329,7 +370,10 @@ function BookingsPageContent() {
           placeholder="Chọn hoặc gõ tên bàn"
           value={tableId}
           onChange={setTableId}
-          data={filteredTables.map((table) => ({ value: table.id, label: table.name }))}
+          data={filteredTables.map((table) => ({
+            value: table.id,
+            label: `${table.name} · ${table.seats} ghế · ${tableStatusLabel[table.status]}`,
+          }))}
           searchable
           size={isCompact ? "md" : "sm"}
         />
