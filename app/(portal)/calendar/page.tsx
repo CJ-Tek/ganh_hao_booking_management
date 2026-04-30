@@ -52,9 +52,6 @@ export default function CalendarPage() {
       if (sortStatus.columnAccessor === "customerId") {
         return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
       }
-      if (sortStatus.columnAccessor === "branchId") {
-        return state.branches.find((item) => item.id === booking.branchId)?.name ?? "";
-      }
       if (sortStatus.columnAccessor === "areaTable") {
         const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
         const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
@@ -73,7 +70,7 @@ export default function CalendarPage() {
         : String(left).localeCompare(String(right), "vi");
       return sortStatus.direction === "asc" ? compare : -compare;
     });
-  }, [bookings, sortStatus, state.areas, state.branches, state.customers, state.tables]);
+  }, [bookings, sortStatus, state.areas, state.customers, state.tables]);
 
   const pagedBookings = useMemo(
     () => {
@@ -96,7 +93,6 @@ export default function CalendarPage() {
         pagedBookings.map((booking) => {
           const customer =
             state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—";
-          const branch = state.branches.find((item) => item.id === booking.branchId)?.name ?? "—";
           const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
           const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
           return (
@@ -117,7 +113,7 @@ export default function CalendarPage() {
                   {dayjs(booking.bookingAt).format("DD/MM/YYYY")}
                 </Text>
                 <Text size="sm">
-                  {branch} · {area} · Bàn {table}
+                  {area} · Bàn {table}
                 </Text>
               </Stack>
             </Card>
@@ -207,13 +203,6 @@ export default function CalendarPage() {
                 sortable: true,
                 render: (booking) =>
                   state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "-",
-              },
-              {
-                accessor: "branchId",
-                title: "Chi nhánh",
-                sortable: true,
-                render: (booking) =>
-                  state.branches.find((item) => item.id === booking.branchId)?.name ?? "-",
               },
               {
                 accessor: "areaTable",

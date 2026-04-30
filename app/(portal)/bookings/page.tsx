@@ -90,16 +90,26 @@ function BookingsPageContent() {
   );
 
   const sortedBookings = useMemo(() => {
-    const getCustomerName = (booking: Booking) =>
-      state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
     const getValue = (booking: Booking) => {
-      if (sortStatus.columnAccessor === "id") {
-        return booking.id;
+      const acc = sortStatus.columnAccessor as string;
+      if (acc === "customerId") {
+        return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
       }
-      if (sortStatus.columnAccessor === "customerId") {
-        return getCustomerName(booking);
+      if (acc === "guestCount") {
+        return booking.guestCount;
       }
-      if (sortStatus.columnAccessor === "status") {
+      if (acc === "areaTable") {
+        const areaName = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
+        const tableName = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
+        return `${areaName} ${tableName}`;
+      }
+      if (acc === "note") {
+        return booking.note ?? "";
+      }
+      if (acc === "createdByUserId") {
+        return state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
+      }
+      if (acc === "status") {
         return bookingStatusLabel[booking.status];
       }
       return dayjs(booking.bookingAt).valueOf();
@@ -112,7 +122,14 @@ function BookingsPageContent() {
         : String(left).localeCompare(String(right), "vi");
       return sortStatus.direction === "asc" ? compare : -compare;
     });
-  }, [branchBookings, sortStatus, state.customers]);
+  }, [
+    branchBookings,
+    sortStatus,
+    state.areas,
+    state.customers,
+    state.tables,
+    state.users,
+  ]);
 
   const pagedBookings = useMemo(
     () => {
@@ -269,17 +286,64 @@ function BookingsPageContent() {
         noRecordsText="Chưa có booking nào cho bộ lọc hiện tại."
         columns={[
           {
+            accessor: "bookingAt",
+            title: "Giờ đặt",
+            sortable: true,
+            render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+          },
+          {
             accessor: "customerId",
             title: "Khách",
             sortable: true,
-            render: (booking) =>
-              state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "-",
+            render: (booking) => {
+              const c = state.customers.find((item) => item.id === booking.customerId);
+              return (
+                <Stack gap={2}>
+                  <Text size="sm">{c?.fullName ?? "—"}</Text>
+                  <Text size="xs" c="dimmed">
+                    {c?.phone ?? "—"}
+                  </Text>
+                </Stack>
+              );
+            },
           },
           {
-            accessor: "bookingAt",
-            title: "Giờ",
+            accessor: "areaTable",
+            title: "Khu vực / Bàn",
             sortable: true,
-            render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM"),
+            render: (booking) => {
+              const area = state.areas.find((item) => item.id === booking.areaId);
+              const table = state.tables.find((item) => item.id === booking.tableId);
+              return `${area?.name ?? "—"} · ${table?.name ?? "—"}`;
+            },
+          },
+          {
+            accessor: "guestCount",
+            title: "Số khách",
+            sortable: true,
+          },
+          {
+            accessor: "createdByUserId",
+            title: "Người tạo",
+            sortable: true,
+            render: (booking) =>
+              state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
+              "Không rõ",
+          },
+          {
+            accessor: "note",
+            title: "Ghi chú",
+            sortable: true,
+            render: (booking) =>
+              booking.note ? (
+                <Text size="sm" lineClamp={2} maw={220}>
+                  {booking.note}
+                </Text>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  —
+                </Text>
+              ),
           },
           {
             accessor: "status",
@@ -331,10 +395,15 @@ function BookingsPageContent() {
         </Text>
       ) : (
         pagedBookings.map((booking) => {
-          const customer =
-            state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—";
+          const cust = state.customers.find((item) => item.id === booking.customerId);
+          const customer = cust?.fullName ?? "—";
+          const phone = cust?.phone ?? "—";
           const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
           const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
+          const creator =
+            state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
+            "Không rõ";
+          const locationLine = `${area} · Bàn ${table}`;
           return (
             <Card key={booking.id} withBorder radius="md" padding="md">
               <Stack gap="sm">
@@ -343,17 +412,28 @@ function BookingsPageContent() {
                     <Text fw={700} lineClamp={2}>
                       {customer}
                     </Text>
+                    <Text size="sm" c="dimmed" mt={4}>
+                      {phone}
+                    </Text>
                   </div>
                   <Badge color={bookingStatusColor[booking.status]} variant="light" size="lg">
                     {bookingStatusLabel[booking.status]}
                   </Badge>
                 </Group>
-                <Text size="sm">
-                  {dayjs(booking.bookingAt).format("HH:mm")} · {dayjs(booking.bookingAt).format("DD/MM/YYYY")}
+                <Text size="sm" fw={500}>
+                  {dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}
                 </Text>
                 <Text size="sm" c="dimmed">
-                  {area} · Bàn {table}
+                  {locationLine}
                 </Text>
+                <Text size="xs" c="dimmed">
+                  {booking.guestCount} khách · {creator}
+                </Text>
+                {booking.note ? (
+                  <Text size="xs" c="dimmed" lineClamp={3}>
+                    {booking.note}
+                  </Text>
+                ) : null}
                 <Group grow gap="xs">
                   {booking.status === "cancelled" || booking.status === "completed" ? null : (
                     <>
