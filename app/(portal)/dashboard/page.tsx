@@ -15,7 +15,8 @@ import {
   Title,
 } from "@mantine/core";
 import { DataTable, type DataTableSortStatus } from "mantine-datatable";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
@@ -25,8 +26,14 @@ import { type Booking } from "@/lib/types";
 
 export default function DashboardPage() {
   const { state, filteredBranchIds, currentUser } = useAppContext();
+  const router = useRouter();
   const isCompact = usePortalCompact();
   const isManager = currentUser?.role === "manager";
+  useEffect(() => {
+    if (isManager) {
+      router.replace("/bookings");
+    }
+  }, [isManager, router]);
   const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Booking>>({
     columnAccessor: "bookingAt",
     direction: "desc",

@@ -47,11 +47,10 @@ import classes from "./app-shell-layout.module.css";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode; adminOnly?: boolean };
 
-const MANAGER_SECTION_HREFS = ["/dashboard", "/bookings", "/floor-map", "/customers"] as const;
+const MANAGER_SECTION_HREFS = ["/bookings", "/floor-map", "/customers"] as const;
 const MANAGER_DOCK_HREFS = MANAGER_SECTION_HREFS;
 
 const managerDockShortLabel: Record<(typeof MANAGER_DOCK_HREFS)[number], string> = {
-  "/dashboard": "Tổng quan",
   "/bookings": "Đặt bàn",
   "/floor-map": "Sơ đồ",
   "/customers": "Khách hàng",
@@ -166,7 +165,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     return shownNavItems.filter((item) => !dockHrefSet.has(item.href));
   }, [usesMobileDock, dockHrefSet, shownNavItems]);
 
-  const showManagerDock = usesMobileDock && isCompact;
+  // Avoid overlap: when mobile drawer is open, hide fixed bottom dock.
+  const showManagerDock = usesMobileDock && isCompact && !opened;
   const portalLabel =
     currentUser?.role === "manager" ? "Cổng quản lý chi nhánh" : "Cổng quản lý tổng";
 
@@ -391,6 +391,9 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
         style={{
           background: "var(--mantine-color-brand-filled)",
           borderRightColor: "rgba(255,255,255,0.2)",
+          overflowY: "auto",
+          overscrollBehavior: "contain",
+          WebkitOverflowScrolling: "touch",
         }}
       >
         <Stack gap="lg">
