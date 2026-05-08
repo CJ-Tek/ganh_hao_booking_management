@@ -83,7 +83,7 @@ export type Database = {
       }
       bookings: {
         Row: {
-          area_id: string
+          area_id: string | null
           booking_at: string
           branch_id: string
           created_by_user_id: string
@@ -92,10 +92,10 @@ export type Database = {
           id: string
           note: string | null
           status: string
-          table_id: string
+          table_id: string | null
         }
         Insert: {
-          area_id: string
+          area_id?: string | null
           booking_at: string
           branch_id: string
           created_by_user_id: string
@@ -104,10 +104,10 @@ export type Database = {
           id?: string
           note?: string | null
           status?: string
-          table_id: string
+          table_id?: string | null
         }
         Update: {
-          area_id?: string
+          area_id?: string | null
           booking_at?: string
           branch_id?: string
           created_by_user_id?: string
@@ -116,7 +116,7 @@ export type Database = {
           id?: string
           note?: string | null
           status?: string
-          table_id?: string
+          table_id?: string | null
         }
         Relationships: [
           {
