@@ -341,6 +341,8 @@ export default function CustomersPage() {
                 {pagedDrawerBookings.map((booking) => {
                   const area = state.areas.find((a) => a.id === booking.areaId)?.name ?? "—";
                   const table = state.tables.find((t) => t.id === booking.tableId)?.name ?? "—";
+                  const locationLine =
+                    booking.areaId && booking.tableId ? `${area} · ${table}` : "Chờ xếp bàn";
                   return (
                     <Card key={booking.id} withBorder radius="md" padding="sm">
                       <Group justify="space-between" align="flex-start" wrap="nowrap">
@@ -352,7 +354,7 @@ export default function CustomersPage() {
                             {dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}
                           </Text>
                           <Text size="xs" c="dimmed">
-                            {area} · {table}
+                            {locationLine}
                           </Text>
                         </Stack>
                         <Badge color={bookingStatusColor[booking.status]} variant="light">

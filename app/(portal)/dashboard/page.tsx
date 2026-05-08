@@ -24,8 +24,9 @@ import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
 
 export default function DashboardPage() {
-  const { state, filteredBranchIds } = useAppContext();
+  const { state, filteredBranchIds, currentUser } = useAppContext();
   const isCompact = usePortalCompact();
+  const isManager = currentUser?.role === "manager";
   const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Booking>>({
     columnAccessor: "bookingAt",
     direction: "desc",
@@ -63,6 +64,9 @@ export default function DashboardPage() {
         return booking.guestCount;
       }
       if (acc === "areaTable") {
+        if (!booking.areaId || !booking.tableId) {
+          return "Chờ xếp bàn";
+        }
         const areaName = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
         const tableName = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
         return `${areaName} ${tableName}`;
@@ -107,30 +111,30 @@ export default function DashboardPage() {
   const historyTotalPages = Math.max(1, Math.ceil(sortedHistoryBookings.length / pageSize));
 
   const statGrid = (
-    <SimpleGrid cols={{ base: 2, sm: 2, lg: 4 }} spacing={isCompact ? "sm" : "md"}>
-      <PortalSectionCard padding={isCompact ? "sm" : "md"}>
-        <Text size="xs" c="dimmed">
+    <SimpleGrid cols={{ base: 2, sm: 2, lg: 4 }} spacing={isManager ? "md" : isCompact ? "sm" : "md"}>
+      <PortalSectionCard padding={isManager ? "lg" : isCompact ? "sm" : "md"}>
+        <Text size={isManager ? "sm" : "xs"} c="dimmed" fw={600}>
           Tổng booking
         </Text>
-        <Title order={2}>{branchBookings.length}</Title>
+        <Title order={isManager ? 1 : 2}>{branchBookings.length}</Title>
       </PortalSectionCard>
-      <PortalSectionCard padding={isCompact ? "sm" : "md"}>
-        <Text size="xs" c="dimmed">
+      <PortalSectionCard padding={isManager ? "lg" : isCompact ? "sm" : "md"}>
+        <Text size={isManager ? "sm" : "xs"} c="dimmed" fw={600}>
           Đã check-in
         </Text>
-        <Title order={2}>{checkedInCount}</Title>
+        <Title order={isManager ? 1 : 2}>{checkedInCount}</Title>
       </PortalSectionCard>
-      <PortalSectionCard padding={isCompact ? "sm" : "md"}>
-        <Text size="xs" c="dimmed">
+      <PortalSectionCard padding={isManager ? "lg" : isCompact ? "sm" : "md"}>
+        <Text size={isManager ? "sm" : "xs"} c="dimmed" fw={600}>
           Bàn phục vụ
         </Text>
-        <Title order={2}>{statusCounts.occupied}</Title>
+        <Title order={isManager ? 1 : 2}>{statusCounts.occupied}</Title>
       </PortalSectionCard>
-      <PortalSectionCard padding={isCompact ? "sm" : "md"}>
-        <Text size="xs" c="dimmed">
+      <PortalSectionCard padding={isManager ? "lg" : isCompact ? "sm" : "md"}>
+        <Text size={isManager ? "sm" : "xs"} c="dimmed" fw={600}>
           Bàn trống
         </Text>
-        <Title order={2}>{statusCounts.available}</Title>
+        <Title order={isManager ? 1 : 2}>{statusCounts.available}</Title>
       </PortalSectionCard>
     </SimpleGrid>
   );
@@ -188,7 +192,8 @@ export default function DashboardPage() {
                 state.customers.find((item) => item.id === booking.customerId)?.phone ?? "—";
               const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
               const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
-              const locationLine = `${area} · Bàn ${table}`;
+              const locationLine =
+                booking.areaId && booking.tableId ? `${area} · Bàn ${table}` : "Chờ xếp bàn";
               const creator =
                 state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
                 "Không rõ";
@@ -293,6 +298,9 @@ export default function DashboardPage() {
               title: "Khu vực / Bàn",
               sortable: true,
               render: (booking) => {
+                if (!booking.areaId || !booking.tableId) {
+                  return "Chờ xếp bàn";
+                }
                 const area = state.areas.find((item) => item.id === booking.areaId);
                 const table = state.tables.find((item) => item.id === booking.tableId);
                 return `${area?.name ?? "—"} · ${table?.name ?? "—"}`;
@@ -346,14 +354,16 @@ export default function DashboardPage() {
     <Stack gap="md">
       <div>
         <PortalPageTitle order={isCompact ? 3 : 2}>
-          {isCompact ? "Tổng quan" : "Dashboard tổng quan"}
+          {isManager ? "Đặt bàn hôm nay" : isCompact ? "Tổng quan" : "Dashboard tổng quan"}
         </PortalPageTitle>
         <Text c="dimmed" size={isCompact ? "xs" : "sm"}>
           Chi nhánh: {branchNames.join(", ")}
         </Text>
       </div>
 
-      {isCompact ? (
+      {isManager ? (
+        statGrid
+      ) : isCompact ? (
         <Tabs defaultValue="overview" keepMounted={false}>
           <Tabs.List grow>
             <Tabs.Tab value="overview">Tổng quan</Tabs.Tab>

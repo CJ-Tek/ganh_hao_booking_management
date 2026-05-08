@@ -47,33 +47,33 @@ import classes from "./app-shell-layout.module.css";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode; adminOnly?: boolean };
 
-const MANAGER_DOCK_HREFS = ["/dashboard", "/bookings", "/floor-map", "/customers"] as const;
+const MANAGER_SECTION_HREFS = ["/bookings", "/floor-map", "/customers"] as const;
+const MANAGER_DOCK_HREFS = MANAGER_SECTION_HREFS;
 
 const managerDockShortLabel: Record<(typeof MANAGER_DOCK_HREFS)[number], string> = {
-  "/dashboard": "Tổng quan",
   "/bookings": "Đặt bàn",
   "/floor-map": "Sơ đồ",
-  "/customers": "Khách",
+  "/customers": "Khách hàng",
 };
 
 const navItems: NavItem[] = [
-  { label: "Tổng quan", href: "/dashboard", icon: <LayoutDashboard size={16} /> },
-  { label: "Sơ đồ nhà hàng", href: "/floor-map", icon: <Map size={16} /> },
-  { label: "Đặt bàn", href: "/bookings", icon: <BookOpenText size={16} /> },
-  { label: "Lịch đặt bàn", href: "/calendar", icon: <CalendarDays size={16} /> },
-  { label: "Quản lý bàn", href: "/tables", icon: <SquareMenu size={16} /> },
-  { label: "Khách hàng", href: "/customers", icon: <Users size={16} /> },
-  { label: "Khu vực & bàn", href: "/settings/areas-tables", icon: <Settings size={16} /> },
+  { label: "Tổng quan", href: "/dashboard", icon: <LayoutDashboard size={20} /> },
+  { label: "Sơ đồ", href: "/floor-map", icon: <Map size={20} /> },
+  { label: "Đặt bàn", href: "/bookings", icon: <BookOpenText size={20} /> },
+  { label: "Lịch đặt bàn", href: "/calendar", icon: <CalendarDays size={20} /> },
+  { label: "Quản lý bàn", href: "/tables", icon: <SquareMenu size={20} /> },
+  { label: "Khách hàng", href: "/customers", icon: <Users size={20} /> },
+  { label: "Khu vực & bàn", href: "/settings/areas-tables", icon: <Settings size={20} /> },
   {
     label: "Thông tin chi nhánh",
     href: "/settings/branches",
-    icon: <Building2 size={16} />,
+    icon: <Building2 size={20} />,
     adminOnly: true,
   },
   {
     label: "Quản lý người dùng",
     href: "/settings/users",
-    icon: <UserCog size={16} />,
+    icon: <UserCog size={20} />,
     adminOnly: true,
   },
 ];
@@ -128,20 +128,15 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     [scopedNotifications]
   );
   const shownNavItems = useMemo(() => {
+    if (currentUser?.role === "manager") {
+      return navItems.filter((item) =>
+        (MANAGER_SECTION_HREFS as readonly string[]).includes(item.href)
+      );
+    }
     const base =
       currentUser?.role === "admin" || currentUser?.role === "general_manager"
         ? navItems
         : navItems.filter((item) => !item.adminOnly);
-    if (currentUser?.role === "manager" && currentUser.branchIds.length > 1) {
-      return [
-        ...base,
-        {
-          label: "Chọn chi nhánh",
-          href: "/select-branch",
-          icon: <Building2 size={16} />,
-        },
-      ];
-    }
     return base;
   }, [currentUser]);
 
@@ -171,70 +166,90 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   }, [usesMobileDock, dockHrefSet, shownNavItems]);
 
   const showManagerDock = usesMobileDock && isCompact;
+  const isBranchManager = currentUser?.role === "manager";
 
   const portalLabel =
     currentUser?.role === "manager" ? "Cổng quản lý chi nhánh" : "Cổng quản lý tổng";
 
   return (
     <AppShell
-      header={{ height: { base: 72, sm: 64 } }}
-      navbar={{ width: 290, breakpoint: "md", collapsed: { mobile: !opened } }}
+      header={{ height: { base: 84, sm: 76 } }}
+      navbar={{ width: 320, breakpoint: "md", collapsed: { mobile: !opened } }}
       padding={{ base: "sm", sm: "md" }}
     >
-      <AppShell.Header px={{ base: "sm", sm: "md" }}>
-        <Group justify="space-between" h="100%" wrap="nowrap" className={classes.headerRoot}>
-          <Group gap="sm" wrap="nowrap">
-            <Burger opened={opened} onClick={toggle} hiddenFrom="md" size="sm" />
-            <Image src="/logo/horizontal.png" alt="Logo Gành Hào" h={34} w="auto" />
-            <Stack gap={0} className={classes.brandCopy}>
-              <Group gap={6} wrap="nowrap">
-                <Title order={5}>Hệ thống quản lý đặt bàn</Title>
-              </Group>
-              <Text size="xs" c="dimmed">
-                {portalLabel}
-              </Text>
-            </Stack>
-          </Group>
-
-          <Group gap="xs" wrap="nowrap">
-            {currentUser?.role !== "manager" && (
-              <Select
-                size="xs"
-                className={classes.branchSelect}
-                value={state.activeBranchId}
-                onChange={(value) => value && setActiveBranchId(value)}
-                data={branchSwitcherOptions.map((branch) => ({
-                  value: branch.id,
-                  label: branch.name,
-                }))}
+      <AppShell.Header
+        px={{ base: "sm", sm: "md" }}
+        style={
+          isBranchManager
+            ? {
+                background: "var(--mantine-color-brand-filled)",
+                color: "white",
+              }
+            : undefined
+        }
+      >
+        <Stack justify="center" h="100%" gap={0}>
+          <Group justify="space-between" wrap="nowrap" className={classes.headerRoot}>
+            <Group gap="sm" wrap="nowrap">
+              <Burger
+                opened={opened}
+                onClick={toggle}
+                hiddenFrom="md"
+                size="sm"
+                color={isBranchManager ? "white" : undefined}
               />
-            )}
-            <Popover width={380} position="bottom-end" withArrow shadow="md">
-              <Popover.Target>
-                <Box className={classes.notificationBellWrap}>
-                  <ActionIcon
-                    variant="transparent"
-                    color="gray"
-                    size="lg"
-                    radius="md"
-                    aria-label="Thông báo nội bộ"
-                  >
-                    <Bell size={20} strokeWidth={1.75} />
-                  </ActionIcon>
-                  {unreadNotifications.length > 0 ? (
-                    <Badge
-                      size="xs"
-                      circle
-                      variant="filled"
-                      color="red"
-                      className={classes.notificationBadge}
+              <Image src="/logo/horizontal.png" alt="Logo Gành Hào" h={34} w="auto" />
+              <Stack gap={0} className={classes.brandCopy}>
+                <Group gap={6} wrap="nowrap">
+                  <Title order={4} c={isBranchManager ? "white" : undefined}>
+                    Hệ thống quản lý đặt bàn
+                  </Title>
+                </Group>
+                <Text size="xs" c={isBranchManager ? "rgba(255,255,255,0.85)" : "dimmed"}>
+                  {portalLabel}
+                </Text>
+              </Stack>
+            </Group>
+
+            <Group gap="xs" wrap="nowrap">
+              {currentUser?.role !== "manager" && (
+                <Select
+                  size="xs"
+                  className={classes.branchSelect}
+                  value={state.activeBranchId}
+                  onChange={(value) => value && setActiveBranchId(value)}
+                  data={branchSwitcherOptions.map((branch) => ({
+                    value: branch.id,
+                    label: branch.name,
+                  }))}
+                />
+              )}
+              <Popover width={380} position="bottom-end" withArrow shadow="md">
+                <Popover.Target>
+                  <Box className={classes.notificationBellWrap}>
+                    <ActionIcon
+                      variant="transparent"
+                      color={isBranchManager ? "white" : "gray"}
+                      size="lg"
+                      radius="md"
+                      aria-label="Thông báo nội bộ"
                     >
-                      {unreadNotifications.length > 99 ? "99+" : unreadNotifications.length}
-                    </Badge>
-                  ) : null}
-                </Box>
-              </Popover.Target>
-              <Popover.Dropdown p="sm">
+                      <Bell size={20} strokeWidth={1.75} />
+                    </ActionIcon>
+                    {unreadNotifications.length > 0 ? (
+                      <Badge
+                        size="xs"
+                        circle
+                        variant="filled"
+                        color="red"
+                        className={classes.notificationBadge}
+                      >
+                        {unreadNotifications.length > 99 ? "99+" : unreadNotifications.length}
+                      </Badge>
+                    ) : null}
+                  </Box>
+                </Popover.Target>
+                <Popover.Dropdown p="sm">
                 <Stack gap="xs" mb="sm">
                   <Group justify="space-between" gap="xs" wrap="nowrap" align="flex-start">
                     <Stack gap={2} style={{ minWidth: 0 }}>
@@ -332,48 +347,59 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                     </Button>
                   </>
                 ) : null}
-              </Popover.Dropdown>
-            </Popover>
+                </Popover.Dropdown>
+              </Popover>
 
-            <Group gap="xs" wrap="nowrap" visibleFrom="md">
-              <Avatar color="brand" radius="xl">
-                {currentUser?.fullName[0] ?? "U"}
-              </Avatar>
-              <Stack gap={0}>
-                <Text size="sm" fw={600}>
-                  {currentUser?.fullName}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  {currentUser?.username}
-                </Text>
-              </Stack>
-              {!hasSupabase && (
-                <Badge color="red" variant="light">
-                  Chưa kết nối DB
-                </Badge>
-              )}
-              <ActionIcon
-                variant="light"
-                color="red"
-                aria-label="Đăng xuất"
-                onClick={() => {
-                  logout();
-                  router.replace("/login");
-                }}
-              >
-                <LogOut size={16} />
-              </ActionIcon>
+              <Group gap="xs" wrap="nowrap" visibleFrom="md">
+                <Avatar color="brand" radius="xl">
+                  {currentUser?.fullName[0] ?? "U"}
+                </Avatar>
+                <Stack gap={0}>
+                  <Text size="sm" fw={600}>
+                    {currentUser?.fullName}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {currentUser?.username}
+                  </Text>
+                </Stack>
+                {!hasSupabase && (
+                  <Badge color="red" variant="light">
+                    Chưa kết nối DB
+                  </Badge>
+                )}
+                <ActionIcon
+                  variant="light"
+                  color="red"
+                  aria-label="Đăng xuất"
+                  onClick={() => {
+                    logout();
+                    router.replace("/login");
+                  }}
+                >
+                  <LogOut size={16} />
+                </ActionIcon>
+              </Group>
             </Group>
           </Group>
-        </Group>
+        </Stack>
       </AppShell.Header>
 
-      <AppShell.Navbar p="md">
-        <Stack gap="md">
-          <Text fw={700} size="sm">
+      <AppShell.Navbar
+        p="lg"
+        style={
+          isBranchManager
+            ? {
+                background: "var(--mantine-color-brand-filled)",
+                borderRightColor: "rgba(255,255,255,0.2)",
+              }
+            : undefined
+        }
+      >
+        <Stack gap="lg">
+          <Text fw={700} size="md" c={isBranchManager ? "white" : undefined}>
             Điều hướng
           </Text>
-          <Stack gap={6}>
+          <Stack gap="sm">
             {shownNavItems.map((item) => (
               <NavLink
                 key={item.href}
@@ -383,6 +409,18 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 leftSection={item.icon}
                 active={pathname.startsWith(item.href)}
                 onClick={close}
+                style={{
+                  borderRadius: 12,
+                  minHeight: 62,
+                  paddingInline: 12,
+                  fontSize: "1rem",
+                  fontWeight: 700,
+                  color: isBranchManager ? "white" : undefined,
+                  background:
+                    isBranchManager && pathname.startsWith(item.href)
+                      ? "rgba(255,255,255,0.14)"
+                      : undefined,
+                }}
               />
             ))}
           </Stack>
@@ -393,16 +431,20 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             pt="lg"
             pb="max(var(--mantine-spacing-xl), calc(env(safe-area-inset-bottom, 0px) + var(--mantine-spacing-md)))"
           >
-            <Divider />
+            <Divider color={isBranchManager ? "rgba(255,255,255,0.25)" : undefined} />
             <Group wrap="nowrap" align="flex-start">
               <Avatar color="brand" radius="xl" size="md">
                 {currentUser?.fullName[0] ?? "U"}
               </Avatar>
               <Stack gap={0} style={{ minWidth: 0 }}>
-                <Text size="sm" fw={600} lineClamp={2}>
+                <Text size="sm" fw={600} lineClamp={2} c={isBranchManager ? "white" : undefined}>
                   {currentUser?.fullName}
                 </Text>
-                <Text size="xs" c="dimmed" lineClamp={1}>
+                <Text
+                  size="xs"
+                  c={isBranchManager ? "rgba(255,255,255,0.82)" : "dimmed"}
+                  lineClamp={1}
+                >
                   {currentUser?.username}
                 </Text>
               </Stack>
@@ -414,8 +456,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             )}
             <Button
               fullWidth
-              variant="light"
-              color="red"
+              variant={isBranchManager ? "white" : "light"}
+              color={isBranchManager ? "dark" : "red"}
               leftSection={<LogOut size={16} />}
               onClick={() => {
                 close();
@@ -432,7 +474,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
       <AppShell.Main
         pb={
           showManagerDock
-            ? "calc(58px + env(safe-area-inset-bottom, 0px))"
+            ? "calc(66px + env(safe-area-inset-bottom, 0px))"
             : undefined
         }
       >
@@ -446,8 +488,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             withBorder
             radius={0}
             px="xs"
-            pt={6}
-            pb="max(6px, env(safe-area-inset-bottom, 0px))"
+            pt={8}
+            pb="max(8px, env(safe-area-inset-bottom, 0px))"
             aria-label="Truy cập nhanh"
             style={{
               position: "fixed",
@@ -455,7 +497,10 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               right: 0,
               bottom: 0,
               zIndex: 200,
-              background: "var(--mantine-color-body)",
+              background: isBranchManager
+                ? "var(--mantine-color-brand-filled)"
+                : "var(--mantine-color-body)",
+              borderTopColor: isBranchManager ? "rgba(255,255,255,0.25)" : undefined,
             }}
           >
             <Group justify="space-between" gap={4} wrap="nowrap" grow>
@@ -477,9 +522,19 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                       flex: 1,
                       minWidth: 0,
                       borderRadius: 10,
-                      padding: "6px 2px",
-                      background: active ? "var(--mantine-color-brand-light)" : undefined,
-                      color: active ? "var(--mantine-color-brand-filled)" : undefined,
+                      minHeight: 52,
+                      padding: "8px 4px",
+                      background:
+                        isBranchManager && active
+                          ? "rgba(255,255,255,0.2)"
+                          : active
+                            ? "var(--mantine-color-brand-light)"
+                            : undefined,
+                      color: isBranchManager
+                        ? "white"
+                        : active
+                          ? "var(--mantine-color-brand-filled)"
+                          : undefined,
                     }}
                   >
                     <Stack gap={2} align="center">
@@ -488,38 +543,56 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "center",
-                          opacity: active ? 1 : 0.85,
+                          transform: "scale(1.1)",
+                          opacity: active || isBranchManager ? 1 : 0.85,
                         }}
                       >
                         {item.icon}
                       </Box>
-                      <Text size="10px" fw={active ? 700 : 500} ta="center" lineClamp={2} lh={1.2}>
+                      <Text
+                        size="12px"
+                        fw={active ? 700 : 600}
+                        c={isBranchManager ? "white" : undefined}
+                        ta="center"
+                        lineClamp={2}
+                        lh={1.2}
+                      >
                         {shortLabel}
                       </Text>
                     </Stack>
                   </UnstyledButton>
                 );
               })}
-              <UnstyledButton
-                type="button"
-                onClick={() => {
-                  openManagerMore();
-                  close();
-                }}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  borderRadius: 10,
-                  padding: "6px 2px",
-                }}
-              >
-                <Stack gap={2} align="center">
-                  <MoreHorizontal size={18} strokeWidth={2} />
-                  <Text size="10px" fw={500} ta="center" lineClamp={1}>
-                    Thêm
-                  </Text>
-                </Stack>
-              </UnstyledButton>
+              {managerMoreNavItems.length > 0 ? (
+                <UnstyledButton
+                  type="button"
+                  onClick={() => {
+                    openManagerMore();
+                    close();
+                  }}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    borderRadius: 10,
+                    minHeight: 52,
+                    padding: "8px 4px",
+                    color: isBranchManager ? "white" : undefined,
+                  }}
+                >
+                  <Stack gap={2} align="center">
+                    <MoreHorizontal size={20} strokeWidth={2} />
+                    <Text
+                      size="12px"
+                      fw={600}
+                      c={isBranchManager ? "white" : undefined}
+                      ta="center"
+                      lineClamp={1}
+                    >
+                      Thêm
+                    </Text>
+                  </Stack>
+                </UnstyledButton>
+              ) : null}
             </Group>
           </Paper>
 

@@ -28,10 +28,10 @@ import {
 } from "@/components/portal-page";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
 import { useAppContext } from "@/contexts/app-context";
-import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
+import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { usePortalCompact } from "@/lib/use-portal-compact";
-import { type Booking, type TableStatus } from "@/lib/types";
+import { type Booking } from "@/lib/types";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
 
 function branchScopeKey(branchIds: string[]) {
@@ -104,14 +104,11 @@ function BookingsPageContent() {
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
-  const [areaId, setAreaId] = useState<string | null>(null);
-  const [tableId, setTableId] = useState<string | null>(null);
   const [guestCount, setGuestCount] = useState<number>(4);
   const [bookingAt, setBookingAt] = useState<string | null>(
     dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm")
   );
   const [note, setNote] = useState("");
-  const [tableStatusFilter, setTableStatusFilter] = useState<string>("all");
   const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Booking>>({
     columnAccessor: "bookingAt",
     direction: "desc",
@@ -171,30 +168,6 @@ function BookingsPageContent() {
     () => state.tables.filter((table) => table.branchId === branchId),
     [branchId, state.tables]
   );
-  const areaAvailability = useMemo(() => {
-    if (!areaId) return null;
-    const items = state.tables.filter((t) => t.areaId === areaId);
-    const counts = items.reduce(
-      (acc, t) => {
-        acc.total += 1;
-        acc.byStatus[t.status] = (acc.byStatus[t.status] ?? 0) + 1;
-        return acc;
-      },
-      { total: 0, byStatus: {} as Partial<Record<TableStatus, number>> }
-    );
-    return counts;
-  }, [areaId, state.tables]);
-  const filteredTables = useMemo(() => {
-    return state.tables
-      .filter((table) => table.areaId === areaId)
-      .filter((table) => tableStatusFilter === "all" || table.status === tableStatusFilter)
-      .sort((a, b) => a.name.localeCompare(b.name, "vi"));
-  }, [areaId, state.tables, tableStatusFilter]);
-
-  const selectedTable = useMemo(
-    () => (tableId ? state.tables.find((t) => t.id === tableId) : undefined),
-    [tableId, state.tables]
-  );
 
   const branchBookings = useMemo(
     () => state.bookings.filter((booking) => filteredBranchIds.includes(booking.branchId)),
@@ -253,8 +226,8 @@ function BookingsPageContent() {
   );
 
   const handleCreate = async () => {
-    if (!customerName || !customerPhone || !branchId || !areaId || !tableId || !bookingAt) {
-      notifications.show({ color: "red", message: "Vui lòng nhập đầy đủ thông tin." });
+    if (!customerName || !customerPhone || !branchId || !bookingAt) {
+      notifications.show({ color: "red", message: "Vui lòng nhập đầy đủ thông tin cơ bản." });
       return;
     }
     const phoneNorm = normalizeVietnamPhone(customerPhone.trim());
@@ -266,21 +239,11 @@ function BookingsPageContent() {
       });
       return;
     }
-    const nextGuestCount = Math.max(1, guestCount);
-    if (selectedTable?.seats && nextGuestCount > selectedTable.seats) {
-      notifications.show({
-        color: "red",
-        message: `Số khách không được vượt quá sức chứa bàn (${selectedTable.seats} ghế).`,
-      });
-      return;
-    }
     const result = await createBooking({
       customerName: formatVietnamesePersonName(customerName),
       customerPhone: phoneNorm,
       branchId,
-      areaId,
-      tableId,
-      guestCount: nextGuestCount,
+      guestCount: Math.max(1, guestCount),
       bookingAt: dayjs(bookingAt).toISOString(),
       note,
     });
@@ -291,8 +254,6 @@ function BookingsPageContent() {
     if (result.ok) {
       setCustomerName("");
       setCustomerPhone("");
-      setAreaId(null);
-      setTableId(null);
       setGuestCount(4);
       setNote("");
     }
@@ -334,49 +295,12 @@ function BookingsPageContent() {
           onChange={(event) => setCustomerPhone(event.currentTarget.value)}
           size={isCompact ? "md" : "sm"}
         />
-        <Select
-          label="Khu vực"
-          placeholder="Chọn khu"
-          value={areaId}
-          onChange={(value) => {
-            setAreaId(value);
-            setTableId(null);
-          }}
-          data={filteredAreas.map((area) => ({ value: area.id, label: area.name }))}
-          size={isCompact ? "md" : "sm"}
-        />
-        {areaAvailability ? (
-          <Text size="sm" c="dimmed">
-            Tình trạng khu: {areaAvailability.total} bàn · Trống {areaAvailability.byStatus.available ?? 0} · Giữ chỗ{" "}
-            {areaAvailability.byStatus.hold ?? 0} · Đang ngồi {areaAvailability.byStatus.occupied ?? 0} · Khóa{" "}
-            {areaAvailability.byStatus.locked ?? 0}
-          </Text>
-        ) : null}
-        <Select
-          label="Trạng thái bàn (lọc)"
-          value={tableStatusFilter}
-          onChange={(value) => setTableStatusFilter(value ?? "all")}
-          data={[
-            { value: "all", label: "Tất cả" },
-            ...(["available", "hold", "occupied", "locked"] as TableStatus[]).map((status) => ({
-              value: status,
-              label: tableStatusLabel[status],
-            })),
-          ]}
-          size={isCompact ? "md" : "sm"}
-        />
-        <Select
-          label="Bàn gán cho khách"
-          placeholder="Chọn hoặc gõ tên bàn"
-          value={tableId}
-          onChange={setTableId}
-          data={filteredTables.map((table) => ({
-            value: table.id,
-            label: `${table.name} · ${table.seats} ghế · ${tableStatusLabel[table.status]}`,
-          }))}
-          searchable
-          size={isCompact ? "md" : "sm"}
-        />
+        <Text size="sm" c="dimmed">
+          Khu vực, trạng thái bàn và bàn gán sẽ được cấu hình ở mục <strong>Sơ đồ</strong>.
+        </Text>
+        <Text size="sm" c="dimmed">
+          Booking tạo từ đây sẽ ở trạng thái <strong>Chờ xếp bàn</strong>.
+        </Text>
         <DateTimePicker
           value={bookingAt}
           onChange={setBookingAt}
@@ -389,7 +313,6 @@ function BookingsPageContent() {
           value={guestCount}
           onChange={(value) => setGuestCount(Number(value || 1))}
           min={1}
-          max={selectedTable?.seats}
           size={isCompact ? "md" : "sm"}
         />
         <Textarea
@@ -458,6 +381,9 @@ function BookingsPageContent() {
             title: "Khu vực / Bàn",
             sortable: true,
             render: (booking) => {
+              if (!booking.areaId || !booking.tableId) {
+                return "Chờ xếp bàn";
+              }
               const area = state.areas.find((item) => item.id === booking.areaId);
               const table = state.tables.find((item) => item.id === booking.tableId);
               return `${area?.name ?? "—"} · ${table?.name ?? "—"}`;
@@ -545,7 +471,8 @@ function BookingsPageContent() {
           const creator =
             state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
             "Không rõ";
-          const locationLine = `${area} · Bàn ${table}`;
+          const locationLine =
+            booking.areaId && booking.tableId ? `${area} · Bàn ${table}` : "Chờ xếp bàn";
           return (
             <Card key={booking.id} withBorder radius="md" padding="md">
               <Stack gap="sm">

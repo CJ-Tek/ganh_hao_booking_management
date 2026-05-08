@@ -22,6 +22,7 @@ import { initialState } from "@/lib/initial-state";
 import {
   addAreaInSupabase,
   addUserInSupabase,
+  assignBookingToTableInSupabase,
   deleteAreaInSupabase,
   deleteUserInSupabase,
   updateUserInSupabase,
@@ -66,8 +67,8 @@ type CreateBookingInput = {
   customerName: string;
   customerPhone: string;
   branchId: string;
-  areaId: string;
-  tableId: string;
+  areaId?: string | null;
+  tableId?: string | null;
   guestCount: number;
   bookingAt: string;
   note?: string;
@@ -95,6 +96,11 @@ interface AppContextValue {
     input: { name: string; address: string }
   ) => Promise<ActionResult>;
   createBooking: (input: CreateBookingInput) => Promise<ActionResult>;
+  assignBookingToTable: (input: {
+    bookingId: string;
+    areaId: string;
+    tableId: string;
+  }) => Promise<ActionResult>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   checkInBooking: (bookingId: string) => Promise<void>;
   deleteCustomers: (customerIds: string[]) => Promise<ActionResult>;
@@ -350,7 +356,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
 
     // Optimistic: immediately reflect auto table state from booking time.
     // so UI updates without waiting for the next polling reload.
-    const tableBefore = state.tables.find((t) => t.id === input.tableId);
+    const tableBefore = input.tableId
+      ? state.tables.find((t) => t.id === input.tableId)
+      : undefined;
     if (tableBefore && tableBefore.status !== "locked") {
       const nextStatus = resolveAutoTableStatus(input.bookingAt);
       setState((prev) => ({
@@ -404,6 +412,17 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       }
       return { ok: false, message: error instanceof Error ? error.message : "Không tạo được booking." };
     }
+  };
+
+  const assignBookingToTable = async (input: {
+    bookingId: string;
+    areaId: string;
+    tableId: string;
+  }) => {
+    if (!hasSupabase) {
+      return { ok: false, message: "Chưa kết nối Supabase." };
+    }
+    return assignBookingToTableInSupabase(input);
   };
 
   const updateBookingStatus = async (bookingId: string, status: BookingStatus) => {
@@ -913,6 +932,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     setActiveBranchId,
     updateBranch,
     createBooking,
+    assignBookingToTable,
     updateBookingStatus,
     checkInBooking,
     deleteCustomers,

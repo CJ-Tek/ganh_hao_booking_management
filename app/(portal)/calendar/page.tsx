@@ -53,6 +53,9 @@ export default function CalendarPage() {
         return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
       }
       if (sortStatus.columnAccessor === "areaTable") {
+        if (!booking.areaId || !booking.tableId) {
+          return "Chờ xếp bàn";
+        }
         const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
         const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
         return `${area} ${table}`;
@@ -95,6 +98,8 @@ export default function CalendarPage() {
             state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—";
           const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
           const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
+          const locationLine =
+            booking.areaId && booking.tableId ? `${area} · Bàn ${table}` : "Chờ xếp bàn";
           return (
             <Card key={booking.id} withBorder radius="md" padding="md">
               <Stack gap="xs">
@@ -113,7 +118,7 @@ export default function CalendarPage() {
                   {dayjs(booking.bookingAt).format("DD/MM/YYYY")}
                 </Text>
                 <Text size="sm">
-                  {area} · Bàn {table}
+                  {locationLine}
                 </Text>
               </Stack>
             </Card>
@@ -209,6 +214,9 @@ export default function CalendarPage() {
                 title: "Khu vực / Bàn",
                 sortable: true,
                 render: (booking) => {
+                  if (!booking.areaId || !booking.tableId) {
+                    return "Chờ xếp bàn";
+                  }
                   const area = state.areas.find((item) => item.id === booking.areaId);
                   const table = state.tables.find((item) => item.id === booking.tableId);
                   return `${area?.name ?? "-"} / ${table?.name ?? "-"}`;

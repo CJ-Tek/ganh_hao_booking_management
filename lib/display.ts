@@ -15,6 +15,7 @@ export const tableStatusColor: Record<TableStatus, string> = {
 };
 
 export const bookingStatusLabel: Record<BookingStatus, string> = {
+  pending: "Chờ xếp bàn",
   confirmed: "Đã xác nhận",
   cancelled: "Đã hủy",
   checked_in: "Đã check-in",
@@ -22,6 +23,7 @@ export const bookingStatusLabel: Record<BookingStatus, string> = {
 };
 
 export const bookingStatusColor: Record<BookingStatus, string> = {
+  pending: "orange",
   confirmed: "cyan",
   cancelled: "red",
   checked_in: "green",

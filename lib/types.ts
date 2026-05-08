@@ -1,7 +1,7 @@
 export type Role = "admin" | "general_manager" | "manager";
 
 export type TableStatus = "available" | "hold" | "occupied" | "locked";
-export type BookingStatus = "confirmed" | "cancelled" | "checked_in" | "completed";
+export type BookingStatus = "pending" | "confirmed" | "cancelled" | "checked_in" | "completed";
 
 export interface AppUser {
   id: string;
@@ -53,8 +53,8 @@ export interface Booking {
   id: string;
   customerId: string;
   branchId: string;
-  areaId: string;
-  tableId: string;
+  areaId: string | null;
+  tableId: string | null;
   guestCount: number;
   bookingAt: string;
   note?: string;

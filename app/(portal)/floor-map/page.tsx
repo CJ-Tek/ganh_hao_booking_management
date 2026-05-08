@@ -196,6 +196,7 @@ export default function FloorMapPage() {
     filteredBranchIds,
     updateTableStatus,
     createBooking,
+    assignBookingToTable,
     updateBookingStatus,
     checkInBooking,
     currentUser,
@@ -253,7 +254,11 @@ export default function FloorMapPage() {
     dayjs().format("HH:mm")
   );
   const [registerNote, setRegisterNote] = useState("");
+  const [registerPendingBookingId, setRegisterPendingBookingId] = useState<string | null>(null);
   const [registerSaving, setRegisterSaving] = useState(false);
+  const [quickAssignBookingId, setQuickAssignBookingId] = useState<string | null>(null);
+  const [quickAssignTableId, setQuickAssignTableId] = useState<string | null>(null);
+  const [quickAssignSaving, setQuickAssignSaving] = useState(false);
   const [detailTable, setDetailTable] = useState<DiningTable | null>(null);
   const [detailBookingActionLoading, setDetailBookingActionLoading] = useState(false);
   /** Status menu uses portal — block canvas interaction while open */
@@ -340,6 +345,59 @@ export default function FloorMapPage() {
     const customer = state.customers.find((c) => c.id === activeBookingForDetailTable.customerId);
     return customer?.fullName ?? "";
   }, [activeBookingForDetailTable, state.customers]);
+  const pendingBookings = useMemo(
+    () =>
+      state.bookings
+        .filter((b) => filteredBranchIds.includes(b.branchId))
+        .filter((b) => b.status === "pending")
+        .sort((a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf()),
+    [filteredBranchIds, state.bookings]
+  );
+  const selectedQuickAssignBooking = useMemo(
+    () => pendingBookings.find((booking) => booking.id === quickAssignBookingId) ?? null,
+    [pendingBookings, quickAssignBookingId]
+  );
+  const quickAssignBookingOptions = useMemo(
+    () =>
+      pendingBookings.map((booking) => {
+        const customer =
+          state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "Khách vãng lai";
+        return {
+          value: booking.id,
+          label: `${dayjs(booking.bookingAt).format("HH:mm DD/MM")} · ${customer} · ${booking.guestCount} khách`,
+        };
+      }),
+    [pendingBookings, state.customers]
+  );
+  const quickAssignTableOptions = useMemo(() => {
+    const requiredSeats = Math.max(1, selectedQuickAssignBooking?.guestCount ?? 1);
+    return state.tables
+      .filter((table) => filteredBranchIds.includes(table.branchId))
+      .filter((table) => table.status === "available")
+      .filter((table) => table.seats >= requiredSeats)
+      .sort((a, b) => a.name.localeCompare(b.name, "vi"))
+      .map((table) => {
+        const area = state.areas.find((item) => item.id === table.areaId)?.name ?? "—";
+        const branch = state.branches.find((item) => item.id === table.branchId)?.name ?? "—";
+        return {
+          value: table.id,
+          label: `${table.name} · ${area} · ${branch} · ${table.seats} ghế`,
+        };
+      });
+  }, [filteredBranchIds, selectedQuickAssignBooking?.guestCount, state.areas, state.branches, state.tables]);
+  useEffect(() => {
+    if (!quickAssignBookingId) {
+      setQuickAssignTableId(null);
+      return;
+    }
+    if (
+      quickAssignTableId &&
+      quickAssignTableOptions.some((option) => option.value === quickAssignTableId)
+    ) {
+      return;
+    }
+    setQuickAssignTableId(quickAssignTableOptions[0]?.value ?? null);
+  }, [quickAssignBookingId, quickAssignTableId, quickAssignTableOptions]);
 
   const closeDetailModal = () => {
     setDetailTable(null);
@@ -833,6 +891,7 @@ export default function FloorMapPage() {
     setRegisterBookingDate(dayjs().format("YYYY-MM-DD"));
     setRegisterBookingTime(dayjs().format("HH:mm"));
     setRegisterNote("");
+    setRegisterPendingBookingId(null);
     setRegisterArrivalMode("immediate");
   }, []);
 
@@ -847,6 +906,7 @@ export default function FloorMapPage() {
     setRegisterNote("");
     setRegisterCustomerName("");
     setRegisterCustomerPhone("");
+    setRegisterPendingBookingId(null);
     setRegisterArrivalMode("immediate");
   };
 
@@ -941,6 +1001,79 @@ export default function FloorMapPage() {
       });
     } finally {
       setRegisterSaving(false);
+    }
+  };
+
+  const handleAssignPendingBooking = async () => {
+    if (!registerTable || !registerPendingBookingId) {
+      notifications.show({
+        color: "red",
+        message: "Vui lòng chọn booking chờ để gán.",
+      });
+      return;
+    }
+    setRegisterSaving(true);
+    try {
+      const result = await assignBookingToTable({
+        bookingId: registerPendingBookingId,
+        areaId: registerTable.areaId,
+        tableId: registerTable.id,
+      });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        closeRegistrationPanel();
+      }
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Không thể gán booking chờ.",
+      });
+    } finally {
+      setRegisterSaving(false);
+    }
+  };
+
+  const handleQuickAssignPendingBooking = async () => {
+    if (!quickAssignBookingId || !quickAssignTableId) {
+      notifications.show({
+        color: "red",
+        message: "Vui lòng chọn booking chờ và bàn để gán.",
+      });
+      return;
+    }
+    const selectedTable = state.tables.find((table) => table.id === quickAssignTableId);
+    if (!selectedTable) {
+      notifications.show({
+        color: "red",
+        message: "Không tìm thấy bàn được chọn.",
+      });
+      return;
+    }
+    setQuickAssignSaving(true);
+    try {
+      const result = await assignBookingToTable({
+        bookingId: quickAssignBookingId,
+        areaId: selectedTable.areaId,
+        tableId: selectedTable.id,
+      });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        setQuickAssignBookingId(null);
+        setQuickAssignTableId(null);
+      }
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Không thể gán booking chờ.",
+      });
+    } finally {
+      setQuickAssignSaving(false);
     }
   };
 
@@ -1559,6 +1692,52 @@ export default function FloorMapPage() {
       ) : null}
 
       <PortalSectionCard>
+        <Stack gap="sm">
+          <Group justify="space-between" align="center" wrap="wrap">
+            <Text fw={600}>Booking chờ xếp bàn</Text>
+            <Badge variant="light" color={pendingBookings.length > 0 ? "orange" : "gray"}>
+              {pendingBookings.length}
+            </Badge>
+          </Group>
+          <Group grow align="end">
+            <Select
+              label="Booking chờ"
+              placeholder="Chọn booking cần gán"
+              value={quickAssignBookingId}
+              onChange={setQuickAssignBookingId}
+              data={quickAssignBookingOptions}
+              searchable
+              clearable
+            />
+            <Select
+              label="Bàn gán"
+              placeholder={
+                selectedQuickAssignBooking
+                  ? "Chọn bàn còn trống"
+                  : "Chọn booking trước"
+              }
+              value={quickAssignTableId}
+              onChange={setQuickAssignTableId}
+              data={quickAssignTableOptions}
+              searchable
+              clearable
+              disabled={!selectedQuickAssignBooking}
+            />
+            <Button
+              loading={quickAssignSaving}
+              disabled={!hasSupabase || isLoading || !quickAssignBookingId || !quickAssignTableId}
+              onClick={() => void handleQuickAssignPendingBooking()}
+            >
+              Gán nhanh
+            </Button>
+          </Group>
+          <Text size="xs" c="dimmed">
+            Booking tạo ở mục Đặt bàn sẽ xuất hiện tại đây với trạng thái Chờ xếp bàn.
+          </Text>
+        </Stack>
+      </PortalSectionCard>
+
+      <PortalSectionCard>
         <div
           className={`${classes.canvasFrame} ${pendingPlacementTableId ? classes.canvasFramePendingPlacement : ""
             }`}
@@ -2118,6 +2297,38 @@ export default function FloorMapPage() {
           <Stack gap="sm">
             <Text size="sm" c="dimmed">
               {registerTable.seats} ghế · {tableStatusLabel[registerTable.status]}
+            </Text>
+            <Select
+              label="Gán booking chờ vào bàn này"
+              placeholder="Chọn booking đang chờ xếp bàn"
+              value={registerPendingBookingId}
+              onChange={setRegisterPendingBookingId}
+              data={pendingBookings.map((booking) => {
+                const customer =
+                  state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "Khách vãng lai";
+                return {
+                  value: booking.id,
+                  label: `${dayjs(booking.bookingAt).format("HH:mm DD/MM")} · ${customer} · ${booking.guestCount} khách`,
+                };
+              })}
+              searchable
+              clearable
+            />
+            {pendingBookings.length === 0 ? (
+              <Text size="xs" c="dimmed">
+                Không có booking chờ trong phạm vi chi nhánh hiện tại.
+              </Text>
+            ) : null}
+            <Button
+              variant="light"
+              loading={registerSaving}
+              disabled={!hasSupabase || isLoading || !registerPendingBookingId}
+              onClick={() => void handleAssignPendingBooking()}
+            >
+              Gán booking chờ
+            </Button>
+            <Text size="xs" c="dimmed">
+              Hoặc tạo booking mới trực tiếp cho bàn này:
             </Text>
             <Radio.Group
               label="Đặt bàn"

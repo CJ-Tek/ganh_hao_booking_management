@@ -15,8 +15,8 @@ type CreateBookingInput = {
   customerName: string;
   customerPhone: string;
   branchId: string;
-  areaId: string;
-  tableId: string;
+  areaId?: string | null;
+  tableId?: string | null;
   guestCount: number;
   bookingAt: string;
   note?: string;
@@ -199,40 +199,46 @@ export async function loginWithSupabase(
 export async function createBookingInSupabase(input: CreateBookingInput): Promise<Result> {
   const client = ensureClient();
   const normalizedAt = dayjs(input.bookingAt).toISOString();
-  const nextTableStatus = resolveAutoTableStatus(normalizedAt);
-  const nextBookingStatus: BookingStatus =
-    nextTableStatus === "hold" ? "confirmed" : "checked_in";
+  const hasAssignedTable = Boolean(input.areaId && input.tableId);
+  const nextTableStatus = hasAssignedTable ? resolveAutoTableStatus(normalizedAt) : null;
+  const nextBookingStatus: BookingStatus = hasAssignedTable
+    ? nextTableStatus === "hold"
+      ? "confirmed"
+      : "checked_in"
+    : "pending";
 
-  const { data: tableInfo, error: tableInfoError } = await client
-    .from("tables")
-    .select("seats")
-    .eq("id", input.tableId)
-    .maybeSingle();
-  if (tableInfoError || !tableInfo) {
-    return {
-      ok: false,
-      message: tableInfoError?.message ?? "Không tìm thấy bàn.",
-    };
-  }
-  if (input.guestCount > tableInfo.seats) {
-    return {
-      ok: false,
-      message: `Số khách không được vượt quá sức chứa bàn (${tableInfo.seats} ghế).`,
-    };
-  }
+  if (hasAssignedTable) {
+    const { data: tableInfo, error: tableInfoError } = await client
+      .from("tables")
+      .select("seats")
+      .eq("id", input.tableId!)
+      .maybeSingle();
+    if (tableInfoError || !tableInfo) {
+      return {
+        ok: false,
+        message: tableInfoError?.message ?? "Không tìm thấy bàn.",
+      };
+    }
+    if (input.guestCount > tableInfo.seats) {
+      return {
+        ok: false,
+        message: `Số khách không được vượt quá sức chứa bàn (${tableInfo.seats} ghế).`,
+      };
+    }
 
-  const { data: conflict, error: conflictError } = await client
-    .from("bookings")
-    .select("id")
-    .eq("table_id", input.tableId)
-    .eq("booking_at", normalizedAt)
-    .in("status", ["confirmed", "checked_in"])
-    .maybeSingle();
-  if (conflictError) {
-    return { ok: false, message: conflictError.message };
-  }
-  if (conflict) {
-    return { ok: false, message: "Đã có đặt bàn trùng khung giờ trên bàn này." };
+    const { data: conflict, error: conflictError } = await client
+      .from("bookings")
+      .select("id")
+      .eq("table_id", input.tableId!)
+      .eq("booking_at", normalizedAt)
+      .in("status", ["confirmed", "checked_in"])
+      .maybeSingle();
+    if (conflictError) {
+      return { ok: false, message: conflictError.message };
+    }
+    if (conflict) {
+      return { ok: false, message: "Đã có đặt bàn trùng khung giờ trên bàn này." };
+    }
   }
 
   const { data: currentCustomer } = await client
@@ -268,8 +274,8 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
   const { error: bookingError } = await client.from("bookings").insert({
     customer_id: customerId,
     branch_id: input.branchId,
-    area_id: input.areaId,
-    table_id: input.tableId,
+    area_id: input.areaId ?? null,
+    table_id: input.tableId ?? null,
     guest_count: input.guestCount,
     booking_at: normalizedAt,
     note: input.note ?? null,
@@ -280,16 +286,18 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     return { ok: false, message: bookingError.message };
   }
 
-  const { data: tableRow } = await client
-    .from("tables")
-    .select("status")
-    .eq("id", input.tableId)
-    .maybeSingle();
-  if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-    await client
+  if (hasAssignedTable && nextTableStatus) {
+    const { data: tableRow } = await client
       .from("tables")
-      .update({ status: nextTableStatus })
-      .eq("id", input.tableId);
+      .select("status")
+      .eq("id", input.tableId!)
+      .maybeSingle();
+    if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+      await client
+        .from("tables")
+        .update({ status: nextTableStatus })
+        .eq("id", input.tableId!);
+    }
   }
 
   await client.from("internal_notifications").insert({
@@ -303,6 +311,85 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
   });
 
   return { ok: true, message: "Đã tạo booking thành công." };
+}
+
+export async function assignBookingToTableInSupabase(input: {
+  bookingId: string;
+  areaId: string;
+  tableId: string;
+}): Promise<Result> {
+  const client = ensureClient();
+  const { bookingId, areaId, tableId } = input;
+  const { data: booking, error: bookingErr } = await client
+    .from("bookings")
+    .select("id, branch_id, guest_count, booking_at, status")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (bookingErr || !booking) {
+    return { ok: false, message: bookingErr?.message ?? "Không tìm thấy booking." };
+  }
+  if (booking.status !== "pending") {
+    return { ok: false, message: "Chỉ gán bàn cho booking đang chờ xếp bàn." };
+  }
+
+  const { data: table, error: tableErr } = await client
+    .from("tables")
+    .select("id, branch_id, seats, status")
+    .eq("id", tableId)
+    .maybeSingle();
+  if (tableErr || !table) {
+    return { ok: false, message: tableErr?.message ?? "Không tìm thấy bàn." };
+  }
+  if (table.branch_id !== booking.branch_id) {
+    return { ok: false, message: "Bàn không thuộc cùng chi nhánh với booking." };
+  }
+  if (booking.guest_count > table.seats) {
+    return {
+      ok: false,
+      message: `Số khách không được vượt quá sức chứa bàn (${table.seats} ghế).`,
+    };
+  }
+
+  const normalizedAt = dayjs(booking.booking_at).toISOString();
+  const { data: conflict, error: conflictError } = await client
+    .from("bookings")
+    .select("id")
+    .eq("table_id", tableId)
+    .eq("booking_at", normalizedAt)
+    .in("status", ["confirmed", "checked_in"])
+    .neq("id", bookingId)
+    .maybeSingle();
+  if (conflictError) {
+    return { ok: false, message: conflictError.message };
+  }
+  if (conflict) {
+    return { ok: false, message: "Đã có đặt bàn trùng khung giờ trên bàn này." };
+  }
+
+  const nextTableStatus = resolveAutoTableStatus(normalizedAt);
+  const nextBookingStatus: BookingStatus =
+    nextTableStatus === "hold" ? "confirmed" : "checked_in";
+  const { error: assignErr } = await client
+    .from("bookings")
+    .update({
+      area_id: areaId,
+      table_id: tableId,
+      status: nextBookingStatus,
+    })
+    .eq("id", bookingId);
+  if (assignErr) {
+    return { ok: false, message: assignErr.message };
+  }
+
+  const { data: tableRow } = await client
+    .from("tables")
+    .select("status")
+    .eq("id", tableId)
+    .maybeSingle();
+  if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+    await client.from("tables").update({ status: nextTableStatus }).eq("id", tableId);
+  }
+  return { ok: true, message: "Đã gán bàn cho booking." };
 }
 
 export async function updateBookingStatusInSupabase(
@@ -320,6 +407,9 @@ export async function updateBookingStatusInSupabase(
     throw new Error(error.message);
   }
   if (!booking || (status !== "cancelled" && status !== "completed")) {
+    return;
+  }
+  if (!booking.table_id) {
     return;
   }
   const { data: tableRow } = await client
@@ -381,6 +471,9 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
   }
   if (!target) {
     throw new Error("Không tìm thấy booking.");
+  }
+  if (!target.table_id) {
+    throw new Error("Booking chưa được gán bàn. Vui lòng gán trong mục Sơ đồ trước.");
   }
 
   const { error: bookingErr } = await client
