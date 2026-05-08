@@ -47,10 +47,11 @@ import classes from "./app-shell-layout.module.css";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode; adminOnly?: boolean };
 
-const MANAGER_SECTION_HREFS = ["/bookings", "/floor-map", "/customers"] as const;
+const MANAGER_SECTION_HREFS = ["/dashboard", "/bookings", "/floor-map", "/customers"] as const;
 const MANAGER_DOCK_HREFS = MANAGER_SECTION_HREFS;
 
 const managerDockShortLabel: Record<(typeof MANAGER_DOCK_HREFS)[number], string> = {
+  "/dashboard": "Tổng quan",
   "/bookings": "Đặt bàn",
   "/floor-map": "Sơ đồ",
   "/customers": "Khách hàng",
@@ -166,8 +167,6 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   }, [usesMobileDock, dockHrefSet, shownNavItems]);
 
   const showManagerDock = usesMobileDock && isCompact;
-  const isBranchManager = currentUser?.role === "manager";
-
   const portalLabel =
     currentUser?.role === "manager" ? "Cổng quản lý chi nhánh" : "Cổng quản lý tổng";
 
@@ -179,14 +178,10 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     >
       <AppShell.Header
         px={{ base: "sm", sm: "md" }}
-        style={
-          isBranchManager
-            ? {
-                background: "var(--mantine-color-brand-filled)",
-                color: "white",
-              }
-            : undefined
-        }
+        style={{
+          background: "var(--mantine-color-brand-filled)",
+          color: "white",
+        }}
       >
         <Stack justify="center" h="100%" gap={0}>
           <Group justify="space-between" wrap="nowrap" className={classes.headerRoot}>
@@ -196,16 +191,16 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 onClick={toggle}
                 hiddenFrom="md"
                 size="sm"
-                color={isBranchManager ? "white" : undefined}
+                color="white"
               />
               <Image src="/logo/horizontal.png" alt="Logo Gành Hào" h={34} w="auto" />
               <Stack gap={0} className={classes.brandCopy}>
                 <Group gap={6} wrap="nowrap">
-                  <Title order={4} c={isBranchManager ? "white" : undefined}>
+                  <Title order={4} c="white">
                     Hệ thống quản lý đặt bàn
                   </Title>
                 </Group>
-                <Text size="xs" c={isBranchManager ? "rgba(255,255,255,0.85)" : "dimmed"}>
+                <Text size="xs" c="rgba(255,255,255,0.85)">
                   {portalLabel}
                 </Text>
               </Stack>
@@ -229,7 +224,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                   <Box className={classes.notificationBellWrap}>
                     <ActionIcon
                       variant="transparent"
-                      color={isBranchManager ? "white" : "gray"}
+                      color="white"
                       size="lg"
                       radius="md"
                       aria-label="Thông báo nội bộ"
@@ -351,14 +346,21 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               </Popover>
 
               <Group gap="xs" wrap="nowrap" visibleFrom="md">
-                <Avatar color="brand" radius="xl">
+                <Avatar
+                  radius="xl"
+                  style={{
+                    background: "rgba(255,255,255,0.18)",
+                    color: "white",
+                    border: "1px solid rgba(255,255,255,0.28)",
+                  }}
+                >
                   {currentUser?.fullName[0] ?? "U"}
                 </Avatar>
                 <Stack gap={0}>
-                  <Text size="sm" fw={600}>
+                  <Text size="sm" fw={600} c="white">
                     {currentUser?.fullName}
                   </Text>
-                  <Text size="xs" c="dimmed">
+                  <Text size="xs" c="rgba(255,255,255,0.82)">
                     {currentUser?.username}
                   </Text>
                 </Stack>
@@ -368,7 +370,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                   </Badge>
                 )}
                 <ActionIcon
-                  variant="light"
+                  variant="filled"
                   color="red"
                   aria-label="Đăng xuất"
                   onClick={() => {
@@ -386,17 +388,13 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
 
       <AppShell.Navbar
         p="lg"
-        style={
-          isBranchManager
-            ? {
-                background: "var(--mantine-color-brand-filled)",
-                borderRightColor: "rgba(255,255,255,0.2)",
-              }
-            : undefined
-        }
+        style={{
+          background: "var(--mantine-color-brand-filled)",
+          borderRightColor: "rgba(255,255,255,0.2)",
+        }}
       >
         <Stack gap="lg">
-          <Text fw={700} size="md" c={isBranchManager ? "white" : undefined}>
+          <Text fw={700} size="md" c="white">
             Điều hướng
           </Text>
           <Stack gap="sm">
@@ -405,6 +403,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 key={item.href}
                 component={Link}
                 href={item.href}
+                className={classes.blueNavLink}
                 label={item.label}
                 leftSection={item.icon}
                 active={pathname.startsWith(item.href)}
@@ -415,11 +414,6 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                   paddingInline: 12,
                   fontSize: "1rem",
                   fontWeight: 700,
-                  color: isBranchManager ? "white" : undefined,
-                  background:
-                    isBranchManager && pathname.startsWith(item.href)
-                      ? "rgba(255,255,255,0.14)"
-                      : undefined,
                 }}
               />
             ))}
@@ -431,20 +425,16 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             pt="lg"
             pb="max(var(--mantine-spacing-xl), calc(env(safe-area-inset-bottom, 0px) + var(--mantine-spacing-md)))"
           >
-            <Divider color={isBranchManager ? "rgba(255,255,255,0.25)" : undefined} />
+            <Divider color="rgba(255,255,255,0.25)" />
             <Group wrap="nowrap" align="flex-start">
               <Avatar color="brand" radius="xl" size="md">
                 {currentUser?.fullName[0] ?? "U"}
               </Avatar>
               <Stack gap={0} style={{ minWidth: 0 }}>
-                <Text size="sm" fw={600} lineClamp={2} c={isBranchManager ? "white" : undefined}>
+                <Text size="sm" fw={600} lineClamp={2} c="white">
                   {currentUser?.fullName}
                 </Text>
-                <Text
-                  size="xs"
-                  c={isBranchManager ? "rgba(255,255,255,0.82)" : "dimmed"}
-                  lineClamp={1}
-                >
+                <Text size="xs" c="rgba(255,255,255,0.82)" lineClamp={1}>
                   {currentUser?.username}
                 </Text>
               </Stack>
@@ -456,8 +446,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             )}
             <Button
               fullWidth
-              variant={isBranchManager ? "white" : "light"}
-              color={isBranchManager ? "dark" : "red"}
+              variant="white"
+              color="dark"
               leftSection={<LogOut size={16} />}
               onClick={() => {
                 close();
@@ -497,10 +487,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               right: 0,
               bottom: 0,
               zIndex: 200,
-              background: isBranchManager
-                ? "var(--mantine-color-brand-filled)"
-                : "var(--mantine-color-body)",
-              borderTopColor: isBranchManager ? "rgba(255,255,255,0.25)" : undefined,
+              background: "var(--mantine-color-brand-filled)",
+              borderTopColor: "rgba(255,255,255,0.25)",
             }}
           >
             <Group justify="space-between" gap={4} wrap="nowrap" grow>
@@ -524,17 +512,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                       borderRadius: 10,
                       minHeight: 52,
                       padding: "8px 4px",
-                      background:
-                        isBranchManager && active
-                          ? "rgba(255,255,255,0.2)"
-                          : active
-                            ? "var(--mantine-color-brand-light)"
-                            : undefined,
-                      color: isBranchManager
-                        ? "white"
-                        : active
-                          ? "var(--mantine-color-brand-filled)"
-                          : undefined,
+                      background: active ? "rgba(255,255,255,0.2)" : undefined,
+                      color: "white",
                     }}
                   >
                     <Stack gap={2} align="center">
@@ -544,7 +523,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                           alignItems: "center",
                           justifyContent: "center",
                           transform: "scale(1.1)",
-                          opacity: active || isBranchManager ? 1 : 0.85,
+                          opacity: active ? 1 : 0.85,
                         }}
                       >
                         {item.icon}
@@ -552,7 +531,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                       <Text
                         size="12px"
                         fw={active ? 700 : 600}
-                        c={isBranchManager ? "white" : undefined}
+                        c="white"
                         ta="center"
                         lineClamp={2}
                         lh={1.2}
@@ -576,7 +555,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                     borderRadius: 10,
                     minHeight: 52,
                     padding: "8px 4px",
-                    color: isBranchManager ? "white" : undefined,
+                    color: "white",
                   }}
                 >
                   <Stack gap={2} align="center">
@@ -584,7 +563,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                     <Text
                       size="12px"
                       fw={600}
-                      c={isBranchManager ? "white" : undefined}
+                      c="white"
                       ta="center"
                       lineClamp={1}
                     >
