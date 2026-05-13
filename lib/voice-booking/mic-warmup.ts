@@ -3,11 +3,11 @@
  * pipeline is ready before Web Speech API's SpeechRecognition.start().
  * Without this, Chromium often drops the first phrase after the user clicks record.
  */
-export async function warmUpMicrophoneForSpeech(signal?: AbortSignal): Promise<void> {
+export async function warmUpMicrophoneForSpeech(): Promise<void> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
     return;
   }
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true, signal });
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   for (const track of stream.getTracks()) {
     track.stop();
   }
