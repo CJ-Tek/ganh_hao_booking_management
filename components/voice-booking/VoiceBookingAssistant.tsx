@@ -117,6 +117,10 @@ export function VoiceBookingAssistant(props: {
   const [isParsing, setIsParsing] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const transcriptRef = useRef(transcript);
+  transcriptRef.current = transcript;
+  /** Transcript (trimmed) at the moment this recording session starts — new speech appends after it. */
+  const recordingAppendBaseRef = useRef("");
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
@@ -207,7 +211,9 @@ export function VoiceBookingAssistant(props: {
         if (event.results[i].isFinal) finalText += txt;
         else interim += txt;
       }
-      setTranscript((finalText + " " + interim).trim());
+      const newSession = (finalText + " " + interim).trim();
+      const base = recordingAppendBaseRef.current;
+      setTranscript([base, newSession].filter(Boolean).join(" "));
     };
 
     rec.onerror = () => {
@@ -218,7 +224,7 @@ export function VoiceBookingAssistant(props: {
       setIsListening(false);
     };
 
-    setTranscript("");
+    recordingAppendBaseRef.current = transcriptRef.current.trim();
     setClarify(null);
     setIsListening(true);
     try {
@@ -350,7 +356,8 @@ export function VoiceBookingAssistant(props: {
                 <Text fw={600}>{branch.name}</Text>
                 </Group>
                 <Text size="sm" c="dimmed">
-                  Bấm <strong>Ghi âm</strong> → nói 1 câu → bấm <strong>Phân tích</strong> → kiểm tra lại → tạo booking.
+                  Bấm <strong>Ghi âm</strong> (có thể nhiều lần để thêm câu) → bấm <strong>Phân tích</strong> → kiểm tra lại →
+                  tạo booking.
                 </Text>
               </Stack>
               <Group gap="xs" align="center">
