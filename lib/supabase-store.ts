@@ -1,6 +1,7 @@
 import dayjs from "dayjs";
 import { initialState } from "./initial-state";
 import { supabase } from "./supabase";
+import { appendUnknownGuestTag, stripUnknownGuestTag, toSyntheticPhoneValue } from "./booking-meta";
 import {
   AppStateSnapshot,
   AppUser,
@@ -13,11 +14,11 @@ type Result = { ok: boolean; message: string };
 
 type CreateBookingInput = {
   customerName: string;
-  customerPhone: string;
+  customerPhone?: string;
   branchId: string;
   areaId?: string | null;
   tableId?: string | null;
-  guestCount: number;
+  guestCount?: number;
   bookingAt: string;
   note?: string;
   createdByUserId: string;
@@ -199,6 +200,15 @@ export async function loginWithSupabase(
 export async function createBookingInSupabase(input: CreateBookingInput): Promise<Result> {
   const client = ensureClient();
   const normalizedAt = dayjs(input.bookingAt).toISOString();
+  const normalizedGuestCount =
+    typeof input.guestCount === "number" && Number.isFinite(input.guestCount)
+      ? Math.max(1, Math.round(input.guestCount))
+      : 1;
+  const guestCountSpecified =
+    typeof input.guestCount === "number" && Number.isFinite(input.guestCount);
+  const bookingNote = guestCountSpecified
+    ? stripUnknownGuestTag(input.note) ?? null
+    : appendUnknownGuestTag(input.note);
   const hasAssignedTable = Boolean(input.areaId && input.tableId);
   const nextTableStatus = hasAssignedTable ? resolveAutoTableStatus(normalizedAt) : null;
   const nextBookingStatus: BookingStatus = hasAssignedTable
@@ -219,7 +229,7 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
         message: tableInfoError?.message ?? "Không tìm thấy bàn.",
       };
     }
-    if (input.guestCount > tableInfo.seats) {
+    if (normalizedGuestCount > tableInfo.seats) {
       return {
         ok: false,
         message: `Số khách không được vượt quá sức chứa bàn (${tableInfo.seats} ghế).`,
@@ -241,11 +251,15 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     }
   }
 
-  const { data: currentCustomer } = await client
-    .from("customers")
-    .select("id")
-    .eq("phone", input.customerPhone)
-    .maybeSingle();
+  const normalizedPhone = input.customerPhone?.trim() || "";
+  const hasProvidedPhone = normalizedPhone.length > 0;
+  const { data: currentCustomer } = hasProvidedPhone
+    ? await client
+        .from("customers")
+        .select("id")
+        .eq("phone", normalizedPhone)
+        .maybeSingle()
+    : { data: null };
 
   let customerId = currentCustomer?.id as string | undefined;
   if (customerId) {
@@ -257,11 +271,12 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
       return { ok: false, message: error.message };
     }
   } else {
+    const customerPhoneValue = hasProvidedPhone ? normalizedPhone : toSyntheticPhoneValue();
     const { data, error } = await client
       .from("customers")
       .insert({
         full_name: input.customerName,
-        phone: input.customerPhone,
+        phone: customerPhoneValue,
       })
       .select("id")
       .single();
@@ -276,9 +291,9 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     branch_id: input.branchId,
     area_id: input.areaId ?? null,
     table_id: input.tableId ?? null,
-    guest_count: input.guestCount,
+    guest_count: normalizedGuestCount,
     booking_at: normalizedAt,
-    note: input.note ?? null,
+    note: bookingNote,
     created_by_user_id: input.createdByUserId,
     status: nextBookingStatus,
   });
@@ -317,12 +332,13 @@ export async function assignBookingToTableInSupabase(input: {
   bookingId: string;
   areaId: string;
   tableId: string;
+  guestCount?: number;
 }): Promise<Result> {
   const client = ensureClient();
-  const { bookingId, areaId, tableId } = input;
+  const { bookingId, areaId, tableId, guestCount } = input;
   const { data: booking, error: bookingErr } = await client
     .from("bookings")
-    .select("id, branch_id, guest_count, booking_at, status")
+    .select("id, branch_id, guest_count, booking_at, status, note")
     .eq("id", bookingId)
     .maybeSingle();
   if (bookingErr || !booking) {
@@ -331,6 +347,11 @@ export async function assignBookingToTableInSupabase(input: {
   if (booking.status !== "pending") {
     return { ok: false, message: "Chỉ gán bàn cho booking đang chờ xếp bàn." };
   }
+
+  const nextGuestCount =
+    typeof guestCount === "number" && Number.isFinite(guestCount)
+      ? Math.max(1, Math.round(guestCount))
+      : booking.guest_count;
 
   const { data: table, error: tableErr } = await client
     .from("tables")
@@ -343,7 +364,7 @@ export async function assignBookingToTableInSupabase(input: {
   if (table.branch_id !== booking.branch_id) {
     return { ok: false, message: "Bàn không thuộc cùng chi nhánh với booking." };
   }
-  if (booking.guest_count > table.seats) {
+  if (nextGuestCount > table.seats) {
     return {
       ok: false,
       message: `Số khách không được vượt quá sức chứa bàn (${table.seats} ghế).`,
@@ -374,6 +395,11 @@ export async function assignBookingToTableInSupabase(input: {
     .update({
       area_id: areaId,
       table_id: tableId,
+      guest_count: nextGuestCount,
+      note:
+        typeof guestCount === "number" && Number.isFinite(guestCount)
+          ? stripUnknownGuestTag(booking.note) ?? null
+          : booking.note,
       status: nextBookingStatus,
     })
     .eq("id", bookingId);

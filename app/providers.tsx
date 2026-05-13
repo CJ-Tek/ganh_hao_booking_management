@@ -4,6 +4,7 @@ import "@mantine/core/styles.css";
 import "@mantine/dates/styles.css";
 import "@mantine/notifications/styles.css";
 import {
+  Button,
   createTheme,
   MantineColorsTuple,
   MantineProvider,
@@ -33,6 +34,29 @@ const theme = createTheme({
     brand: brandPalette,
   },
   fontFamily: "Inter, Arial, sans-serif",
+  components: {
+    Button: Button.extend({
+      styles: {
+        root: {
+          height: "auto",
+          minHeight: "var(--button-height)",
+          maxWidth: "100%",
+        },
+        inner: {
+          minWidth: 0,
+          maxWidth: "100%",
+        },
+        label: {
+          minWidth: 0,
+          whiteSpace: "normal",
+          overflowWrap: "break-word",
+          wordBreak: "break-word",
+          textAlign: "center",
+          lineHeight: 1.35,
+        },
+      },
+    }),
+  },
 });
 
 export function Providers({ children }: { children: React.ReactNode }) {

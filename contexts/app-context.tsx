@@ -65,11 +65,11 @@ const SESSION_KEY = "ganh_hao_booking_session_v1";
 
 type CreateBookingInput = {
   customerName: string;
-  customerPhone: string;
+  customerPhone?: string;
   branchId: string;
   areaId?: string | null;
   tableId?: string | null;
-  guestCount: number;
+  guestCount?: number;
   bookingAt: string;
   note?: string;
 };
@@ -100,6 +100,7 @@ interface AppContextValue {
     bookingId: string;
     areaId: string;
     tableId: string;
+    guestCount?: number;
   }) => Promise<ActionResult>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   checkInBooking: (bookingId: string) => Promise<void>;
@@ -418,6 +419,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     bookingId: string;
     areaId: string;
     tableId: string;
+    guestCount?: number;
   }) => {
     if (!hasSupabase) {
       return { ok: false, message: "Chưa kết nối Supabase." };

@@ -18,6 +18,7 @@ import { notifications } from "@mantine/notifications";
 import { useMemo, useRef, useState } from "react";
 import { matchAreaId, matchTableId, type AreaLite, type TableLite } from "@/lib/voice-booking/match";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
+import { warmUpMicrophoneForSpeech } from "@/lib/voice-booking/mic-warmup";
 import { tableStatusLabel } from "@/lib/display";
 
 type ActionResult = { ok: boolean; message: string };
@@ -35,7 +36,7 @@ type VoiceBookingDraft = {
 type VoiceBookingResponse =
   | {
       draft: VoiceBookingDraft;
-      missing: Array<"customerName" | "customerPhone" | "guestCount" | "bookingAtLocal" | "tableId">;
+      missing: Array<"customerName" | "bookingAtLocal">;
       clarificationQuestion?: string;
     }
   | { error: string };
@@ -97,11 +98,11 @@ export function VoiceBookingAssistant(props: {
   tables: TableLite[];
   onCreateBooking: (input: {
     customerName: string;
-    customerPhone: string;
+    customerPhone?: string;
     branchId: string;
-    areaId: string;
-    tableId: string;
-    guestCount: number;
+    areaId?: string | null;
+    tableId?: string | null;
+    guestCount?: number;
     bookingAt: string;
     note?: string;
   }) => Promise<ActionResult>;
@@ -110,6 +111,8 @@ export function VoiceBookingAssistant(props: {
 
   const [opened, setOpened] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  /** Brief mic priming before SpeechRecognition — avoids Chromium dropping the first phrase. */
+  const [isWarmingMic, setIsWarmingMic] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [isParsing, setIsParsing] = useState(false);
 
@@ -117,7 +120,7 @@ export function VoiceBookingAssistant(props: {
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
-  const [guestCount, setGuestCount] = useState<number>(4);
+  const [guestCount, setGuestCount] = useState<number | null>(null);
   const [bookingAt, setBookingAt] = useState<string | null>(
     dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm")
   );
@@ -158,7 +161,7 @@ export function VoiceBookingAssistant(props: {
 
   const hasSpeech = typeof window !== "undefined" && Boolean(getSpeechRecognition(window as SpeechApi));
 
-  const startListening = () => {
+  const startListening = async () => {
     if (!hasSpeech) {
       notifications.show({
         color: "red",
@@ -167,8 +170,29 @@ export function VoiceBookingAssistant(props: {
       });
       return;
     }
+    if (isWarmingMic || isListening) return;
+
     const SR = getSpeechRecognition(window as SpeechApi);
     if (!SR) return;
+
+    setIsWarmingMic(true);
+    try {
+      await warmUpMicrophoneForSpeech();
+    } catch (e) {
+      setIsWarmingMic(false);
+      const name = e instanceof Error ? e.name : "";
+      notifications.show({
+        color: "red",
+        title: "Không bật được micro",
+        message:
+          name === "NotAllowedError"
+            ? "Cho phép micro trong trình duyệt rồi thử lại."
+            : "Kiểm tra micro và thử lại.",
+      });
+      return;
+    }
+    setIsWarmingMic(false);
+
     const rec = new SR();
     recognitionRef.current = rec;
     rec.lang = "vi-VN";
@@ -197,7 +221,17 @@ export function VoiceBookingAssistant(props: {
     setTranscript("");
     setClarify(null);
     setIsListening(true);
-    rec.start();
+    try {
+      rec.start();
+    } catch {
+      setIsListening(false);
+      recognitionRef.current = null;
+      notifications.show({
+        color: "red",
+        title: "Lỗi",
+        message: "Không khởi động được nhận diện giọng nói.",
+      });
+    }
   };
 
   const stopListening = () => {
@@ -264,16 +298,13 @@ export function VoiceBookingAssistant(props: {
       notifications.show({ color: "red", title: "Thiếu giờ", message: "Chọn ngày/giờ." });
       return;
     }
-    if (!areaId || !tableId) {
-      notifications.show({ color: "red", title: "Thiếu bàn", message: "Chọn khu và bàn." });
-      return;
-    }
-    const phoneNorm = normalizeVietnamPhone(customerPhone);
     if (!customerName.trim()) {
       notifications.show({ color: "red", title: "Thiếu tên", message: "Nhập tên khách." });
       return;
     }
-    if (!isPlausibleVietnamPhone(phoneNorm)) {
+    const phoneRaw = customerPhone.trim();
+    const phoneNorm = phoneRaw ? normalizeVietnamPhone(phoneRaw) : "";
+    if (phoneNorm && !isPlausibleVietnamPhone(phoneNorm)) {
       notifications.show({
         color: "red",
         title: "SĐT không hợp lệ",
@@ -284,11 +315,11 @@ export function VoiceBookingAssistant(props: {
 
     const result = await onCreateBooking({
       customerName: formatVietnamesePersonName(customerName),
-      customerPhone: phoneNorm,
+      customerPhone: phoneNorm || undefined,
       branchId: branch.id,
-      areaId,
-      tableId,
-      guestCount,
+      areaId: areaId ?? undefined,
+      tableId: tableId ?? undefined,
+      guestCount: typeof guestCount === "number" && Number.isFinite(guestCount) ? guestCount : undefined,
       bookingAt: dayjs(bookingAt).toISOString(),
       note: note.trim() ? note.trim() : undefined,
     });
@@ -324,17 +355,18 @@ export function VoiceBookingAssistant(props: {
               </Stack>
               <Group gap="xs" align="center">
                 <Button
-                  onClick={() => (isListening ? stopListening() : startListening())}
+                  onClick={() => (isListening ? stopListening() : void startListening())}
                   color={isListening ? "red" : "blue"}
                   variant="filled"
                   disabled={!hasSpeech}
+                  loading={isWarmingMic}
                 >
                   {isListening ? "Dừng" : "Ghi âm"}
                 </Button>
                 <Button
                   onClick={() => void parseTranscript()}
                   loading={isParsing}
-                  disabled={!transcript.trim() || isListening}
+                  disabled={!transcript.trim() || isListening || isWarmingMic}
                 >
                   Phân tích
                 </Button>
@@ -393,8 +425,11 @@ export function VoiceBookingAssistant(props: {
             <NumberInput
               label="Số khách"
               value={guestCount}
-              onChange={(v) => setGuestCount(typeof v === "number" ? v : 1)}
+              onChange={(v) => setGuestCount(typeof v === "number" && Number.isFinite(v) ? v : null)}
               min={1}
+              allowDecimal={false}
+              clampBehavior="strict"
+              placeholder="Tùy chọn"
             />
             <DateTimePicker
               label="Thời gian đến"

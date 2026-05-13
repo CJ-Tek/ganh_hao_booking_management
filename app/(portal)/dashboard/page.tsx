@@ -20,6 +20,11 @@ import { useRouter } from "next/navigation";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
+import {
+  displayCustomerPhone,
+  isGuestCountSpecified,
+  stripUnknownGuestTag,
+} from "@/lib/booking-meta";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
@@ -79,7 +84,7 @@ export default function DashboardPage() {
         return `${areaName} ${tableName}`;
       }
       if (acc === "note") {
-        return booking.note ?? "";
+        return stripUnknownGuestTag(booking.note) ?? "";
       }
       if (acc === "createdByUserId") {
         return state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
@@ -196,7 +201,9 @@ export default function DashboardPage() {
               const customer =
                 state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—";
               const phone =
-                state.customers.find((item) => item.id === booking.customerId)?.phone ?? "—";
+                displayCustomerPhone(
+                  state.customers.find((item) => item.id === booking.customerId)?.phone
+                );
               const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
               const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
               const locationLine =
@@ -221,11 +228,14 @@ export default function DashboardPage() {
                         {locationLine}
                       </Text>
                       <Text size="xs" c="dimmed">
-                        {booking.guestCount} khách · {creator}
+                        {isGuestCountSpecified(booking)
+                          ? `${booking.guestCount} khách`
+                          : "Chưa rõ số khách"}{" "}
+                        · {creator}
                       </Text>
-                      {booking.note ? (
+                      {stripUnknownGuestTag(booking.note) ? (
                         <Text size="xs" c="dimmed" lineClamp={3}>
-                          {booking.note}
+                          {stripUnknownGuestTag(booking.note)}
                         </Text>
                       ) : null}
                     </Stack>
@@ -294,7 +304,7 @@ export default function DashboardPage() {
                   <Stack gap={2}>
                     <Text size="sm">{c?.fullName ?? "—"}</Text>
                     <Text size="xs" c="dimmed">
-                      {c?.phone ?? "—"}
+                      {displayCustomerPhone(c?.phone)}
                     </Text>
                   </Stack>
                 );
@@ -317,6 +327,8 @@ export default function DashboardPage() {
               accessor: "guestCount",
               title: "Số khách",
               sortable: true,
+              render: (booking) =>
+                isGuestCountSpecified(booking) ? booking.guestCount : "Chưa rõ",
             },
             {
               accessor: "createdByUserId",
@@ -331,9 +343,9 @@ export default function DashboardPage() {
               title: "Ghi chú",
               sortable: true,
               render: (booking) =>
-                booking.note ? (
+                stripUnknownGuestTag(booking.note) ? (
                   <Text size="sm" lineClamp={2} maw={220}>
-                    {booking.note}
+                    {stripUnknownGuestTag(booking.note)}
                   </Text>
                 ) : (
                   <Text size="sm" c="dimmed">

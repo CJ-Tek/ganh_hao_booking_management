@@ -5,6 +5,7 @@ import {
   Alert,
   Badge,
   Button,
+  Flex,
   Group,
   Menu,
   Modal,
@@ -13,6 +14,7 @@ import {
   Select,
   SegmentedControl,
   Stack,
+  Tabs,
   Text,
   TextInput,
   Textarea,
@@ -255,6 +257,7 @@ export default function FloorMapPage() {
   );
   const [registerNote, setRegisterNote] = useState("");
   const [registerPendingBookingId, setRegisterPendingBookingId] = useState<string | null>(null);
+  const [registerModalTab, setRegisterModalTab] = useState<"book" | "assign">("book");
   const [registerSaving, setRegisterSaving] = useState(false);
   const [quickAssignBookingId, setQuickAssignBookingId] = useState<string | null>(null);
   const [quickAssignTableId, setQuickAssignTableId] = useState<string | null>(null);
@@ -299,8 +302,12 @@ export default function FloorMapPage() {
   const prevAreaIdForLayoutRef = useRef<string | null>(null);
   const prevModeForLayoutRef = useRef<CanvasMode>("view");
 
+  /** Stable order so the default/fallback area does not jump when snapshot polling refreshes. */
   const availableAreas = useMemo(
-    () => state.areas.filter((area) => filteredBranchIds.includes(area.branchId)),
+    () =>
+      [...state.areas.filter((area) => filteredBranchIds.includes(area.branchId))].sort(
+        (a, b) => a.name.localeCompare(b.name, "vi") || a.id.localeCompare(b.id)
+      ),
     [filteredBranchIds, state.areas]
   );
 
@@ -491,9 +498,18 @@ export default function FloorMapPage() {
     }
   };
 
+  /** Keep a concrete area id in state so the location Select does not follow unstable `areas[0]` on each reload. */
   useEffect(() => {
-    if (activeAreaId && !availableAreas.some((a) => a.id === activeAreaId)) {
-      setActiveAreaId(availableAreas[0]?.id ?? null);
+    if (availableAreas.length === 0) {
+      setActiveAreaId(null);
+      return;
+    }
+    if (activeAreaId !== null && !availableAreas.some((a) => a.id === activeAreaId)) {
+      setActiveAreaId(availableAreas[0]!.id);
+      return;
+    }
+    if (activeAreaId === null) {
+      setActiveAreaId(availableAreas[0]!.id);
     }
   }, [activeAreaId, availableAreas]);
 
@@ -893,6 +909,7 @@ export default function FloorMapPage() {
     setRegisterNote("");
     setRegisterPendingBookingId(null);
     setRegisterArrivalMode("immediate");
+    setRegisterModalTab("book");
   }, []);
 
   const openRegistrationForTable = (table: DiningTable) => {
@@ -908,6 +925,7 @@ export default function FloorMapPage() {
     setRegisterCustomerPhone("");
     setRegisterPendingBookingId(null);
     setRegisterArrivalMode("immediate");
+    setRegisterModalTab("book");
   };
 
   const handleViewOrRegisterForTable = (table: DiningTable) => {
@@ -1699,8 +1717,14 @@ export default function FloorMapPage() {
               {pendingBookings.length}
             </Badge>
           </Group>
-          <Group grow align="end">
+          <Flex
+            direction={{ base: "column", sm: "row" }}
+            gap="sm"
+            align={{ base: "stretch", sm: "flex-end" }}
+            wrap="nowrap"
+          >
             <Select
+              style={{ flex: "1 1 0", minWidth: 0 }}
               label="Booking chờ"
               placeholder="Chọn booking cần gán"
               value={quickAssignBookingId}
@@ -1710,6 +1734,7 @@ export default function FloorMapPage() {
               clearable
             />
             <Select
+              style={{ flex: "1 1 0", minWidth: 0 }}
               label="Bàn gán"
               placeholder={
                 selectedQuickAssignBooking
@@ -1724,13 +1749,15 @@ export default function FloorMapPage() {
               disabled={!selectedQuickAssignBooking}
             />
             <Button
+              w={{ base: "100%", sm: "auto" }}
+              miw={{ sm: 120 }}
               loading={quickAssignSaving}
               disabled={!hasSupabase || isLoading || !quickAssignBookingId || !quickAssignTableId}
               onClick={() => void handleQuickAssignPendingBooking()}
             >
               Gán nhanh
             </Button>
-          </Group>
+          </Flex>
           <Text size="xs" c="dimmed">
             Booking tạo ở mục Đặt bàn sẽ xuất hiện tại đây với trạng thái Chờ xếp bàn.
           </Text>
@@ -2289,7 +2316,7 @@ export default function FloorMapPage() {
         opened={Boolean(registerTable)}
         onClose={closeRegistrationPanel}
         title={registerTable ? `Đăng ký - ${registerTable.name}` : "Đăng ký"}
-        size="sm"
+        size="md"
         centered
         overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
       >
@@ -2298,106 +2325,136 @@ export default function FloorMapPage() {
             <Text size="sm" c="dimmed">
               {registerTable.seats} ghế · {tableStatusLabel[registerTable.status]}
             </Text>
-            <Select
-              label="Gán booking chờ vào bàn này"
-              placeholder="Chọn booking đang chờ xếp bàn"
-              value={registerPendingBookingId}
-              onChange={setRegisterPendingBookingId}
-              data={pendingBookings.map((booking) => {
-                const customer =
-                  state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "Khách vãng lai";
-                return {
-                  value: booking.id,
-                  label: `${dayjs(booking.bookingAt).format("HH:mm DD/MM")} · ${customer} · ${booking.guestCount} khách`,
-                };
-              })}
-              searchable
-              clearable
-            />
-            {pendingBookings.length === 0 ? (
-              <Text size="xs" c="dimmed">
-                Không có booking chờ trong phạm vi chi nhánh hiện tại.
-              </Text>
-            ) : null}
-            <Button
-              variant="light"
-              loading={registerSaving}
-              disabled={!hasSupabase || isLoading || !registerPendingBookingId}
-              onClick={() => void handleAssignPendingBooking()}
-            >
-              Gán booking chờ
-            </Button>
-            <Text size="xs" c="dimmed">
-              Hoặc tạo booking mới trực tiếp cho bàn này:
-            </Text>
-            <Radio.Group
-              label="Đặt bàn"
-              value={registerArrivalMode}
+            <Tabs
+              value={registerModalTab}
               onChange={(value) =>
-                setRegisterArrivalMode(value === "hold" ? "hold" : "immediate")
+                setRegisterModalTab(value === "assign" ? "assign" : "book")
               }
             >
-              <Stack gap={6} mt={4}>
-                <Radio value="hold" label="Giữ chỗ" />
-                <Radio value="immediate" label="Vào bàn ngay" />
-              </Stack>
-            </Radio.Group>
-            {registerArrivalMode === "hold" ? (
-              <Group grow align="end">
-                <DatePickerInput
-                  label="Ngày đến"
-                  value={registerBookingDate}
-                  onChange={setRegisterBookingDate}
-                  valueFormat="YYYY-MM-DD"
-                />
-                <TimeInput
-                  label="Giờ đến"
-                  value={registerBookingTime}
-                  onChange={(event) => setRegisterBookingTime(event.currentTarget.value)}
-                  withSeconds={false}
-                />
-              </Group>
-            ) : null}
-            <TextInput
-              label="Tên khách"
-              placeholder="Họ và tên"
-              value={registerCustomerName}
-              onChange={(event) => setRegisterCustomerName(event.currentTarget.value)}
-            />
-            <TextInput
-              label="Số điện thoại"
-              placeholder="09..."
-              inputMode="tel"
-              value={registerCustomerPhone}
-              onChange={(event) => setRegisterCustomerPhone(event.currentTarget.value)}
-            />
-            <NumberInput
-              label="Số khách"
-              value={registerGuestCount}
-              onChange={(value) => setRegisterGuestCount(Number(value || 1))}
-              min={1}
-              max={registerTable.seats || undefined}
-            />
-            <Textarea
-              label="Ghi chú"
-              placeholder="Tùy chọn"
-              value={registerNote}
-              onChange={(event) => setRegisterNote(event.currentTarget.value)}
-              autosize
-              minRows={2}
-            />
-            <Group justify="flex-end" gap={8}>
-              <Button variant="default" onClick={closeRegistrationPanel}>
-                Hủy
-              </Button>
-              <Button
-                loading={registerSaving}
-                disabled={!hasSupabase || isLoading}
-                onClick={() => void handleRegisterCustomer()}
-              >
-                Tạo booking
-              </Button>
-            </Group>
+              <Tabs.List grow>
+                <Tabs.Tab value="book">Đặt bàn</Tabs.Tab>
+                <Tabs.Tab value="assign">Gán booking chờ</Tabs.Tab>
+              </Tabs.List>
+
+              <Tabs.Panel value="book" pt="sm">
+                <Stack gap="sm">
+                  <Radio.Group
+                    label="Đặt bàn"
+                    value={registerArrivalMode}
+                    onChange={(value) =>
+                      setRegisterArrivalMode(value === "hold" ? "hold" : "immediate")
+                    }
+                  >
+                    <Stack gap={6} mt={4}>
+                      <Radio value="hold" label="Giữ chỗ" />
+                      <Radio value="immediate" label="Vào bàn ngay" />
+                    </Stack>
+                  </Radio.Group>
+                  {registerArrivalMode === "hold" ? (
+                    <Flex
+                      direction={{ base: "column", sm: "row" }}
+                      gap="sm"
+                      align={{ base: "stretch", sm: "flex-end" }}
+                    >
+                      <DatePickerInput
+                        style={{ flex: "1 1 0", minWidth: 0 }}
+                        label="Ngày đến"
+                        value={registerBookingDate}
+                        onChange={setRegisterBookingDate}
+                        valueFormat="YYYY-MM-DD"
+                      />
+                      <TimeInput
+                        style={{ flex: "1 1 0", minWidth: 0 }}
+                        label="Giờ đến"
+                        value={registerBookingTime}
+                        onChange={(event) => setRegisterBookingTime(event.currentTarget.value)}
+                        withSeconds={false}
+                      />
+                    </Flex>
+                  ) : null}
+                  <TextInput
+                    label="Tên khách"
+                    placeholder="Họ và tên"
+                    value={registerCustomerName}
+                    onChange={(event) => setRegisterCustomerName(event.currentTarget.value)}
+                  />
+                  <TextInput
+                    label="Số điện thoại"
+                    placeholder="09..."
+                    inputMode="tel"
+                    value={registerCustomerPhone}
+                    onChange={(event) => setRegisterCustomerPhone(event.currentTarget.value)}
+                  />
+                  <NumberInput
+                    label="Số khách"
+                    value={registerGuestCount}
+                    onChange={(value) => setRegisterGuestCount(Number(value || 1))}
+                    min={1}
+                    max={registerTable.seats || undefined}
+                  />
+                  <Textarea
+                    label="Ghi chú"
+                    placeholder="Tùy chọn"
+                    value={registerNote}
+                    onChange={(event) => setRegisterNote(event.currentTarget.value)}
+                    autosize
+                    minRows={2}
+                  />
+                  <Group justify="flex-end" gap={8}>
+                    <Button variant="default" onClick={closeRegistrationPanel}>
+                      Hủy
+                    </Button>
+                    <Button
+                      loading={registerSaving}
+                      disabled={!hasSupabase || isLoading}
+                      onClick={() => void handleRegisterCustomer()}
+                    >
+                      Tạo booking
+                    </Button>
+                  </Group>
+                </Stack>
+              </Tabs.Panel>
+
+              <Tabs.Panel value="assign" pt="sm">
+                <Stack gap="sm">
+                  <Select
+                    label="Booking chờ"
+                    placeholder="Chọn booking đang chờ xếp bàn"
+                    value={registerPendingBookingId}
+                    onChange={setRegisterPendingBookingId}
+                    data={pendingBookings.map((booking) => {
+                      const customer =
+                        state.customers.find((item) => item.id === booking.customerId)?.fullName ??
+                        "Khách vãng lai";
+                      return {
+                        value: booking.id,
+                        label: `${dayjs(booking.bookingAt).format("HH:mm DD/MM")} · ${customer} · ${booking.guestCount} khách`,
+                      };
+                    })}
+                    searchable
+                    clearable
+                  />
+                  {pendingBookings.length === 0 ? (
+                    <Text size="xs" c="dimmed">
+                      Không có booking chờ trong phạm vi chi nhánh hiện tại.
+                    </Text>
+                  ) : null}
+                  <Group justify="flex-end" gap={8}>
+                    <Button variant="default" onClick={closeRegistrationPanel}>
+                      Hủy
+                    </Button>
+                    <Button
+                      variant="light"
+                      loading={registerSaving}
+                      disabled={!hasSupabase || isLoading || !registerPendingBookingId}
+                      onClick={() => void handleAssignPendingBooking()}
+                    >
+                      Gán booking chờ
+                    </Button>
+                  </Group>
+                </Stack>
+              </Tabs.Panel>
+            </Tabs>
           </Stack>
         ) : null}
       </Modal>

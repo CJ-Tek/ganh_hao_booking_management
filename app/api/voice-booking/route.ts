@@ -44,9 +44,7 @@ const DraftSchema = z.object({
 
 const ResponseSchema = z.object({
   draft: DraftSchema,
-  missing: z.array(
-    z.enum(["customerName", "customerPhone", "guestCount", "bookingAtLocal", "tableId"])
-  ),
+  missing: z.array(z.enum(["customerName", "bookingAtLocal"])),
   clarificationQuestion: z.string().optional(),
 });
 
@@ -67,9 +65,11 @@ export async function POST(req: Request) {
       "You are a manager-only voice assistant that converts Vietnamese booking speech into a structured booking draft for an internal restaurant booking system.",
       "Be direct. No politeness. No greetings. No filler.",
       "Your job: extract booking fields from the transcript and ask for exactly ONE missing/ambiguous piece of information when needed.",
+      "Minimum required fields to create a booking are ONLY customerName and bookingAtLocal.",
       "Do NOT invent table IDs. Only return tableNameHint / areaNameHint as plain strings when mentioned.",
       `Time handling: now is ${input.nowIso}. Convert relative times (e.g. 'tối nay', 'mai', 'thứ bảy') into local time string YYYY-MM-DDTHH:mm (24h) in Vietnam time.`,
-      "Phone handling: keep raw digits as spoken; accept +84 forms.",
+      "Phone, guestCount, area and table are optional.",
+      "Phone handling: keep raw digits as spoken; accept +84 forms when present.",
       "If the transcript contains multiple bookings, only draft the first one and ignore the rest.",
     ].join("\n");
 
