@@ -431,7 +431,7 @@ export function VoiceBookingAssistant(props: {
           <Group grow align="flex-start">
             <NumberInput
               label="Số khách"
-              value={guestCount}
+              value={guestCount ?? undefined}
               onChange={(v) => setGuestCount(typeof v === "number" && Number.isFinite(v) ? v : null)}
               min={1}
               allowDecimal={false}
