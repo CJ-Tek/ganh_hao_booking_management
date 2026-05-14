@@ -2,6 +2,7 @@
 
 import dayjs from "dayjs";
 import {
+  ActionIcon,
   Badge,
   Button,
   Card,
@@ -20,6 +21,7 @@ import { DateTimePicker } from "@mantine/dates";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { DataTable, type DataTableSortStatus } from "mantine-datatable";
+import { Mic, Square } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   PortalPageTitle,
@@ -36,7 +38,7 @@ import {
 } from "@/lib/booking-meta";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { usePortalCompact } from "@/lib/use-portal-compact";
-import { type Booking } from "@/lib/types";
+import { type Booking, type BookingStatus } from "@/lib/types";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
 import { warmUpMicrophoneForSpeech } from "@/lib/voice-booking/mic-warmup";
 
@@ -221,6 +223,10 @@ function BookingsPageContent() {
   );
   const [note, setNote] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [listStatusFilter, setListStatusFilter] = useState<BookingStatus | null>(null);
+  const [listTableAssignFilter, setListTableAssignFilter] = useState<
+    "all" | "assigned" | "unassigned"
+  >("all");
   const [isListeningSearch, setIsListeningSearch] = useState(false);
   /** Mic priming before SpeechRecognition — avoids Chromium missing the first phrase. */
   const [isWarmingVoiceSearch, setIsWarmingVoiceSearch] = useState(false);
@@ -332,6 +338,40 @@ function BookingsPageContent() {
     () => state.bookings.filter((booking) => filteredBranchIds.includes(booking.branchId)),
     [filteredBranchIds, state.bookings]
   );
+
+  const bookingStatusFilterOptions = useMemo(
+    () =>
+      (["pending", "confirmed", "checked_in", "completed", "cancelled"] as const).map((s) => ({
+        value: s,
+        label: bookingStatusLabel[s],
+      })),
+    []
+  );
+
+  const tableAssignFilterOptions = useMemo(
+    () => [
+      { value: "all", label: "Tất cả" },
+      { value: "assigned", label: "Đã gán bàn" },
+      { value: "unassigned", label: "Chưa gán bàn" },
+    ],
+    []
+  );
+
+  const pipelineFilteredBookings = useMemo(() => {
+    return branchBookings.filter((booking) => {
+      if (listStatusFilter && booking.status !== listStatusFilter) {
+        return false;
+      }
+      const hasTable = Boolean(booking.areaId && booking.tableId);
+      if (listTableAssignFilter === "assigned" && !hasTable) {
+        return false;
+      }
+      if (listTableAssignFilter === "unassigned" && hasTable) {
+        return false;
+      }
+      return true;
+    });
+  }, [branchBookings, listStatusFilter, listTableAssignFilter]);
 
   const startVoiceSearch = async () => {
     const ww = window as SpeechApi;
@@ -567,9 +607,9 @@ function BookingsPageContent() {
   const searchedBookings = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) {
-      return branchBookings;
+      return pipelineFilteredBookings;
     }
-    return branchBookings.filter((booking) => {
+    return pipelineFilteredBookings.filter((booking) => {
       const customer = state.customers.find((item) => item.id === booking.customerId);
       const area = state.areas.find((item) => item.id === booking.areaId);
       const table = state.tables.find((item) => item.id === booking.tableId);
@@ -594,7 +634,7 @@ function BookingsPageContent() {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [branchBookings, searchQuery, state.areas, state.customers, state.tables]);
+  }, [pipelineFilteredBookings, searchQuery, state.areas, state.customers, state.tables]);
 
   const sortedBookings = useMemo(() => {
     const getValue = (booking: Booking) => {
@@ -779,37 +819,118 @@ function BookingsPageContent() {
     </PortalSectionCard>
   );
 
+  const voiceSearchInputSection = (actionIconSize: "sm" | "md") => (
+    <Tooltip label={isListeningSearch ? "Dừng ghi âm" : "Tìm bằng giọng nói"} withArrow>
+      <ActionIcon
+        variant={isListeningSearch ? "filled" : "subtle"}
+        color={isListeningSearch ? "red" : "gray"}
+        loading={isWarmingVoiceSearch}
+        size={actionIconSize}
+        radius="sm"
+        onClick={() => {
+          if (isListeningSearch) {
+            stopVoiceSearch();
+          } else {
+            void startVoiceSearch();
+          }
+        }}
+        aria-label={isListeningSearch ? "Dừng ghi âm" : "Tìm bằng giọng nói"}
+      >
+        {isListeningSearch ? (
+          <Square size={actionIconSize === "md" ? 15 : 13} strokeWidth={2.5} fill="currentColor" />
+        ) : (
+          <Mic size={actionIconSize === "md" ? 19 : 17} strokeWidth={2} />
+        )}
+      </ActionIcon>
+    </Tooltip>
+  );
+
   const bookingsTable = (
     <PortalSectionCard>
       <Stack gap="sm">
-        <Group justify="space-between" align="flex-end">
-          <Text fw={600}>Danh sách booking</Text>
-          <Group gap="xs">
-            <Button
-              size="compact-sm"
-              variant={isListeningSearch ? "filled" : "default"}
-              color={isListeningSearch ? "red" : "gray"}
-              loading={isWarmingVoiceSearch}
-              onClick={() => {
-                if (isListeningSearch) {
-                  stopVoiceSearch();
-                } else {
-                  void startVoiceSearch();
-                }
+        <Text fw={600}>Danh sách booking</Text>
+        {isCompact ? (
+          <Stack gap="sm">
+            <TextInput
+              placeholder="Tìm theo khách, SĐT, giờ đến, giờ check-in, khu, bàn, trạng thái..."
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.currentTarget.value);
+                setPage(1);
               }}
-            >
-              {isListeningSearch ? "Dừng ghi âm" : "Tìm bằng giọng nói"}
-            </Button>
+              size="md"
+              rightSection={voiceSearchInputSection("md")}
+              rightSectionWidth={44}
+              rightSectionPointerEvents="all"
+            />
+            <Group grow align="flex-end" wrap="wrap" gap="sm">
+              <Select
+                label="Trạng thái"
+                placeholder="Tất cả"
+                clearable
+                data={bookingStatusFilterOptions}
+                value={listStatusFilter}
+                onChange={(value) => {
+                  setListStatusFilter((value as BookingStatus | null) ?? null);
+                  setPage(1);
+                }}
+                size="md"
+              />
+              <Select
+                label="Bàn"
+                data={tableAssignFilterOptions}
+                value={listTableAssignFilter}
+                onChange={(value) => {
+                  setListTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
+                  setPage(1);
+                }}
+                size="md"
+              />
+            </Group>
+          </Stack>
+        ) : (
+          <Group align="flex-end" gap="sm" wrap="nowrap" justify="flex-start">
+            <TextInput
+              placeholder="Tìm theo khách, SĐT, giờ đến, giờ check-in, khu, bàn, trạng thái..."
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.currentTarget.value);
+                setPage(1);
+              }}
+              size="sm"
+              style={{ flex: "1 1 12rem", minWidth: 0 }}
+              rightSection={voiceSearchInputSection("sm")}
+              rightSectionWidth={40}
+              rightSectionPointerEvents="all"
+            />
+            <Select
+              label="Trạng thái"
+              placeholder="Tất cả"
+              clearable
+              data={bookingStatusFilterOptions}
+              value={listStatusFilter}
+              onChange={(value) => {
+                setListStatusFilter((value as BookingStatus | null) ?? null);
+                setPage(1);
+              }}
+              size="sm"
+              w={168}
+              miw={168}
+            />
+            <Select
+              label="Bàn"
+              data={tableAssignFilterOptions}
+              value={listTableAssignFilter}
+              onChange={(value) => {
+                setListTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
+                setPage(1);
+              }}
+              size="sm"
+              w={168}
+              miw={168}
+            />
           </Group>
-        </Group>
-        <TextInput
-          placeholder="Tìm theo khách, SĐT, giờ đến, giờ check-in, khu, bàn, trạng thái..."
-          value={searchQuery}
-          onChange={(event) => {
-            setSearchQuery(event.currentTarget.value);
-            setPage(1);
-          }}
-        />
+        )}
       </Stack>
       <div style={{ height: 12 }} />
       <DataTable
