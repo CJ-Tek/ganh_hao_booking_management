@@ -19,6 +19,7 @@ import {
   shouldPickBranchOnLogin,
 } from "@/lib/branch-pick";
 import { initialState } from "@/lib/initial-state";
+import { clampFloorNodeSpacing } from "@/lib/floor-map-layout";
 import {
   addAreaInSupabase,
   addUserInSupabase,
@@ -813,7 +814,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     async (areaId: string, columns: number, rows: number, spacing: number) => {
       const floorGridColumns = Math.min(24, Math.max(4, Math.round(columns)));
       const floorGridRows = Math.min(18, Math.max(4, Math.round(rows)));
-      const floorNodeSpacing = Math.min(160, Math.max(64, Math.round(spacing)));
+      const floorNodeSpacing = clampFloorNodeSpacing(spacing);
       if (!hasSupabase) {
         setState((prev) => ({
           ...prev,
@@ -846,7 +847,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     async (areaId: string, input: SaveFloorLayoutInput) => {
       const floorGridColumns = Math.min(24, Math.max(4, Math.round(input.floorGridColumns)));
       const floorGridRows = Math.min(18, Math.max(4, Math.round(input.floorGridRows)));
-      const floorNodeSpacing = Math.min(160, Math.max(64, Math.round(input.floorNodeSpacing)));
+      const floorNodeSpacing = clampFloorNodeSpacing(input.floorNodeSpacing);
       const tablePositions = input.tablePositions.map((p) => ({
         tableId: p.tableId,
         x: Math.round(p.x),

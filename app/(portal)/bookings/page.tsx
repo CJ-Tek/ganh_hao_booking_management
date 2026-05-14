@@ -578,6 +578,12 @@ function BookingsPageContent() {
         customer?.fullName ?? "",
         displayCustomerPhone(customer?.phone),
         dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+        dayjs(booking.bookingAt).format("DD/MM/YYYY HH:mm"),
+        booking.checkedInAt ? dayjs(booking.checkedInAt).format("HH:mm DD/MM/YYYY") : "",
+        booking.checkedInAt ? dayjs(booking.checkedInAt).format("DD/MM/YYYY HH:mm") : "",
+        "check-in",
+        "checkin",
+        "giờ check-in",
         String(booking.guestCount),
         area?.name ?? "",
         table?.name ?? "",
@@ -612,6 +618,9 @@ function BookingsPageContent() {
       }
       if (acc === "status") {
         return bookingStatusLabel[booking.status];
+      }
+      if (acc === "checkedInAt") {
+        return booking.checkedInAt ? dayjs(booking.checkedInAt).valueOf() : 0;
       }
       return dayjs(booking.bookingAt).valueOf();
     };
@@ -794,7 +803,7 @@ function BookingsPageContent() {
           </Group>
         </Group>
         <TextInput
-          placeholder="Tìm theo khách, SĐT, giờ đến, khu, bàn, trạng thái..."
+          placeholder="Tìm theo khách, SĐT, giờ đến, giờ check-in, khu, bàn, trạng thái..."
           value={searchQuery}
           onChange={(event) => {
             setSearchQuery(event.currentTarget.value);
@@ -833,6 +842,19 @@ function BookingsPageContent() {
             title: "Giờ đặt",
             sortable: true,
             render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+          },
+          {
+            accessor: "checkedInAt",
+            title: "Giờ check-in",
+            sortable: true,
+            render: (booking) =>
+              booking.checkedInAt ? (
+                <Text size="sm">{dayjs(booking.checkedInAt).format("HH:mm DD/MM/YYYY")}</Text>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  —
+                </Text>
+              ),
           },
           {
             accessor: "customerId",
@@ -1037,6 +1059,11 @@ function BookingsPageContent() {
                 <Text size="sm" fw={500}>
                   {dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}
                 </Text>
+                {booking.checkedInAt ? (
+                  <Text size="xs" c="dimmed">
+                    Check-in: {dayjs(booking.checkedInAt).format("HH:mm · DD/MM/YYYY")}
+                  </Text>
+                ) : null}
                 <Text size="sm" c="dimmed">
                   {locationLine}
                 </Text>

@@ -27,6 +27,7 @@ import { useAppContext } from "@/contexts/app-context";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { getAreaSeatBudget } from "@/lib/area-capacity";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
+import { FLOOR_TABLE_PALETTE_SENTINEL } from "@/lib/floor-map-layout";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type DiningTable, TableStatus } from "@/lib/types";
 
@@ -217,8 +218,8 @@ function TablesPageContent() {
       name: singleName.trim(),
       seats,
       status: "available",
-      positionX: 0,
-      positionY: 0,
+      positionX: FLOOR_TABLE_PALETTE_SENTINEL,
+      positionY: FLOOR_TABLE_PALETTE_SENTINEL,
     });
     setSingleName("");
     setSingleSeats(4);
@@ -264,8 +265,8 @@ function TablesPageContent() {
           name: `${batchPrefix.trim()} ${nextNum}`,
           seats: g.seats,
           status: "available",
-          positionX: 0,
-          positionY: 0,
+          positionX: FLOOR_TABLE_PALETTE_SENTINEL,
+          positionY: FLOOR_TABLE_PALETTE_SENTINEL,
         });
         nextNum++;
       }

@@ -42,3 +42,29 @@ export function displayCustomerPhone(phone?: string | null): string {
   }
   return phone;
 }
+
+function bookingAtMs(booking: Pick<Booking, "bookingAt">): number {
+  const t = Date.parse(booking.bookingAt);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Prefer in-table checked-in guest, else confirmed, else any active booking on the table. */
+export function pickPrimaryBookingOnTable(
+  tableId: string,
+  bookings: readonly Booking[]
+): Booking | null {
+  const onTable = bookings.filter(
+    (b) =>
+      b.tableId === tableId && b.status !== "cancelled" && b.status !== "completed"
+  );
+  if (onTable.length === 0) {
+    return null;
+  }
+  const checkedIn = onTable.filter((b) => b.status === "checked_in");
+  const pool =
+    checkedIn.length > 0
+      ? checkedIn
+      : onTable.filter((b) => b.status === "confirmed");
+  const finalPool = pool.length > 0 ? pool : onTable;
+  return [...finalPool].sort((a, b) => bookingAtMs(b) - bookingAtMs(a))[0] ?? null;
+}

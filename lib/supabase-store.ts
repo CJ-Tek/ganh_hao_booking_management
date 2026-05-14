@@ -3,6 +3,9 @@ import { initialState } from "./initial-state";
 import { supabase } from "./supabase";
 import { appendUnknownGuestTag, stripUnknownGuestTag, toSyntheticPhoneValue } from "./booking-meta";
 import {
+  FLOOR_DEFAULT_NODE_SPACING_PX,
+} from "./floor-map-layout";
+import {
   AppStateSnapshot,
   AppUser,
   BookingStatus,
@@ -121,7 +124,9 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
           typeof item.floor_grid_columns === "number" ? item.floor_grid_columns : 12,
         floorGridRows: typeof item.floor_grid_rows === "number" ? item.floor_grid_rows : 8,
         floorNodeSpacing:
-          typeof item.floor_node_spacing === "number" ? item.floor_node_spacing : 96,
+          typeof item.floor_node_spacing === "number"
+            ? item.floor_node_spacing
+            : FLOOR_DEFAULT_NODE_SPACING_PX,
       })) ?? [],
     tables:
       tablesResult.data?.map((item) => ({
@@ -150,6 +155,7 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
         tableId: item.table_id,
         guestCount: item.guest_count,
         bookingAt: item.booking_at,
+        checkedInAt: item.checked_in_at ?? undefined,
         note: item.note ?? undefined,
         createdByUserId: item.created_by_user_id,
         status: item.status as BookingStatus,
@@ -296,6 +302,7 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     note: bookingNote,
     created_by_user_id: input.createdByUserId,
     status: nextBookingStatus,
+    checked_in_at: nextBookingStatus === "checked_in" ? dayjs().toISOString() : null,
   });
   if (bookingError) {
     return { ok: false, message: bookingError.message };
@@ -401,6 +408,7 @@ export async function assignBookingToTableInSupabase(input: {
           ? stripUnknownGuestTag(booking.note) ?? null
           : booking.note,
       status: nextBookingStatus,
+      checked_in_at: nextBookingStatus === "checked_in" ? dayjs().toISOString() : null,
     })
     .eq("id", bookingId);
   if (assignErr) {
@@ -428,7 +436,14 @@ export async function updateBookingStatusInSupabase(
     .select("id, table_id")
     .eq("id", bookingId)
     .maybeSingle();
-  const { error } = await client.from("bookings").update({ status }).eq("id", bookingId);
+  const shouldClearCheckedInAt =
+    status === "cancelled" || status === "pending" || status === "confirmed";
+  const { error } = await client
+    .from("bookings")
+    .update(
+      shouldClearCheckedInAt ? { status, checked_in_at: null } : { status }
+    )
+    .eq("id", bookingId);
   if (error) {
     throw new Error(error.message);
   }
@@ -504,7 +519,7 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
 
   const { error: bookingErr } = await client
     .from("bookings")
-    .update({ status: "checked_in" })
+    .update({ status: "checked_in", checked_in_at: dayjs().toISOString() })
     .eq("id", bookingId);
   if (bookingErr) {
     throw new Error(bookingErr.message);
@@ -680,7 +695,7 @@ export async function addAreaInSupabase(
     capacity,
     floor_grid_columns: 12,
     floor_grid_rows: 8,
-    floor_node_spacing: 96,
+    floor_node_spacing: FLOOR_DEFAULT_NODE_SPACING_PX,
   });
 }
 
@@ -775,7 +790,7 @@ export type SaveFloorLayoutInput = {
   floorGridColumns: number;
   floorGridRows: number;
   floorNodeSpacing: number;
-  /** All tables in this area; positions use grid indices (or STORAGE_OFF_GRID for palette). */
+  /** All tables in this area; positions use grid indices (or `FLOOR_TABLE_PALETTE_SENTINEL` / -1 for palette). */
   tablePositions: Array<{ tableId: string; x: number; y: number }>;
 };
 

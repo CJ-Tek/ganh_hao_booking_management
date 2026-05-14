@@ -50,11 +50,12 @@
 
 .tableBlock {
   position: absolute;
-  width: 112px;
+  /* Must match lib/floor-map-layout.ts FLOOR_TABLE_BLOCK_WIDTH_PX */
+  width: 152px;
   z-index: 3;
   border: 1px solid rgba(148, 163, 184, 0.5);
   border-radius: 8px;
-  padding: 6px;
+  padding: 8px;
   padding-top: 22px;
   background-color: #ffffff;
   cursor: grab;
@@ -104,7 +105,7 @@
 .tableBlockView {
   position: relative;
   cursor: pointer;
-  padding-top: 6px;
+  padding-top: 8px;
 }
 
 .tableBlockStatusMenuBtn {

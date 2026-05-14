@@ -52,9 +52,20 @@ import {
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { usePortalCompact } from "@/lib/use-portal-compact";
+import {
+  clampFloorNodeSpacing,
+  FLOOR_DEFAULT_NODE_SPACING_PX,
+  FLOOR_NODE_SPACING_MAX_PX,
+  FLOOR_NODE_SPACING_MIN_PX,
+  FLOOR_TABLE_BLOCK_HEIGHT_PX,
+  FLOOR_TABLE_BLOCK_WIDTH_PX,
+  FLOOR_TABLE_PALETTE_SENTINEL,
+  FLOOR_TABLE_STACK_OFFSET_PX,
+} from "@/lib/floor-map-layout";
 import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
 import { bookingStatusColor, bookingStatusLabel, tableStatusColor, tableStatusLabel } from "@/lib/display";
-import { type DiningTable, type TableStatus } from "@/lib/types";
+import { displayCustomerPhone, pickPrimaryBookingOnTable } from "@/lib/booking-meta";
+import { type Booking, type DiningTable, type TableStatus } from "@/lib/types";
 import classes from "./page.module.css";
 
 const TABLE_STATUS_SURFACE_CLASS: Record<TableStatus, string> = {
@@ -72,20 +83,12 @@ const LEGACY_CELL_HEIGHT = 70;
 const MIN_SCALE = 0.12;
 const MAX_SCALE = 2.5;
 const SCALE_STEP = 0.1;
-const DEFAULT_NODE_SPACING = 96;
 const CANVAS_PADDING = 64;
 const TOUCH_PINCH_FACTOR = 0.005;
 /** Inset the fitted region slightly inside the viewport so edges are not flush with the frame. */
 const FIT_VIEWPORT_MARGIN = 0.94;
 /** World-space padding around the union of table blocks when fitting (px). */
 const FIT_TABLE_BOUNDS_PADDING = 40;
-/** Must match `.tableBlock` width and the positioning math in the canvas. */
-const TABLE_BLOCK_WIDTH = 112;
-/** Includes space for the edit-mode remove control. */
-const TABLE_BLOCK_HEIGHT = 90;
-const TABLE_STACK_OFFSET = 8;
-/** Sentinel coordinates when a table is stored in the palette (off the grid). */
-const STORAGE_OFF_GRID = -1;
 const TAP_PLACE_THRESHOLD_PX = 14;
 const PALETTE_DRAG_THRESHOLD_PX = 12;
 
@@ -147,6 +150,8 @@ function getPlacedTableBounds(
   if (grouped.size === 0) {
     return null;
   }
+  const halfW = FLOOR_TABLE_BLOCK_WIDTH_PX / 2;
+  const halfH = FLOOR_TABLE_BLOCK_HEIGHT_PX / 2;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -154,16 +159,16 @@ function getPlacedTableBounds(
   for (const [, tablesAtNode] of grouped) {
     const stackMax = tablesAtNode.length - 1;
     const { row, col } = getTableGridPosition(tablesAtNode[0]!, gridColumns, gridRows);
-    const x = CANVAS_PADDING + col * nodeSpacing;
-    const y = CANVAS_PADDING + row * nodeSpacing;
-    const left = x - 56 + 0 * TABLE_STACK_OFFSET;
-    const right = x - 56 + stackMax * TABLE_STACK_OFFSET + TABLE_BLOCK_WIDTH;
-    const top = y - 28 + 0 * TABLE_STACK_OFFSET;
-    const bottom = y - 28 + stackMax * TABLE_STACK_OFFSET + TABLE_BLOCK_HEIGHT;
-    minX = Math.min(minX, left);
-    minY = Math.min(minY, top);
-    maxX = Math.max(maxX, right);
-    maxY = Math.max(maxY, bottom);
+    const gx = CANVAS_PADDING + col * nodeSpacing;
+    const gy = CANVAS_PADDING + row * nodeSpacing;
+    for (let k = 0; k <= stackMax; k++) {
+      const cx = gx + k * FLOOR_TABLE_STACK_OFFSET_PX;
+      const cy = gy + k * FLOOR_TABLE_STACK_OFFSET_PX;
+      minX = Math.min(minX, cx - halfW);
+      maxX = Math.max(maxX, cx + halfW);
+      minY = Math.min(minY, cy - halfH);
+      maxY = Math.max(maxY, cy + halfH);
+    }
   }
   return { minX, minY, maxX, maxY };
 }
@@ -221,7 +226,7 @@ export default function FloorMapPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [gridColumns, setGridColumns] = useState(DEFAULT_GRID_COLUMNS);
   const [gridRows, setGridRows] = useState(DEFAULT_GRID_ROWS);
-  const [nodeSpacing, setNodeSpacing] = useState(DEFAULT_NODE_SPACING);
+  const [nodeSpacing, setNodeSpacing] = useState(FLOOR_DEFAULT_NODE_SPACING_PX);
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 24, y: 24 });
   const [dragState, setDragState] = useState<DragState | null>(null);
@@ -335,14 +340,11 @@ export default function FloorMapPage() {
     return state.bookings.filter((b) => b.areaId === areaId).length;
   }, [areaId, state.bookings]);
 
-  const activeBookingForDetailTable = useMemo(() => {
+  const activeBookingForDetailTable = useMemo((): Booking | null => {
     if (!detailTable) {
       return null;
     }
-    const candidates = state.bookings
-      .filter((b) => b.tableId === detailTable.id && b.status !== "cancelled" && b.status !== "completed")
-      .sort((a, b) => dayjs(b.bookingAt).valueOf() - dayjs(a.bookingAt).valueOf());
-    return candidates[0] ?? null;
+    return pickPrimaryBookingOnTable(detailTable.id, state.bookings);
   }, [detailTable, state.bookings]);
 
   const activeBookingCustomerName = useMemo(() => {
@@ -531,7 +533,7 @@ export default function FloorMapPage() {
     }
     setGridColumns(area.floorGridColumns ?? DEFAULT_GRID_COLUMNS);
     setGridRows(area.floorGridRows ?? DEFAULT_GRID_ROWS);
-    setNodeSpacing(area.floorNodeSpacing ?? DEFAULT_NODE_SPACING);
+    setNodeSpacing(clampFloorNodeSpacing(area.floorNodeSpacing ?? FLOOR_DEFAULT_NODE_SPACING_PX));
     // Resync view grid when area/mode/loading changes; avoid re-drafting on every snapshot.
   }, [areaId, isLoading, mode, state.areas]);
 
@@ -584,7 +586,7 @@ export default function FloorMapPage() {
     setEditLayout({
       gridColumns: area?.floorGridColumns ?? DEFAULT_GRID_COLUMNS,
       gridRows: area?.floorGridRows ?? DEFAULT_GRID_ROWS,
-      nodeSpacing: area?.floorNodeSpacing ?? DEFAULT_NODE_SPACING,
+      nodeSpacing: clampFloorNodeSpacing(area?.floorNodeSpacing ?? FLOOR_DEFAULT_NODE_SPACING_PX),
       positions,
     });
     // Draft snapshot only when entering edit; remote updates handled after save.
@@ -603,7 +605,7 @@ export default function FloorMapPage() {
     setEditLayout({
       gridColumns: area?.floorGridColumns ?? DEFAULT_GRID_COLUMNS,
       gridRows: area?.floorGridRows ?? DEFAULT_GRID_ROWS,
-      nodeSpacing: area?.floorNodeSpacing ?? DEFAULT_NODE_SPACING,
+      nodeSpacing: clampFloorNodeSpacing(area?.floorNodeSpacing ?? FLOOR_DEFAULT_NODE_SPACING_PX),
       positions,
     });
   }, [state.tables, state.areas, mode, areaId]);
@@ -709,7 +711,8 @@ export default function FloorMapPage() {
     if (
       editLayout.gridColumns !== (area.floorGridColumns ?? DEFAULT_GRID_COLUMNS) ||
       editLayout.gridRows !== (area.floorGridRows ?? DEFAULT_GRID_ROWS) ||
-      editLayout.nodeSpacing !== (area.floorNodeSpacing ?? DEFAULT_NODE_SPACING)
+      editLayout.nodeSpacing !==
+      clampFloorNodeSpacing(area.floorNodeSpacing ?? FLOOR_DEFAULT_NODE_SPACING_PX)
     ) {
       return true;
     }
@@ -725,11 +728,38 @@ export default function FloorMapPage() {
   const visibleTables = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     return layoutTablesInArea.filter((table) => {
-      const hitKeyword = !keyword || table.name.toLowerCase().includes(keyword);
+      const displayBooking = pickPrimaryBookingOnTable(table.id, state.bookings);
+      const customer = displayBooking
+        ? state.customers.find((item) => item.id === displayBooking.customerId)
+        : undefined;
+      const haystackParts = [
+        table.name,
+        String(table.seats),
+        customer?.fullName ?? "",
+        displayCustomerPhone(customer?.phone),
+      ];
+      if (displayBooking) {
+        haystackParts.push(
+          dayjs(displayBooking.bookingAt).format("HH:mm DD/MM/YYYY"),
+          dayjs(displayBooking.bookingAt).format("DD/MM/YYYY HH:mm"),
+          dayjs(displayBooking.bookingAt).format("HH:mm"),
+          "check-in",
+          "checkin",
+        );
+        if (displayBooking.checkedInAt) {
+          haystackParts.push(
+            dayjs(displayBooking.checkedInAt).format("HH:mm DD/MM/YYYY"),
+            dayjs(displayBooking.checkedInAt).format("DD/MM/YYYY HH:mm"),
+            dayjs(displayBooking.checkedInAt).format("HH:mm"),
+          );
+        }
+      }
+      const haystack = haystackParts.join(" ").toLowerCase();
+      const hitKeyword = !keyword || haystack.includes(keyword);
       const hitStatus = statusFilter === "all" || table.status === statusFilter;
       return hitKeyword && hitStatus;
     });
-  }, [search, statusFilter, layoutTablesInArea]);
+  }, [search, statusFilter, layoutTablesInArea, state.bookings, state.customers]);
 
   const tableMap = useMemo(
     () => Object.fromEntries(visibleTables.map((table) => [table.id, table])),
@@ -843,7 +873,7 @@ export default function FloorMapPage() {
         ...prev,
         positions: {
           ...prev.positions,
-          [table.id]: { x: STORAGE_OFF_GRID, y: STORAGE_OFF_GRID },
+          [table.id]: { x: FLOOR_TABLE_PALETTE_SENTINEL, y: FLOOR_TABLE_PALETTE_SENTINEL },
         },
       };
     });
@@ -1811,8 +1841,9 @@ export default function FloorMapPage() {
                 return tables.map((table, stackIndex) => {
                   const stackKey = `${table.id}-${node.row}-${node.col}-${stackIndex}`;
                   const style = {
-                    left: x - 56 + stackIndex * 8,
-                    top: y - 28 + stackIndex * 8,
+                    left: x + stackIndex * FLOOR_TABLE_STACK_OFFSET_PX,
+                    top: y + stackIndex * FLOOR_TABLE_STACK_OFFSET_PX,
+                    transform: "translate(-50%, -50%)",
                   };
                   if (!isEditMode) {
                     return (
@@ -1881,6 +1912,35 @@ export default function FloorMapPage() {
                           >
                             {tableStatusLabel[table.status]}
                           </Badge>
+                          {(() => {
+                            const displayBooking = pickPrimaryBookingOnTable(
+                              table.id,
+                              state.bookings
+                            );
+                            if (!displayBooking) {
+                              return null;
+                            }
+                            const cust = state.customers.find(
+                              (item) => item.id === displayBooking.customerId
+                            );
+                            return (
+                              <Stack gap={2} mt={4} style={{ pointerEvents: "none" }}>
+                                <Text size="xs" fw={600} lineClamp={2} lh={1.25}>
+                                  {cust?.fullName ?? "—"}
+                                </Text>
+                                <Text size="xs" c="dimmed" lineClamp={1}>
+                                  Đặt {dayjs(displayBooking.bookingAt).format("HH:mm · DD/MM")}
+                                </Text>
+                                {displayBooking.status === "checked_in" &&
+                                displayBooking.checkedInAt ? (
+                                  <Text size="xs" c="dimmed" lineClamp={1}>
+                                    Check-in{" "}
+                                    {dayjs(displayBooking.checkedInAt).format("HH:mm · DD/MM")}
+                                  </Text>
+                                ) : null}
+                              </Stack>
+                            );
+                          })()}
                         </div>
                       </div>
                     );
@@ -1947,7 +2007,7 @@ export default function FloorMapPage() {
                     <Stack gap="sm">
                       <TextInput
                         label="Tìm bàn"
-                        placeholder="Theo tên bàn"
+                        placeholder="Tên bàn, khách, SĐT, giờ đặt, giờ check-in…"
                         value={search}
                         onChange={(event) => setSearch(event.currentTarget.value)}
                       />
@@ -2040,17 +2100,15 @@ export default function FloorMapPage() {
                               prev
                                 ? {
                                     ...prev,
-                                    nodeSpacing: clamp(
-                                      Number(value) || DEFAULT_NODE_SPACING,
-                                      64,
-                                      160
+                                    nodeSpacing: clampFloorNodeSpacing(
+                                      Number(value) || FLOOR_DEFAULT_NODE_SPACING_PX
                                     ),
                                   }
                                 : prev
                             )
                           }
-                          min={64}
-                          max={160}
+                          min={FLOOR_NODE_SPACING_MIN_PX}
+                          max={FLOOR_NODE_SPACING_MAX_PX}
                           step={4}
                           clampBehavior="strict"
                           disabled={!editLayout}
@@ -2479,6 +2537,12 @@ export default function FloorMapPage() {
               Giờ đến:{" "}
               {dayjs(activeBookingForDetailTable.bookingAt).format("HH:mm DD/MM/YYYY")}
             </Text>
+            {activeBookingForDetailTable.checkedInAt ? (
+              <Text size="sm">
+                Giờ check-in:{" "}
+                {dayjs(activeBookingForDetailTable.checkedInAt).format("HH:mm DD/MM/YYYY")}
+              </Text>
+            ) : null}
             <Text size="sm">Số khách: {activeBookingForDetailTable.guestCount}</Text>
             {activeBookingForDetailTable.note ? (
               <Text size="sm" c="dimmed">

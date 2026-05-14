@@ -27,7 +27,7 @@ export interface Area {
   floorGridColumns?: number;
   /** Floor map grid rows (persisted when using Supabase). */
   floorGridRows?: number;
-  /** Node spacing in px (persisted when using Supabase). */
+  /** Node spacing (px) on floor map; see `lib/floor-map-layout.ts` for clamps and defaults. */
   floorNodeSpacing?: number;
 }
 
@@ -57,6 +57,8 @@ export interface Booking {
   tableId: string | null;
   guestCount: number;
   bookingAt: string;
+  /** Set when status becomes checked_in (explicit check-in or walk-in assign). */
+  checkedInAt?: string | null;
   note?: string;
   createdByUserId: string;
   status: BookingStatus;
