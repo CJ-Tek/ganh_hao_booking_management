@@ -86,6 +86,7 @@ export type Database = {
           area_id: string | null
           booking_at: string
           branch_id: string
+          checked_in_at: string | null
           created_by_user_id: string
           customer_id: string
           guest_count: number
@@ -98,6 +99,7 @@ export type Database = {
           area_id?: string | null
           booking_at: string
           branch_id: string
+          checked_in_at?: string | null
           created_by_user_id: string
           customer_id: string
           guest_count?: number
@@ -110,6 +112,7 @@ export type Database = {
           area_id?: string | null
           booking_at?: string
           branch_id?: string
+          checked_in_at?: string | null
           created_by_user_id?: string
           customer_id?: string
           guest_count?: number
