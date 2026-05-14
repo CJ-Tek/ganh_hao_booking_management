@@ -132,6 +132,65 @@ function BookingCheckInButton(props: {
   );
 }
 
+/** Mantine NumberInput may emit string while editing; keep a single parse path for guest counts. */
+function parseGuestCountFromNumberInput(value: number | string | undefined): number | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+  const n = Number(String(value).trim().replace(",", "."));
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function AssignGuestCountPromptBody(props: {
+  onManual: (guestCount: number) => void;
+  onAuto: (guestCount: number) => void;
+}) {
+  const { onManual, onAuto } = props;
+  const [guestCount, setGuestCount] = useState<number | undefined>(undefined);
+  return (
+    <Stack>
+      <NumberInput
+        label="Số khách"
+        min={1}
+        allowDecimal={false}
+        clampBehavior="strict"
+        value={guestCount}
+        onChange={(value) => setGuestCount(parseGuestCountFromNumberInput(value))}
+      />
+      <Group grow>
+        <Button
+          variant="default"
+          onClick={() => {
+            if (typeof guestCount !== "number" || guestCount < 1) {
+              notifications.show({
+                color: "red",
+                message: "Vui lòng nhập số khách hợp lệ.",
+              });
+              return;
+            }
+            onManual(guestCount);
+          }}
+        >
+          Chọn thủ công
+        </Button>
+        <Button
+          onClick={() => {
+            if (typeof guestCount !== "number" || guestCount < 1) {
+              notifications.show({
+                color: "red",
+                message: "Vui lòng nhập số khách hợp lệ.",
+              });
+              return;
+            }
+            onAuto(guestCount);
+          }}
+        >
+          Tự động theo số khách
+        </Button>
+      </Group>
+    </Stack>
+  );
+}
+
 export default function BookingsPage() {
   const { filteredBranchIds } = useAppContext();
   return <BookingsPageContent key={branchScopeKey(filteredBranchIds)} />;
@@ -469,67 +528,22 @@ function BookingsPageContent() {
                   variant="default"
                   onClick={() => {
                     modals.close(modalId);
-                    const nextId = modals.open({
+                    let nestedModalId = "";
+                    nestedModalId = modals.open({
                       title: "Nhập số khách rồi chọn cách gán",
                       children: (
-                        <Stack>
-                          <NumberInput
-                            label="Số khách"
-                            min={1}
-                            allowDecimal={false}
-                            clampBehavior="strict"
-                            value={assignManualGuestCount}
-                            onChange={(value) =>
-                              setAssignManualGuestCount(
-                                typeof value === "number" && Number.isFinite(value)
-                                  ? value
-                                  : undefined
-                              )
-                            }
-                          />
-                          <Group grow>
-                            <Button
-                              variant="default"
-                              onClick={() => {
-                                if (
-                                  typeof assignManualGuestCount !== "number" ||
-                                  assignManualGuestCount < 1
-                                ) {
-                                  notifications.show({
-                                    color: "red",
-                                    message: "Vui lòng nhập số khách hợp lệ.",
-                                  });
-                                  return;
-                                }
-                                modals.close(nextId);
-                                openManualAssignModal(booking, assignManualGuestCount);
-                              }}
-                            >
-                              Chọn thủ công
-                            </Button>
-                            <Button
-                              onClick={() => {
-                                if (
-                                  typeof assignManualGuestCount !== "number" ||
-                                  assignManualGuestCount < 1
-                                ) {
-                                  notifications.show({
-                                    color: "red",
-                                    message: "Vui lòng nhập số khách hợp lệ.",
-                                  });
-                                  return;
-                                }
-                                modals.close(nextId);
-                                void runAutoAssign(booking, assignManualGuestCount);
-                              }}
-                            >
-                              Tự động theo số khách
-                            </Button>
-                          </Group>
-                        </Stack>
+                        <AssignGuestCountPromptBody
+                          onManual={(guest) => {
+                            modals.close(nestedModalId);
+                            openManualAssignModal(booking, guest);
+                          }}
+                          onAuto={(guest) => {
+                            modals.close(nestedModalId);
+                            void runAutoAssign(booking, guest);
+                          }}
+                        />
                       ),
                     });
-                    setAssignManualGuestCount(undefined);
                   }}
                 >
                   Nhập số khách
@@ -731,9 +745,7 @@ function BookingsPageContent() {
         <NumberInput
           label="Số khách (tùy chọn)"
           value={guestCount}
-          onChange={(value) =>
-            setGuestCount(typeof value === "number" && Number.isFinite(value) ? value : undefined)
-          }
+          onChange={(value) => setGuestCount(parseGuestCountFromNumberInput(value))}
           min={1}
           allowDecimal={false}
           clampBehavior="strict"
@@ -1093,13 +1105,57 @@ function BookingsPageContent() {
     const requiredSeats =
       typeof assignManualGuestCount === "number" && Number.isFinite(assignManualGuestCount)
         ? assignManualGuestCount
-        : undefined;
+        : isGuestCountSpecified(assignFormBooking)
+          ? assignFormBooking.guestCount
+          : undefined;
     return getCandidateTables(assignFormBooking, requiredSeats)
       .filter((table) => (assignAreaId ? table.areaId === assignAreaId : true))
       .map((table) => ({
         value: table.id,
         label: `${table.name} · ${table.seats} ghế`,
       }));
+  }, [assignAreaId, assignFormBooking, assignManualGuestCount, state.bookings, state.tables]);
+
+  /** When the table list is empty only because no table in scope has enough seats (vs conflicts / no tables). */
+  const assignModalTableCapacityHint = useMemo(() => {
+    if (!assignFormBooking) {
+      return null;
+    }
+    const requiredSeats =
+      typeof assignManualGuestCount === "number" && Number.isFinite(assignManualGuestCount)
+        ? assignManualGuestCount
+        : isGuestCountSpecified(assignFormBooking)
+          ? assignFormBooking.guestCount
+          : undefined;
+
+    const candidateTables = getCandidateTables(assignFormBooking, requiredSeats).filter((table) =>
+      assignAreaId ? table.areaId === assignAreaId : true
+    );
+    if (candidateTables.length > 0) {
+      return null;
+    }
+    if (!requiredSeats || requiredSeats < 1) {
+      return null;
+    }
+
+    const branchTables = state.tables.filter(
+      (table) => table.branchId === assignFormBooking.branchId && table.status !== "locked"
+    );
+    const tablesInScope = assignAreaId
+      ? branchTables.filter((table) => table.areaId === assignAreaId)
+      : branchTables;
+    if (tablesInScope.length === 0) {
+      return null;
+    }
+
+    const maxSeatsInScope = Math.max(...tablesInScope.map((table) => table.seats));
+    if (requiredSeats <= maxSeatsInScope) {
+      return null;
+    }
+
+    return assignAreaId
+      ? `Trong khu vực đã chọn, không có bàn nào đủ chỗ cho ${requiredSeats} khách (tối đa ${maxSeatsInScope} ghế/bàn). Chọn khu vực khác hoặc giảm số khách.`
+      : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất hiện có: ${maxSeatsInScope} ghế). Giảm số khách hoặc cấu hình bàn lớn hơn.`;
   }, [assignAreaId, assignFormBooking, assignManualGuestCount, state.bookings, state.tables]);
 
   const assignModalAreaOptions = useMemo(() => {
@@ -1186,9 +1242,7 @@ function BookingsPageContent() {
                 min={1}
                 value={assignManualGuestCount}
                 onChange={(value) =>
-                  setAssignManualGuestCount(
-                    typeof value === "number" && Number.isFinite(value) ? value : undefined
-                  )
+                  setAssignManualGuestCount(parseGuestCountFromNumberInput(value))
                 }
                 allowDecimal={false}
                 clampBehavior="strict"
@@ -1214,6 +1268,11 @@ function BookingsPageContent() {
                 searchable
               />
             </Group>
+            {assignModalTableCapacityHint ? (
+              <Text size="xs" c="dimmed">
+                {assignModalTableCapacityHint}
+              </Text>
+            ) : null}
             <Group justify="flex-end">
               <Button variant="default" onClick={() => setAssignFormBooking(null)}>
                 Đóng

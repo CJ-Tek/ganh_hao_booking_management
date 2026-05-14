@@ -80,6 +80,7 @@ const navItems: NavItem[] = [
 
 export function AppShellLayout({ children }: { children: React.ReactNode }) {
   const [opened, { toggle, close }] = useDisclosure();
+  const [desktopNavExpanded, { toggle: toggleDesktopNav }] = useDisclosure(true);
   const [managerMoreOpen, { open: openManagerMore, close: closeManagerMore }] = useDisclosure(false);
   const pathname = usePathname();
   const router = useRouter();
@@ -173,7 +174,11 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   return (
     <AppShell
       header={{ height: { base: 84, sm: 76 } }}
-      navbar={{ width: 320, breakpoint: "md", collapsed: { mobile: !opened } }}
+      navbar={{
+        width: 320,
+        breakpoint: "md",
+        collapsed: { mobile: !opened, desktop: !desktopNavExpanded },
+      }}
       padding={{ base: "sm", sm: "md" }}
     >
       <AppShell.Header
@@ -192,6 +197,15 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 hiddenFrom="md"
                 size="sm"
                 color="white"
+                aria-label="Mở hoặc đóng điều hướng"
+              />
+              <Burger
+                opened={desktopNavExpanded}
+                onClick={toggleDesktopNav}
+                visibleFrom="md"
+                size="sm"
+                color="white"
+                aria-label="Ẩn hoặc hiện thanh điều hướng"
               />
               <Image src="/logo/horizontal.png" alt="Logo Gành Hào" h={34} w="auto" />
               <Stack gap={0} className={classes.brandCopy}>
