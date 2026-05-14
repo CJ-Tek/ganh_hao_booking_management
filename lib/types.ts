@@ -45,7 +45,8 @@ export interface DiningTable {
 export interface Customer {
   id: string;
   fullName: string;
-  phone: string;
+  /** Real phone when known; null when the guest did not provide one (stored as NULL in Supabase). */
+  phone: string | null;
   note?: string;
 }
 

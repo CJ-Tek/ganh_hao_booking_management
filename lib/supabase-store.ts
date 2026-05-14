@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 import { initialState } from "./initial-state";
 import { supabase } from "./supabase";
-import { appendUnknownGuestTag, stripUnknownGuestTag, toSyntheticPhoneValue } from "./booking-meta";
+import { appendUnknownGuestTag, stripUnknownGuestTag } from "./booking-meta";
 import {
   FLOOR_DEFAULT_NODE_SPACING_PX,
 } from "./floor-map-layout";
@@ -277,12 +277,11 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
       return { ok: false, message: error.message };
     }
   } else {
-    const customerPhoneValue = hasProvidedPhone ? normalizedPhone : toSyntheticPhoneValue();
     const { data, error } = await client
       .from("customers")
       .insert({
         full_name: input.customerName,
-        phone: customerPhoneValue,
+        phone: hasProvidedPhone ? normalizedPhone : null,
       })
       .select("id")
       .single();

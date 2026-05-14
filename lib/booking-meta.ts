@@ -38,7 +38,7 @@ export function isSyntheticPhoneValue(phone?: string | null): boolean {
 
 export function displayCustomerPhone(phone?: string | null): string {
   if (!phone || isSyntheticPhoneValue(phone)) {
-    return "Chưa cung cấp";
+    return "-";
   }
   return phone;
 }

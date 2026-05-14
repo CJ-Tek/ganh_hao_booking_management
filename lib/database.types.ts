@@ -179,19 +179,19 @@ export type Database = {
           full_name: string
           id: string
           note: string | null
-          phone: string
+          phone: string | null
         }
         Insert: {
           full_name: string
           id?: string
           note?: string | null
-          phone: string
+          phone?: string | null
         }
         Update: {
           full_name?: string
           id?: string
           note?: string | null
-          phone?: string
+          phone?: string | null
         }
         Relationships: []
       }

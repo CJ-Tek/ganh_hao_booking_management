@@ -20,6 +20,7 @@ import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { usePortalCompact } from "@/lib/use-portal-compact";
+import { displayCustomerPhone } from "@/lib/booking-meta";
 import { Customer } from "@/lib/types";
 
 const LIST_PAGE_SIZE = 10;
@@ -58,11 +59,15 @@ export default function CustomersPage() {
             latestBooking: bookings[0]?.bookingAt,
           };
         })
-        .filter(
-          (item) =>
-            item.fullName.toLowerCase().includes(query.toLowerCase()) ||
-            item.phone.includes(query)
-        )
+        .filter((item) => {
+          const q = query.toLowerCase();
+          const rawPhone = (item.phone ?? "").toLowerCase();
+          return (
+            item.fullName.toLowerCase().includes(q) ||
+            rawPhone.includes(q) ||
+            displayCustomerPhone(item.phone).toLowerCase().includes(q)
+          );
+        })
         .filter((item) => {
           if (filter === "has_booking") return item.bookingCount > 0;
           if (filter === "no_booking") return item.bookingCount === 0;
@@ -80,7 +85,10 @@ export default function CustomersPage() {
         return dir * a.fullName.localeCompare(b.fullName, "vi");
       }
       if (accessor === "phone") {
-        return dir * a.phone.localeCompare(b.phone, "vi");
+        return (
+          dir *
+          displayCustomerPhone(a.phone).localeCompare(displayCustomerPhone(b.phone), "vi")
+        );
       }
       if (accessor === "bookingCount") {
         return dir * (a.bookingCount - b.bookingCount);
@@ -224,7 +232,7 @@ export default function CustomersPage() {
                       <Group gap={6} wrap="nowrap">
                         <Phone size={14} />
                         <Text size="sm" c="dimmed">
-                          {row.phone}
+                          {displayCustomerPhone(row.phone)}
                         </Text>
                       </Group>
                     </Stack>
@@ -287,7 +295,12 @@ export default function CustomersPage() {
             onSortStatusChange={setSortStatus}
             columns={[
               { accessor: "fullName", title: "Khách hàng", sortable: true },
-              { accessor: "phone", title: "Điện thoại", sortable: true },
+              {
+                accessor: "phone",
+                title: "Điện thoại",
+                sortable: true,
+                render: (row) => displayCustomerPhone(row.phone),
+              },
               { accessor: "bookingCount", title: "Số booking", sortable: true },
               {
                 accessor: "latestBooking",
@@ -323,7 +336,7 @@ export default function CustomersPage() {
         <Stack gap="md">
           <Group gap="xs" wrap="nowrap">
             <Phone size={18} />
-            <Text fw={600}>{selectedCustomer?.phone}</Text>
+            <Text fw={600}>{displayCustomerPhone(selectedCustomer?.phone)}</Text>
           </Group>
           <Text size="sm" c="dimmed">
             Ghi chú: {selectedCustomer?.note || "Không có"}
