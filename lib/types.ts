@@ -1,4 +1,4 @@
-export type Role = "admin" | "general_manager" | "manager";
+export type Role = "admin" | "general_manager" | "manager" | "employee";
 
 export type TableStatus = "available" | "hold" | "occupied" | "locked";
 export type BookingStatus = "pending" | "confirmed" | "cancelled" | "checked_in" | "completed";

@@ -34,11 +34,17 @@ export default function DashboardPage() {
   const router = useRouter();
   const isCompact = usePortalCompact();
   const isManager = currentUser?.role === "manager";
+  const isEmployee = currentUser?.role === "employee";
   useEffect(() => {
     if (isManager) {
       router.replace("/bookings");
     }
   }, [isManager, router]);
+  useEffect(() => {
+    if (isEmployee) {
+      router.replace("/floor-map");
+    }
+  }, [isEmployee, router]);
   const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Booking>>({
     columnAccessor: "bookingAt",
     direction: "desc",

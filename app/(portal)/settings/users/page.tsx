@@ -28,12 +28,14 @@ const roleLabel: Record<Role, string> = {
   admin: "Admin",
   general_manager: "Quản lý tổng",
   manager: "Quản lý chi nhánh",
+  employee: "Nhân viên",
 };
 
 const ROLE_OPTIONS: { value: Role; label: string }[] = [
   { value: "admin", label: "Admin" },
   { value: "general_manager", label: "Quản lý tổng" },
   { value: "manager", label: "Quản lý chi nhánh" },
+  { value: "employee", label: "Nhân viên" },
 ];
 
 export default function UserManagementPage() {

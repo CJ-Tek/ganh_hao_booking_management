@@ -29,6 +29,7 @@ import {
   LayoutDashboard,
   LogOut,
   Map,
+  MapPin,
   MoreHorizontal,
   Settings,
   SquareMenu,
@@ -129,6 +130,9 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     [scopedNotifications]
   );
   const shownNavItems = useMemo(() => {
+    if (currentUser?.role === "employee") {
+      return navItems.filter((item) => item.href === "/floor-map");
+    }
     if (currentUser?.role === "manager") {
       return navItems.filter((item) =>
         (MANAGER_SECTION_HREFS as readonly string[]).includes(item.href)
@@ -142,9 +146,10 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   }, [currentUser]);
 
   /** Bottom quick nav on narrow viewports (sync with `usePortalCompact` / navbar `breakpoint: "md"`).
-   *  Enabled for branch managers, general_manager, and admin. */
+   *  Enabled for branch managers, employees, general_manager, and admin. */
   const usesMobileDock =
     currentUser?.role === "manager" ||
+    currentUser?.role === "employee" ||
     currentUser?.role === "general_manager" ||
     currentUser?.role === "admin";
 
@@ -169,7 +174,11 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   // Avoid overlap: when mobile drawer is open, hide fixed bottom dock.
   const showManagerDock = usesMobileDock && isCompact && !opened;
   const portalLabel =
-    currentUser?.role === "manager" ? "Cổng quản lý chi nhánh" : "Cổng quản lý tổng";
+    currentUser?.role === "manager"
+      ? "Cổng quản lý chi nhánh"
+      : currentUser?.role === "employee"
+        ? "Cổng nhân viên"
+        : "Cổng quản lý tổng";
 
   return (
     <AppShell
@@ -221,7 +230,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             </Group>
 
             <Group gap="xs" wrap="nowrap">
-              {currentUser?.role !== "manager" && (
+              {currentUser?.role !== "manager" && currentUser?.role !== "employee" && (
                 <Select
                   size="xs"
                   className={classes.branchSelect}
@@ -233,6 +242,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                   }))}
                 />
               )}
+              {currentUser?.role !== "employee" ? (
               <Popover width={380} position="bottom-end" withArrow shadow="md">
                 <Popover.Target>
                   <Box className={classes.notificationBellWrap}>
@@ -358,6 +368,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 ) : null}
                 </Popover.Dropdown>
               </Popover>
+              ) : null}
 
               <Group gap="xs" wrap="nowrap" visibleFrom="md">
                 <Avatar
@@ -434,6 +445,24 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 }}
               />
             ))}
+            {currentUser?.role === "employee" && currentUser.branchIds.length > 1 ? (
+              <NavLink
+                component={Link}
+                href="/select-branch"
+                className={classes.blueNavLink}
+                label="Chọn chi nhánh"
+                leftSection={<MapPin size={20} />}
+                active={pathname.startsWith("/select-branch")}
+                onClick={close}
+                style={{
+                  borderRadius: 12,
+                  minHeight: 62,
+                  paddingInline: 12,
+                  fontSize: "1rem",
+                  fontWeight: 700,
+                }}
+              />
+            ) : null}
           </Stack>
 
           <Stack

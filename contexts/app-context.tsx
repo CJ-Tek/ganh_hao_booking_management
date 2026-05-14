@@ -19,6 +19,11 @@ import {
   shouldPickBranchOnLogin,
 } from "@/lib/branch-pick";
 import { initialState } from "@/lib/initial-state";
+import {
+  assertEmployeeMaySetBookingStatus,
+  EMPLOYEE_MUTATION_BLOCKED,
+  isEmployeeUser,
+} from "@/lib/employee-access";
 import { clampFloorNodeSpacing } from "@/lib/floor-map-layout";
 import {
   addAreaInSupabase,
@@ -162,14 +167,14 @@ const AppContext = createContext<AppContextValue | null>(null);
 /**
  * Branch IDs used to scope bookings, tables, areas, dashboard, etc.
  * Admin / Quản lý tổng: exactly the active branch (switch in header or after login pick).
- * Quản lý chi nhánh: one branch at a time — assigned branch if only one; otherwise the active
+ * Quản lý chi nhánh / nhân viên: one branch at a time — assigned branch if only one; otherwise the active
  * branch (switch via menu "Chọn chi nhánh" → /select-branch).
  */
 function userScopeBranchIds(user: AppUser | null, activeBranchId?: string): string[] {
   if (!user) {
     return [];
   }
-  if (user.role === "manager") {
+  if (user.role === "manager" || user.role === "employee") {
     if (user.branchIds.length === 0) {
       return [];
     }
@@ -326,7 +331,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (currentUser) {
       if (shouldPickBranchOnLogin(currentUser.role)) {
         persistActiveBranch(currentUser, branchId);
-      } else if (currentUser.role === "manager" && currentUser.branchIds.length > 1) {
+      } else if (
+        (currentUser.role === "manager" || currentUser.role === "employee") &&
+        currentUser.branchIds.length > 1
+      ) {
         persistActiveBranch(currentUser, branchId);
       }
     }
@@ -334,6 +342,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const updateBranch = async (branchId: string, input: { name: string; address: string }) => {
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
     if (!hasSupabase) {
       setState((prev) => ({
         ...prev,
@@ -350,6 +361,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const createBooking = async (input: CreateBookingInput) => {
     if (!currentUser) {
       return { ok: false, message: "Vui lòng đăng nhập." };
+    }
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
     }
 
     if (!hasSupabase) {
@@ -422,6 +436,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     tableId: string;
     guestCount?: number;
   }) => {
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
     if (!hasSupabase) {
       return { ok: false, message: "Chưa kết nối Supabase." };
     }
@@ -432,6 +449,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase) {
       return;
     }
+    if (isEmployeeUser(currentUser)) {
+      assertEmployeeMaySetBookingStatus(state, bookingId, status);
+    }
     await updateBookingStatusInSupabase(bookingId, status);
   };
 
@@ -439,10 +459,16 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase) {
       return;
     }
+    if (isEmployeeUser(currentUser)) {
+      throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+    }
     await checkInBookingInSupabase(bookingId);
   };
 
   const deleteCustomers = async (customerIds: string[]) => {
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
     const ids = customerIds.filter((id) => id.trim().length > 0);
     if (ids.length === 0) {
       return { ok: true, message: "Không có khách hàng để xóa." };
@@ -466,6 +492,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const upsertTable = async (table: Omit<DiningTable, "id"> & { id?: string }) => {
+    if (isEmployeeUser(currentUser)) {
+      throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+    }
     if (!hasSupabase) {
       return;
     }
@@ -473,6 +502,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const upsertTablesBatch = async (tables: Array<Omit<DiningTable, "id"> & { id?: string }>) => {
+    if (isEmployeeUser(currentUser)) {
+      throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+    }
     if (!hasSupabase || tables.length === 0) {
       return;
     }
@@ -480,6 +512,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const updateTableStatus = async (tableId: string, status: TableStatus) => {
+    if (isEmployeeUser(currentUser)) {
+      throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+    }
     if (!hasSupabase) {
       return;
     }
@@ -511,6 +546,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const deleteTable = async (tableId: string) => {
+    if (isEmployeeUser(currentUser)) {
+      throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+    }
     if (!hasSupabase) {
       return;
     }
@@ -518,6 +556,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const deleteTables = async (tableIds: string[]) => {
+    if (isEmployeeUser(currentUser)) {
+      throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+    }
     if (!hasSupabase || tableIds.length === 0) {
       return;
     }
@@ -534,6 +575,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const updateTablePosition = async (tableId: string, x: number, y: number) => {
+    if (isEmployeeUser(currentUser)) {
+      throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+    }
     updateLocalTablePosition(tableId, x, y);
     if (!hasSupabase) {
       return;
@@ -542,6 +586,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const addArea = async (branchId: string, name: string, capacity: number) => {
+    if (isEmployeeUser(currentUser)) {
+      throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+    }
     if (!hasSupabase) {
       return;
     }
@@ -552,6 +599,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     areaId: string,
     input: { branchId?: string; name?: string; capacity?: number }
   ) => {
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
     const applyLocal = () => {
       setState((prev) => ({
         ...prev,
@@ -597,6 +647,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const deleteArea = async (areaId: string) => {
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
     const tablesInArea = state.tables.filter((t) => t.areaId === areaId);
     const bookingsInArea = state.bookings.filter((b) => b.areaId === areaId);
     if (!hasSupabase) {
@@ -623,6 +676,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     role: Role;
     branchIds: string[];
   }) => {
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
     if (currentUser?.role === "general_manager" && payload.role === "admin") {
       return {
         ok: false,
@@ -650,6 +706,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       branchIds: string[];
     }
   ) => {
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
     const target = state.users.find((u) => u.id === userId);
     if (!target) {
       return { ok: false, message: "Không tìm thấy tài khoản." };
@@ -738,6 +797,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const deleteUser = async (userId: string) => {
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
     if (userId === currentUser?.id) {
       return { ok: false, message: "Không thể xóa tài khoản đang đăng nhập." };
     }
@@ -764,6 +826,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const markNotificationRead = async (id: string) => {
+    if (isEmployeeUser(currentUser)) {
+      return;
+    }
     if (!hasSupabase) {
       setState((prev) => ({
         ...prev,
@@ -783,6 +848,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   };
 
   const markAllScopedNotificationsRead = useCallback(async () => {
+    if (isEmployeeUser(currentUser)) {
+      return;
+    }
     const ids = state.notifications
       .filter(
         (n) =>
@@ -808,10 +876,13 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         ids.includes(n.id) ? { ...n, isRead: true } : n
       ),
     }));
-  }, [filteredBranchIds, hasSupabase, state.notifications]);
+  }, [currentUser, filteredBranchIds, hasSupabase, state.notifications]);
 
   const saveAreaFloorGrid = useCallback(
     async (areaId: string, columns: number, rows: number, spacing: number) => {
+      if (isEmployeeUser(currentUser)) {
+        return;
+      }
       const floorGridColumns = Math.min(24, Math.max(4, Math.round(columns)));
       const floorGridRows = Math.min(18, Math.max(4, Math.round(rows)));
       const floorNodeSpacing = clampFloorNodeSpacing(spacing);
@@ -840,11 +911,14 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         ),
       }));
     },
-    [hasSupabase]
+    [currentUser, hasSupabase]
   );
 
   const saveFloorLayout = useCallback(
     async (areaId: string, input: SaveFloorLayoutInput) => {
+      if (isEmployeeUser(currentUser)) {
+        throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+      }
       const floorGridColumns = Math.min(24, Math.max(4, Math.round(input.floorGridColumns)));
       const floorGridRows = Math.min(18, Math.max(4, Math.round(input.floorGridRows)));
       const floorNodeSpacing = clampFloorNodeSpacing(input.floorNodeSpacing);
@@ -881,13 +955,16 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       });
       await reload();
     },
-    [hasSupabase, reload]
+    [currentUser, hasSupabase, reload]
   );
 
   // Realtime subscriptions removed in favor of silent polling refresh.
 
   const acquireFloorLayoutEditLock = useCallback(
     async (areaId: string) => {
+      if (isEmployeeUser(currentUser)) {
+        return { ok: false as const, holderFullName: "Tài khoản nhân viên" };
+      }
       if (!hasSupabase || !currentUser) {
         return { ok: true as const };
       }
@@ -898,6 +975,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
 
   const renewFloorLayoutEditLock = useCallback(
     async (areaId: string) => {
+      if (isEmployeeUser(currentUser)) {
+        return;
+      }
       if (!hasSupabase || !currentUser) {
         return;
       }
@@ -908,6 +988,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
 
   const releaseFloorLayoutEditLock = useCallback(
     async (areaId: string) => {
+      if (isEmployeeUser(currentUser)) {
+        return;
+      }
       if (!hasSupabase || !currentUser) {
         return;
       }

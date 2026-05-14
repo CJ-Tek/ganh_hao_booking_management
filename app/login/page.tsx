@@ -40,6 +40,8 @@ export default function LoginPage() {
     try {
       if (user.role === "admin" || user.role === "general_manager") {
         router.replace("/select-branch");
+      } else if (user.role === "employee") {
+        router.replace("/floor-map");
       } else {
         router.replace("/dashboard");
       }
@@ -57,11 +59,8 @@ export default function LoginPage() {
               <Image src="/logo/vertical.png" alt="Gành Hào" w={170} />
             </Center>
             <Title order={3} ta="center">
-              Đăng nhập quản trị
+              Đăng nhập
             </Title>
-            <Text c="dimmed" size="sm" ta="center">
-              Hỗ trợ 2 cổng: Quản lý tổng và Quản lý chi nhánh
-            </Text>
 
             {error && (
               <Alert color="red" icon={<AlertCircle size={16} />}>
