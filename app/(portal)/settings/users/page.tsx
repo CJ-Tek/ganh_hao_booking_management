@@ -19,6 +19,7 @@ import { DataTable, type DataTableSortStatus } from "mantine-datatable";
 import { Pencil, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard, PortalStickyAction } from "@/components/portal-page";
+import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { RouteGuard } from "@/components/route-guard";
 import { useAppContext } from "@/contexts/app-context";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
@@ -257,7 +258,7 @@ export default function UserManagementPage() {
         </PortalSectionCard>
 
         <PortalSectionCard>
-          <TextInput
+          <TextInputWithVoice
             label="Tìm tài khoản"
             placeholder="Tên đăng nhập, họ tên, vai trò..."
             value={search}

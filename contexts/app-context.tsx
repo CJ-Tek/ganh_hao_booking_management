@@ -56,6 +56,7 @@ import {
   updateTableStatusInSupabase,
   upsertTableInSupabase,
   upsertTablesBatchInSupabase,
+  updateBookingGuestCountInSupabase,
 } from "@/lib/supabase-store";
 import { supabase } from "@/lib/supabase";
 import {
@@ -80,11 +81,6 @@ type CreateBookingInput = {
   note?: string;
 };
 
-function resolveAutoTableStatus(bookingAtIso: string): TableStatus {
-  const bookingAt = new Date(bookingAtIso).getTime();
-  return Number.isFinite(bookingAt) && bookingAt > Date.now() ? "hold" : "occupied";
-}
-
 type ActionResult = { ok: boolean; message: string };
 
 interface AppContextValue {
@@ -108,6 +104,7 @@ interface AppContextValue {
     tableId: string;
     guestCount?: number;
   }) => Promise<ActionResult>;
+  updateBookingGuestCount: (bookingId: string, guestCount: number) => Promise<ActionResult>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   checkInBooking: (bookingId: string) => Promise<void>;
   deleteCustomers: (customerIds: string[]) => Promise<ActionResult>;
@@ -376,7 +373,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       ? state.tables.find((t) => t.id === input.tableId)
       : undefined;
     if (tableBefore && tableBefore.status !== "locked") {
-      const nextStatus = resolveAutoTableStatus(input.bookingAt);
+      // Confirmed booking without check-in → Giữ chỗ (server uses same rule after refresh).
+      const nextStatus: TableStatus = "hold";
       setState((prev) => ({
         ...prev,
         tables: prev.tables.map((t) =>
@@ -443,6 +441,26 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return { ok: false, message: "Chưa kết nối Supabase." };
     }
     return assignBookingToTableInSupabase(input);
+  };
+
+  const updateBookingGuestCount = async (bookingId: string, guestCount: number) => {
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    if (!hasSupabase) {
+      return { ok: false, message: "Chưa kết nối Supabase." };
+    }
+    const result = await updateBookingGuestCountInSupabase(bookingId, guestCount);
+    if (result.ok && !reloadInFlightRef.current) {
+      reloadInFlightRef.current = true;
+      lastReloadAtRef.current = Date.now();
+      try {
+        await reload();
+      } finally {
+        reloadInFlightRef.current = false;
+      }
+    }
+    return result;
   };
 
   const updateBookingStatus = async (bookingId: string, status: BookingStatus) => {
@@ -1019,6 +1037,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     updateBranch,
     createBooking,
     assignBookingToTable,
+    updateBookingGuestCount,
     updateBookingStatus,
     checkInBooking,
     deleteCustomers,

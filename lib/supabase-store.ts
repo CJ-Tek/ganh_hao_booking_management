@@ -1,15 +1,18 @@
 import dayjs from "dayjs";
 import { initialState } from "./initial-state";
 import { supabase } from "./supabase";
-import { appendUnknownGuestTag, stripUnknownGuestTag } from "./booking-meta";
+import { appendUnknownGuestTag, pickPrimaryBookingOnTable, stripUnknownGuestTag } from "./booking-meta";
 import {
   FLOOR_DEFAULT_NODE_SPACING_PX,
 } from "./floor-map-layout";
 import {
   AppStateSnapshot,
   AppUser,
+  BookingRuntimeSettings,
   BookingStatus,
+  BookingWaitlistEntry,
   Role,
+  TableBlockState,
   TableStatus,
 } from "./types";
 
@@ -27,9 +30,60 @@ type CreateBookingInput = {
   createdByUserId: string;
 };
 
-function resolveAutoTableStatus(bookingAtIso: string): TableStatus {
-  return dayjs(bookingAtIso).isAfter(dayjs()) ? "hold" : "occupied";
+type BookingCreateOrQueueResult =
+  | {
+      outcome: "confirmed";
+      message?: string | null;
+      booking_id: string;
+      start_time: string;
+      end_time: string;
+    }
+  | {
+      outcome: "waitlisted";
+      message?: string | null;
+      waitlist_id: string;
+      start_time: string;
+      end_time: string;
+    };
+
+const DEFAULT_BOOKING_RUNTIME_SETTINGS: BookingRuntimeSettings = {
+  standardTurnaroundMinutes: 90,
+  noShowGraceMinutes: 15,
+  waitlistOfferTtlMinutes: 5,
+};
+
+const ACTIVE_TABLE_SLOT_STATUSES: BookingStatus[] = ["confirmed", "seated", "checked_in"];
+const BOOKING_MAINTENANCE_INTERVAL_MS = 60_000;
+let lastBookingMaintenanceAt = 0;
+let bookingMaintenanceInFlight: Promise<void> | null = null;
+
+async function maybeRunBookingMaintenance(): Promise<void> {
+  const now = Date.now();
+  if (now - lastBookingMaintenanceAt < BOOKING_MAINTENANCE_INTERVAL_MS) {
+    return;
+  }
+  if (bookingMaintenanceInFlight) {
+    await bookingMaintenanceInFlight;
+    return;
+  }
+  lastBookingMaintenanceAt = now;
+  bookingMaintenanceInFlight = runBookingMaintenanceInSupabase()
+    .then(() => undefined)
+    .catch(() => undefined)
+    .finally(() => {
+      bookingMaintenanceInFlight = null;
+    });
+  await bookingMaintenanceInFlight;
 }
+const TERMINAL_CANCEL_STATUSES: BookingStatus[] = ["cancelled", "no_show"];
+
+/** Bookings that tie a table (show as hold or occupied, not trống). */
+const TABLE_RESERVATION_BOOKING_STATUSES: BookingStatus[] = [
+  "pending",
+  "confirmed",
+  "seated",
+  "checked_in",
+];
 
 export function isSupabaseEnabled() {
   return Boolean(supabase);
@@ -40,6 +94,123 @@ function ensureClient() {
     throw new Error("Chưa cấu hình Supabase.");
   }
   return supabase;
+}
+
+async function getBookingRuntimeSettings(
+  client: ReturnType<typeof ensureClient>
+): Promise<BookingRuntimeSettings> {
+  const { data, error } = await (client as any)
+    .from("booking_runtime_settings")
+    .select("standard_turnaround_minutes, no_show_grace_minutes, waitlist_offer_ttl_minutes")
+    .eq("id", true)
+    .maybeSingle();
+
+  if (error || !data) {
+    return DEFAULT_BOOKING_RUNTIME_SETTINGS;
+  }
+
+  return {
+    standardTurnaroundMinutes:
+      typeof data.standard_turnaround_minutes === "number"
+        ? data.standard_turnaround_minutes
+        : DEFAULT_BOOKING_RUNTIME_SETTINGS.standardTurnaroundMinutes,
+    noShowGraceMinutes:
+      typeof data.no_show_grace_minutes === "number"
+        ? data.no_show_grace_minutes
+        : DEFAULT_BOOKING_RUNTIME_SETTINGS.noShowGraceMinutes,
+    waitlistOfferTtlMinutes:
+      typeof data.waitlist_offer_ttl_minutes === "number"
+        ? data.waitlist_offer_ttl_minutes
+        : DEFAULT_BOOKING_RUNTIME_SETTINGS.waitlistOfferTtlMinutes,
+  };
+}
+
+async function upsertCustomerForBooking(
+  client: ReturnType<typeof ensureClient>,
+  input: { customerName: string; customerPhone?: string }
+): Promise<{ customerId: string } | { error: string }> {
+  const normalizedPhone = input.customerPhone?.trim() || "";
+  const hasProvidedPhone = normalizedPhone.length > 0;
+  const { data: currentCustomer } = hasProvidedPhone
+    ? await client
+        .from("customers")
+        .select("id")
+        .eq("phone", normalizedPhone)
+        .maybeSingle()
+    : { data: null };
+
+  let customerId = currentCustomer?.id as string | undefined;
+  if (customerId) {
+    const { error } = await client
+      .from("customers")
+      .update({ full_name: input.customerName })
+      .eq("id", customerId);
+    if (error) {
+      return { error: error.message };
+    }
+  } else {
+    const { data, error } = await client
+      .from("customers")
+      .insert({
+        full_name: input.customerName,
+        phone: hasProvidedPhone ? normalizedPhone : null,
+      })
+      .select("id")
+      .single();
+    if (error || !data) {
+      return { error: error?.message ?? "Không tạo được khách hàng." };
+    }
+    customerId = data.id;
+  }
+
+  return { customerId };
+}
+
+async function refreshTableAvailabilityForBooking(
+  client: ReturnType<typeof ensureClient>,
+  tableId: string
+): Promise<void> {
+  const { data: tableRow } = await client.from("tables").select("status").eq("id", tableId).maybeSingle();
+  if ((tableRow?.status as TableStatus | undefined) === "locked") {
+    return;
+  }
+  const { data: rows, error } = await client
+    .from("bookings")
+    .select("id, status")
+    .eq("table_id", tableId)
+    .in("status", TABLE_RESERVATION_BOOKING_STATUSES);
+  if (error || !rows?.length) {
+    if (!error) {
+      await client.from("tables").update({ status: "available" }).eq("id", tableId);
+    }
+    return;
+  }
+  const hasSeated = rows.some(
+    (r: { status: string }) => r.status === "seated" || r.status === "checked_in"
+  );
+  const nextStatus: TableStatus = hasSeated ? "occupied" : "hold";
+  await client.from("tables").update({ status: nextStatus }).eq("id", tableId);
+}
+
+/**
+ * Automated no-show (run_booking_maintenance) updates `bookings` in SQL without touching
+ * `tables.status`. This reconciles affected tables so we do not leave "Giữ chỗ" with empty peek.
+ */
+async function refreshTablesTouchedByRecentNoShows(
+  client: ReturnType<typeof ensureClient>,
+  sinceIso: string
+): Promise<void> {
+  const { data: rows, error } = await client
+    .from("bookings")
+    .select("table_id")
+    .eq("status", "no_show")
+    .gte("no_show_marked_at", sinceIso)
+    .not("table_id", "is", null);
+  if (error || !rows?.length) {
+    return;
+  }
+  const ids = [...new Set((rows as { table_id: string }[]).map((r) => r.table_id).filter(Boolean))];
+  await Promise.all(ids.map((id) => refreshTableAvailabilityForBooking(client, id)));
 }
 
 export async function updateBranchInSupabase(
@@ -61,6 +232,8 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
   if (!supabase) {
     return initialState;
   }
+
+  await maybeRunBookingMaintenance();
 
   const client = ensureClient();
   const [
@@ -98,6 +271,50 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
     throw new Error(errors[0]?.message ?? "Không thể tải dữ liệu Supabase.");
   }
 
+  const bookings: AppStateSnapshot["bookings"] =
+    ((bookingsResult.data ?? []) as any[]).map((item) => ({
+      id: item.id,
+      customerId: item.customer_id,
+      branchId: item.branch_id,
+      areaId: item.area_id,
+      tableId: item.table_id,
+      guestCount: item.guest_count,
+      bookingAt: item.booking_at,
+      startTime: item.start_time ?? item.booking_at,
+      endTime:
+        item.end_time ??
+        dayjs(item.start_time ?? item.booking_at)
+          .add(DEFAULT_BOOKING_RUNTIME_SETTINGS.standardTurnaroundMinutes, "minute")
+          .toISOString(),
+      checkedInAt: item.checked_in_at ?? undefined,
+      noShowMarkedAt: item.no_show_marked_at ?? undefined,
+      note: item.note ?? undefined,
+      createdByUserId: item.created_by_user_id,
+      status: item.status as BookingStatus,
+    }));
+
+  let tablesRowList = tablesResult.data ?? [];
+  const orphanTableIds = tablesRowList
+    .filter((item) => {
+      const st = item.status as TableStatus;
+      if (st === "locked") {
+        return false;
+      }
+      if (st !== "hold" && st !== "occupied") {
+        return false;
+      }
+      return pickPrimaryBookingOnTable(item.id, bookings) === null;
+    })
+    .map((item) => item.id);
+
+  if (orphanTableIds.length > 0) {
+    await Promise.all(orphanTableIds.map((id) => refreshTableAvailabilityForBooking(client, id)));
+    const tablesRefetch = await client.from("tables").select("*");
+    if (!tablesRefetch.error && tablesRefetch.data) {
+      tablesRowList = tablesRefetch.data;
+    }
+  }
+
   return {
     users:
       usersResult.data?.map((item) => ({
@@ -129,7 +346,7 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
             : FLOOR_DEFAULT_NODE_SPACING_PX,
       })) ?? [],
     tables:
-      tablesResult.data?.map((item) => ({
+      tablesRowList.map((item) => ({
         id: item.id,
         branchId: item.branch_id,
         areaId: item.area_id,
@@ -146,20 +363,7 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
         phone: item.phone,
         note: item.note ?? undefined,
       })) ?? [],
-    bookings:
-      bookingsResult.data?.map((item) => ({
-        id: item.id,
-        customerId: item.customer_id,
-        branchId: item.branch_id,
-        areaId: item.area_id,
-        tableId: item.table_id,
-        guestCount: item.guest_count,
-        bookingAt: item.booking_at,
-        checkedInAt: item.checked_in_at ?? undefined,
-        note: item.note ?? undefined,
-        createdByUserId: item.created_by_user_id,
-        status: item.status as BookingStatus,
-      })) ?? [],
+    bookings,
     notifications:
       notificationsResult.data?.map((item) => ({
         id: item.id,
@@ -205,7 +409,11 @@ export async function loginWithSupabase(
 
 export async function createBookingInSupabase(input: CreateBookingInput): Promise<Result> {
   const client = ensureClient();
+  const runtimeSettings = await getBookingRuntimeSettings(client);
   const normalizedAt = dayjs(input.bookingAt).toISOString();
+  const slotEnd = dayjs(normalizedAt)
+    .add(runtimeSettings.standardTurnaroundMinutes, "minute")
+    .toISOString();
   const normalizedGuestCount =
     typeof input.guestCount === "number" && Number.isFinite(input.guestCount)
       ? Math.max(1, Math.round(input.guestCount))
@@ -216,17 +424,20 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     ? stripUnknownGuestTag(input.note) ?? null
     : appendUnknownGuestTag(input.note);
   const hasAssignedTable = Boolean(input.areaId && input.tableId);
-  const nextTableStatus = hasAssignedTable ? resolveAutoTableStatus(normalizedAt) : null;
-  const nextBookingStatus: BookingStatus = hasAssignedTable
-    ? nextTableStatus === "hold"
-      ? "confirmed"
-      : "checked_in"
-    : "pending";
+
+  const customerResult = await upsertCustomerForBooking(client, {
+    customerName: input.customerName,
+    customerPhone: input.customerPhone,
+  });
+  if ("error" in customerResult) {
+    return { ok: false, message: customerResult.error };
+  }
+  const customerId = customerResult.customerId;
 
   if (hasAssignedTable) {
     const { data: tableInfo, error: tableInfoError } = await client
       .from("tables")
-      .select("seats")
+      .select("seats, branch_id")
       .eq("id", input.tableId!)
       .maybeSingle();
     if (tableInfoError || !tableInfo) {
@@ -241,84 +452,96 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
         message: `Số khách không được vượt quá sức chứa bàn (${tableInfo.seats} ghế).`,
       };
     }
+    if (tableInfo.branch_id !== input.branchId) {
+      return { ok: false, message: "Bàn không thuộc cùng chi nhánh với booking." };
+    }
 
-    const { data: conflict, error: conflictError } = await client
-      .from("bookings")
-      .select("id")
-      .eq("table_id", input.tableId!)
-      .eq("booking_at", normalizedAt)
-      .in("status", ["confirmed", "checked_in"])
-      .maybeSingle();
-    if (conflictError) {
-      return { ok: false, message: conflictError.message };
+    const { data: createData, error: createError } = await (client as any).rpc(
+      "create_or_queue_booking",
+      {
+        p_customer_id: customerId,
+        p_branch_id: input.branchId,
+        p_area_id: input.areaId!,
+        p_table_id: input.tableId!,
+        p_guest_count: normalizedGuestCount,
+        p_start_time: normalizedAt,
+        p_end_time: slotEnd,
+        p_note: bookingNote,
+        p_created_by_user_id: input.createdByUserId,
+      }
+    );
+    if (createError) {
+      return { ok: false, message: createError.message };
     }
-    if (conflict) {
-      return { ok: false, message: "Đã có đặt bàn trùng khung giờ trên bàn này." };
+
+    const outcome = Array.isArray(createData) ? createData[0] : createData;
+    if (!outcome || typeof outcome !== "object") {
+      return { ok: false, message: "Không nhận được phản hồi từ hệ thống đặt bàn." };
     }
+
+    const normalizedOutcome = outcome as BookingCreateOrQueueResult;
+    if (normalizedOutcome.outcome === "waitlisted") {
+      const { error: waitlistNotifErr } = await client.from("internal_notifications").insert({
+        title: "Đã vào hàng chờ",
+        message: `Khung giờ ${dayjs(normalizedAt).format(
+          "HH:mm DD/MM/YYYY"
+        )} đã kín. Đã thêm ${input.customerName} vào hàng chờ.`,
+        created_at: dayjs().toISOString(),
+        is_read: false,
+        branch_id: input.branchId,
+      });
+      if (waitlistNotifErr) {
+        return { ok: false, message: waitlistNotifErr.message };
+      }
+      return {
+        ok: true,
+        message:
+          normalizedOutcome.message ??
+          "Khung giờ đã kín. Khách đã được thêm vào hàng chờ của bàn.",
+      };
+    }
+
+    {
+      const { data: tableRow } = await client
+        .from("tables")
+        .select("status")
+        .eq("id", input.tableId!)
+        .maybeSingle();
+      if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+        await refreshTableAvailabilityForBooking(client, input.tableId!);
+      }
+    }
+
+    await client.from("internal_notifications").insert({
+      title: "Đặt bàn mới",
+      message: `Đã xác nhận booking cho ${input.customerName} lúc ${dayjs(normalizedAt).format(
+        "HH:mm DD/MM/YYYY"
+      )}.`,
+      created_at: dayjs().toISOString(),
+      is_read: false,
+      branch_id: input.branchId,
+    });
+
+    return { ok: true, message: "Đã tạo booking thành công." };
   }
 
-  const normalizedPhone = input.customerPhone?.trim() || "";
-  const hasProvidedPhone = normalizedPhone.length > 0;
-  const { data: currentCustomer } = hasProvidedPhone
-    ? await client
-        .from("customers")
-        .select("id")
-        .eq("phone", normalizedPhone)
-        .maybeSingle()
-    : { data: null };
-
-  let customerId = currentCustomer?.id as string | undefined;
-  if (customerId) {
-    const { error } = await client
-      .from("customers")
-      .update({ full_name: input.customerName })
-      .eq("id", customerId);
-    if (error) {
-      return { ok: false, message: error.message };
-    }
-  } else {
-    const { data, error } = await client
-      .from("customers")
-      .insert({
-        full_name: input.customerName,
-        phone: hasProvidedPhone ? normalizedPhone : null,
-      })
-      .select("id")
-      .single();
-    if (error || !data) {
-      return { ok: false, message: error?.message ?? "Không tạo được khách hàng." };
-    }
-    customerId = data.id;
-  }
-
-  const { error: bookingError } = await client.from("bookings").insert({
+  const { error: bookingError } = await (client as any).from("bookings").insert({
     customer_id: customerId,
     branch_id: input.branchId,
     area_id: input.areaId ?? null,
     table_id: input.tableId ?? null,
     guest_count: normalizedGuestCount,
     booking_at: normalizedAt,
+    start_time: normalizedAt,
+    end_time: slotEnd,
     note: bookingNote,
     created_by_user_id: input.createdByUserId,
-    status: nextBookingStatus,
-    checked_in_at: nextBookingStatus === "checked_in" ? dayjs().toISOString() : null,
+    status: "pending",
+    checked_in_at: null,
+    no_show_marked_at: null,
   });
   if (bookingError) {
     return { ok: false, message: bookingError.message };
-  }
-
-  if (hasAssignedTable && nextTableStatus) {
-    const { data: tableRow } = await client
-      .from("tables")
-      .select("status")
-      .eq("id", input.tableId!)
-      .maybeSingle();
-    if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-      await client
-        .from("tables")
-        .update({ status: nextTableStatus })
-        .eq("id", input.tableId!);
-    }
   }
 
   await client.from("internal_notifications").insert({
@@ -342,9 +565,9 @@ export async function assignBookingToTableInSupabase(input: {
 }): Promise<Result> {
   const client = ensureClient();
   const { bookingId, areaId, tableId, guestCount } = input;
-  const { data: booking, error: bookingErr } = await client
+  const { data: booking, error: bookingErr } = await (client as any)
     .from("bookings")
-    .select("id, branch_id, guest_count, booking_at, status, note")
+    .select("id, branch_id, guest_count, booking_at, start_time, end_time, status, note, customer_id, created_by_user_id")
     .eq("id", bookingId)
     .maybeSingle();
   if (bookingErr || !booking) {
@@ -358,6 +581,7 @@ export async function assignBookingToTableInSupabase(input: {
     typeof guestCount === "number" && Number.isFinite(guestCount)
       ? Math.max(1, Math.round(guestCount))
       : booking.guest_count;
+  const runtimeSettings = await getBookingRuntimeSettings(client);
 
   const { data: table, error: tableErr } = await client
     .from("tables")
@@ -377,41 +601,50 @@ export async function assignBookingToTableInSupabase(input: {
     };
   }
 
-  const normalizedAt = dayjs(booking.booking_at).toISOString();
-  const { data: conflict, error: conflictError } = await client
-    .from("bookings")
-    .select("id")
-    .eq("table_id", tableId)
-    .eq("booking_at", normalizedAt)
-    .in("status", ["confirmed", "checked_in"])
-    .neq("id", bookingId)
-    .maybeSingle();
-  if (conflictError) {
-    return { ok: false, message: conflictError.message };
-  }
-  if (conflict) {
-    return { ok: false, message: "Đã có đặt bàn trùng khung giờ trên bàn này." };
-  }
+  const normalizedStart = dayjs(booking.start_time ?? booking.booking_at).toISOString();
+  const normalizedEnd = dayjs(
+    booking.end_time ??
+      dayjs(normalizedStart).add(runtimeSettings.standardTurnaroundMinutes, "minute").toISOString()
+  ).toISOString();
 
-  const nextTableStatus = resolveAutoTableStatus(normalizedAt);
-  const nextBookingStatus: BookingStatus =
-    nextTableStatus === "hold" ? "confirmed" : "checked_in";
-  const { error: assignErr } = await client
-    .from("bookings")
-    .update({
-      area_id: areaId,
-      table_id: tableId,
-      guest_count: nextGuestCount,
-      note:
-        typeof guestCount === "number" && Number.isFinite(guestCount)
-          ? stripUnknownGuestTag(booking.note) ?? null
-          : booking.note,
-      status: nextBookingStatus,
-      checked_in_at: nextBookingStatus === "checked_in" ? dayjs().toISOString() : null,
-    })
-    .eq("id", bookingId);
+  const { data: assignData, error: assignErr } = await (client as any).rpc(
+    "assign_or_queue_pending_booking",
+    {
+      p_booking_id: bookingId,
+      p_table_id: tableId,
+      p_area_id: areaId,
+      p_guest_count: nextGuestCount,
+      p_start_time: normalizedStart,
+      p_end_time: normalizedEnd,
+    }
+  );
   if (assignErr) {
     return { ok: false, message: assignErr.message };
+  }
+
+  const outcome = Array.isArray(assignData) ? assignData[0] : assignData;
+  if (!outcome || typeof outcome !== "object") {
+    return { ok: false, message: "Không nhận được phản hồi khi gán bàn." };
+  }
+  if ((outcome as BookingCreateOrQueueResult).outcome === "waitlisted") {
+    return {
+      ok: true,
+      message: (outcome as BookingCreateOrQueueResult).message ?? "Đã chuyển booking sang hàng chờ.",
+    };
+  }
+
+  const guestCountWasProvided = typeof guestCount === "number" && Number.isFinite(guestCount);
+  if (guestCountWasProvided) {
+    const { error: guestUpdateErr } = await (client as any)
+      .from("bookings")
+      .update({
+        guest_count: nextGuestCount,
+        note: stripUnknownGuestTag(booking.note) ?? null,
+      })
+      .eq("id", bookingId);
+    if (guestUpdateErr) {
+      return { ok: false, message: guestUpdateErr.message };
+    }
   }
 
   const { data: tableRow } = await client
@@ -420,9 +653,45 @@ export async function assignBookingToTableInSupabase(input: {
     .eq("id", tableId)
     .maybeSingle();
   if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-    await client.from("tables").update({ status: nextTableStatus }).eq("id", tableId);
+    await refreshTableAvailabilityForBooking(client, tableId);
   }
   return { ok: true, message: "Đã gán bàn cho booking." };
+}
+
+export async function updateBookingGuestCountInSupabase(
+  bookingId: string,
+  guestCount: number
+): Promise<Result> {
+  const client = ensureClient();
+  const normalized = Math.max(1, Math.round(guestCount));
+  const { data: booking, error: loadErr } = await (client as any)
+    .from("bookings")
+    .select("id, status, note")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (loadErr || !booking) {
+    return { ok: false, message: loadErr?.message ?? "Không tìm thấy booking." };
+  }
+  const st = booking.status as BookingStatus;
+  if (st !== "pending" && st !== "confirmed") {
+    return {
+      ok: false,
+      message: "Chỉ chỉnh số khách khi booking chờ xếp bàn hoặc đã xác nhận.",
+    };
+  }
+  const clearedNote =
+    stripUnknownGuestTag(booking.note as string | undefined) ?? null;
+  const { error } = await (client as any)
+    .from("bookings")
+    .update({
+      guest_count: normalized,
+      note: clearedNote,
+    })
+    .eq("id", bookingId);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  return { ok: true, message: "Đã cập nhật số khách." };
 }
 
 export async function updateBookingStatusInSupabase(
@@ -430,46 +699,52 @@ export async function updateBookingStatusInSupabase(
   status: BookingStatus
 ): Promise<void> {
   const client = ensureClient();
-  const { data: booking } = await client
+  const { data: booking } = await (client as any)
     .from("bookings")
-    .select("id, table_id")
+    .select("id, table_id, branch_id, start_time, end_time")
     .eq("id", bookingId)
     .maybeSingle();
+  const normalizedStatus: BookingStatus = status === "checked_in" ? "seated" : status;
   const shouldClearCheckedInAt =
-    status === "cancelled" || status === "pending" || status === "confirmed";
-  const { error } = await client
+    normalizedStatus === "cancelled" ||
+    normalizedStatus === "pending" ||
+    normalizedStatus === "confirmed" ||
+    normalizedStatus === "no_show";
+  const { error } = await (client as any)
     .from("bookings")
     .update(
-      shouldClearCheckedInAt ? { status, checked_in_at: null } : { status }
+      shouldClearCheckedInAt
+        ? {
+            status: normalizedStatus,
+            checked_in_at: null,
+            no_show_marked_at:
+              normalizedStatus === "no_show" ? dayjs().toISOString() : null,
+          }
+        : { status: normalizedStatus }
     )
     .eq("id", bookingId);
   if (error) {
     throw new Error(error.message);
   }
-  if (!booking || (status !== "cancelled" && status !== "completed")) {
+  if (!booking || !booking.table_id) {
     return;
   }
-  if (!booking.table_id) {
-    return;
+
+  if (TERMINAL_CANCEL_STATUSES.includes(normalizedStatus)) {
+    await (client as any).rpc("promote_waitlist_for_booking_slot", {
+      p_table_id: booking.table_id,
+      p_branch_id: booking.branch_id,
+      p_slot_start_time: booking.start_time ?? dayjs().toISOString(),
+      p_slot_end_time:
+        booking.end_time ??
+        dayjs(booking.start_time ?? dayjs().toISOString())
+          .add(DEFAULT_BOOKING_RUNTIME_SETTINGS.standardTurnaroundMinutes, "minute")
+          .toISOString(),
+    });
   }
-  const { data: tableRow } = await client
-    .from("tables")
-    .select("status")
-    .eq("id", booking.table_id)
-    .maybeSingle();
-  if ((tableRow?.status as TableStatus | undefined) === "locked") {
-    return;
-  }
-  const { data: activeBooking } = await client
-    .from("bookings")
-    .select("id")
-    .eq("table_id", booking.table_id)
-    .in("status", ["confirmed", "checked_in"])
-    .neq("id", bookingId)
-    .limit(1)
-    .maybeSingle();
-  if (!activeBooking) {
-    await client.from("tables").update({ status: "available" }).eq("id", booking.table_id);
+
+  if (normalizedStatus === "cancelled" || normalizedStatus === "completed" || normalizedStatus === "no_show") {
+    await refreshTableAvailabilityForBooking(client, booking.table_id);
   }
 }
 
@@ -516,9 +791,9 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
     throw new Error("Booking chưa được gán bàn. Vui lòng gán trong mục Sơ đồ trước.");
   }
 
-  const { error: bookingErr } = await client
+  const { error: bookingErr } = await (client as any)
     .from("bookings")
-    .update({ status: "checked_in", checked_in_at: dayjs().toISOString() })
+    .update({ status: "seated", checked_in_at: dayjs().toISOString(), no_show_marked_at: null })
     .eq("id", bookingId);
   if (bookingErr) {
     throw new Error(bookingErr.message);
@@ -533,13 +808,7 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
     throw new Error(tableReadErr.message);
   }
   if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-    const { error: tableUpdErr } = await client
-      .from("tables")
-      .update({ status: "occupied" })
-      .eq("id", target.table_id);
-    if (tableUpdErr) {
-      throw new Error(tableUpdErr.message);
-    }
+    await refreshTableAvailabilityForBooking(client, target.table_id);
   }
 
   const tableName =
@@ -559,6 +828,153 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
   if (notifErr) {
     throw new Error(notifErr.message);
   }
+}
+
+export async function getTableBlockStateInSupabase(input: {
+  tableId: string;
+  slotStartTime: string;
+  slotEndTime?: string;
+  /** `all` = every active waitlist row for this table; `day` = same calendar day; `slot` = exact window. */
+  waitlistScope?: "slot" | "day" | "all";
+}): Promise<TableBlockState> {
+  const client = ensureClient();
+  const runtimeSettings = await getBookingRuntimeSettings(client);
+  const slotStartTime = dayjs(input.slotStartTime).toISOString();
+  const slotEndTime = dayjs(
+    input.slotEndTime ??
+      dayjs(slotStartTime).add(runtimeSettings.standardTurnaroundMinutes, "minute").toISOString()
+  ).toISOString();
+
+  const scheduleFrom = dayjs().startOf("day").toISOString();
+
+  const waitlistScope = input.waitlistScope ?? "all";
+  let waitlistQuery = (client as any)
+    .from("booking_waitlist_entries")
+    .select("*")
+    .eq("table_id", input.tableId)
+    .in("status", ["waiting", "offered"])
+    .order("queue_position", { ascending: true });
+  if (waitlistScope === "slot") {
+    waitlistQuery = waitlistQuery
+      .eq("desired_start_time", slotStartTime)
+      .eq("desired_end_time", slotEndTime);
+  } else if (waitlistScope === "day") {
+    const dayStart = dayjs(slotStartTime).startOf("day").toISOString();
+    const dayEnd = dayjs(slotStartTime).endOf("day").toISOString();
+    waitlistQuery = waitlistQuery
+      .gte("desired_start_time", dayStart)
+      .lte("desired_start_time", dayEnd);
+  }
+
+  const [confirmedResult, waitlistResult] = await Promise.all([
+    (client as any)
+      .from("bookings")
+      .select("*")
+      .eq("table_id", input.tableId)
+      .gte("start_time", scheduleFrom)
+      .in("status", ["confirmed", "seated", "checked_in"])
+      .order("start_time", { ascending: true }),
+    waitlistQuery,
+  ]);
+
+  if (confirmedResult.error) {
+    throw new Error(confirmedResult.error.message);
+  }
+  if (waitlistResult.error) {
+    throw new Error(waitlistResult.error.message);
+  }
+
+  return {
+    tableId: input.tableId,
+    slotStartTime,
+    slotEndTime,
+    confirmedSchedule:
+      (confirmedResult.data as any[] | null | undefined)?.map((item) => ({
+        id: item.id,
+        customerId: item.customer_id,
+        branchId: item.branch_id,
+        areaId: item.area_id,
+        tableId: item.table_id,
+        guestCount: item.guest_count,
+        bookingAt: item.booking_at,
+        startTime: item.start_time ?? item.booking_at,
+        endTime:
+          item.end_time ??
+          dayjs(item.start_time ?? item.booking_at)
+            .add(runtimeSettings.standardTurnaroundMinutes, "minute")
+            .toISOString(),
+        checkedInAt: item.checked_in_at,
+        noShowMarkedAt: item.no_show_marked_at,
+        note: item.note ?? undefined,
+        createdByUserId: item.created_by_user_id,
+        status: item.status as BookingStatus,
+      })) ?? [],
+    waitlistQueue:
+      (waitlistResult.data as any[] | null | undefined)?.map(
+        (item): BookingWaitlistEntry => ({
+          id: item.id,
+          tableId: item.table_id,
+          branchId: item.branch_id,
+          areaId: item.area_id,
+          customerId: item.customer_id,
+          bookingId: item.booking_id,
+          desiredStartTime: item.desired_start_time,
+          desiredEndTime: item.desired_end_time,
+          partySize: item.party_size,
+          status: item.status as BookingWaitlistEntry["status"],
+          position: item.queue_position,
+          offeredAt: item.offered_at,
+          offerExpiresAt: item.offer_expires_at,
+          promotedBookingId: item.promoted_booking_id,
+          createdAt: item.created_at,
+          updatedAt: item.updated_at,
+        })
+      ) ?? [],
+  };
+}
+
+export async function confirmWaitlistOfferInSupabase(waitlistEntryId: string): Promise<Result> {
+  const client = ensureClient();
+  const { data, error } = await (client as any).rpc("confirm_waitlist_offer", {
+    p_waitlist_entry_id: waitlistEntryId,
+  });
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  const response = Array.isArray(data) ? data[0] : data;
+  if (!response || typeof response !== "object") {
+    return { ok: false, message: "Không thể xác nhận suất từ hàng chờ." };
+  }
+  return {
+    ok: Boolean((response as { ok?: boolean }).ok),
+    message:
+      ((response as { message?: string }).message ?? "Đã xử lý xác nhận hàng chờ."),
+  };
+}
+
+export async function runBookingMaintenanceInSupabase(): Promise<Result> {
+  const client = ensureClient();
+  const noShowWindowStart = dayjs().subtract(5, "minute").toISOString();
+  const { data, error } = await (client as any).rpc("run_booking_maintenance");
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  const payload = Array.isArray(data) ? data[0] : data;
+  if (!payload || typeof payload !== "object") {
+    return { ok: true, message: "Đã chạy tác vụ bảo trì booking." };
+  }
+  const noShowCount = Number((payload as { no_show_count?: number }).no_show_count ?? 0);
+  const expiredOfferCount = Number((payload as { expired_offer_count?: number }).expired_offer_count ?? 0);
+  const promotedCount = Number((payload as { promoted_count?: number }).promoted_count ?? 0);
+
+  if (noShowCount > 0) {
+    await refreshTablesTouchedByRecentNoShows(client, noShowWindowStart);
+  }
+
+  return {
+    ok: true,
+    message: `Bảo trì xong: ${noShowCount} no-show, ${expiredOfferCount} offer hết hạn, ${promotedCount} lượt promotion.`,
+  };
 }
 
 export async function upsertTableInSupabase(input: {

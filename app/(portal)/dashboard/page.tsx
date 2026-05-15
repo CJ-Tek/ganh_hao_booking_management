@@ -60,7 +60,9 @@ export default function DashboardPage() {
     () => state.tables.filter((item) => filteredBranchIds.includes(item.branchId)),
     [filteredBranchIds, state.tables]
   );
-  const checkedInCount = branchBookings.filter((item) => item.status === "checked_in").length;
+  const checkedInCount = branchBookings.filter(
+    (item) => item.status === "checked_in" || item.status === "seated"
+  ).length;
   const branchNames = state.branches
     .filter((branch) => filteredBranchIds.includes(branch.id))
     .map((branch) => branch.name);

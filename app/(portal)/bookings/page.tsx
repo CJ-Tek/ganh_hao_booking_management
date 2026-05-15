@@ -2,7 +2,6 @@
 
 import dayjs from "dayjs";
 import {
-  ActionIcon,
   Badge,
   Button,
   Card,
@@ -21,18 +20,19 @@ import { DateTimePicker } from "@mantine/dates";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { DataTable, type DataTableSortStatus } from "mantine-datatable";
-import { Mic, Square } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   PortalPageTitle,
   PortalSectionCard,
   PortalStickyAction,
 } from "@/components/portal-page";
+import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import {
   displayCustomerPhone,
+  getAssignableCandidateTables,
   isGuestCountSpecified,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
@@ -40,11 +40,17 @@ import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking, type BookingStatus } from "@/lib/types";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
-import { warmUpMicrophoneForSpeech } from "@/lib/voice-booking/mic-warmup";
 
 function branchScopeKey(branchIds: string[]) {
   return [...branchIds].sort().join("|") || "none";
 }
+
+/** After `modals.close`, the Mantine overlay can still cover the viewport during exit (notably on mobile). */
+const MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS = 220;
+
+/** Page `<Modal>` stacks above Mantine `modals`; Select dropdowns portal with a lower default z-index. */
+const MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX = 600;
+const MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX = 700;
 
 /** Chuẩn hóa số điện thoại VN (+84 → 0…). */
 function normalizeVietnamPhone(raw: string): string {
@@ -60,51 +66,6 @@ function normalizeVietnamPhone(raw: string): string {
 
 function isPlausibleVietnamPhone(normalized: string): boolean {
   return /^0[1-9]\d{8,9}$/.test(normalized);
-}
-
-/** Speech engines often append a sentence-ending period; strip it from search. */
-function trimVoiceSearchTranscript(text: string): string {
-  return text.replace(/\.+$/u, "").trimEnd();
-}
-
-type SpeechRecognitionResultLike = {
-  transcript?: string;
-};
-
-type SpeechRecognitionAlternativeLike = [SpeechRecognitionResultLike, ...SpeechRecognitionResultLike[]];
-
-type SpeechRecognitionResultEntryLike = {
-  isFinal: boolean;
-  0?: SpeechRecognitionResultLike;
-} & SpeechRecognitionAlternativeLike;
-
-type SpeechRecognitionResultListLike = ArrayLike<SpeechRecognitionResultEntryLike>;
-
-type SpeechRecognitionEventLike = {
-  resultIndex: number;
-  results: SpeechRecognitionResultListLike;
-};
-
-type SpeechRecognitionLike = {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  start: () => void;
-  stop: () => void;
-  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-  onerror: (() => void) | null;
-  onend: (() => void) | null;
-};
-
-type SpeechRecognitionConstructorLike = new () => SpeechRecognitionLike;
-
-type SpeechApi = typeof window & {
-  SpeechRecognition?: SpeechRecognitionConstructorLike;
-  webkitSpeechRecognition?: SpeechRecognitionConstructorLike;
-};
-
-function getSpeechRecognition(ww: SpeechApi) {
-  return ww.SpeechRecognition ?? ww.webkitSpeechRecognition ?? null;
 }
 
 function BookingCheckInButton(props: {
@@ -143,13 +104,19 @@ function parseGuestCountFromNumberInput(value: number | string | undefined): num
 }
 
 function AssignGuestCountPromptBody(props: {
+  onBack?: () => void;
   onManual: (guestCount: number) => void;
   onAuto: (guestCount: number) => void;
 }) {
-  const { onManual, onAuto } = props;
+  const { onBack, onManual, onAuto } = props;
   const [guestCount, setGuestCount] = useState<number | undefined>(undefined);
   return (
-    <Stack>
+    <Stack gap="sm">
+      {onBack ? (
+        <Button variant="default" size="compact-sm" onClick={onBack}>
+          ← Quay lại
+        </Button>
+      ) : null}
       <NumberInput
         label="Số khách"
         min={1}
@@ -193,6 +160,114 @@ function AssignGuestCountPromptBody(props: {
   );
 }
 
+/** Đã có số khách: Sửa → chỉnh rồi Xong để lưu DB; sau đó có thể chọn thủ công / tự động. */
+function AssignGuestSpecifiedOptionsBody(props: {
+  booking: Booking;
+  modalId: string;
+  persistGuestCount: (bookingId: string, guestCount: number) => Promise<{ ok: boolean; message: string }>;
+  onManual: (guestCount: number) => void;
+  onAuto: (guestCount: number) => void;
+}) {
+  const { booking, modalId, persistGuestCount, onManual, onAuto } = props;
+  const [editingGuest, setEditingGuest] = useState(false);
+  const [guestDraft, setGuestDraft] = useState(() => Math.max(1, booking.guestCount));
+  const [committedGuest, setCommittedGuest] = useState(() => Math.max(1, booking.guestCount));
+  const [persistingGuest, setPersistingGuest] = useState(false);
+
+  useEffect(() => {
+    const base = Math.max(1, booking.guestCount);
+    setGuestDraft(base);
+    setCommittedGuest(base);
+    setEditingGuest(false);
+  }, [booking.id, booking.guestCount]);
+
+  const resolvedGuest = Math.max(
+    1,
+    Math.round(
+      typeof guestDraft === "number" && Number.isFinite(guestDraft)
+        ? guestDraft
+        : committedGuest
+    )
+  );
+
+  const handleEditToggle = async () => {
+    if (editingGuest) {
+      const next = resolvedGuest;
+      setPersistingGuest(true);
+      try {
+        const result = await persistGuestCount(booking.id, next);
+        notifications.show({ color: result.ok ? "green" : "red", message: result.message });
+        if (!result.ok) {
+          return;
+        }
+        setCommittedGuest(next);
+        setGuestDraft(next);
+      } finally {
+        setPersistingGuest(false);
+      }
+      setEditingGuest(false);
+      return;
+    }
+    setEditingGuest(true);
+  };
+
+  return (
+    <Stack gap="sm">
+      <Group gap="xs" align="flex-end" wrap="wrap">
+        {editingGuest ? (
+          <NumberInput
+            label="Số khách"
+            min={1}
+            miw={160}
+            style={{ flex: "1 1 12rem" }}
+            allowDecimal={false}
+            clampBehavior="strict"
+            disabled={persistingGuest}
+            value={guestDraft}
+            onChange={(v) =>
+              setGuestDraft(parseGuestCountFromNumberInput(v) ?? guestDraft)
+            }
+          />
+        ) : (
+          <Text size="sm" c="dimmed">
+            Đã có số khách: <strong>{resolvedGuest}</strong>.
+          </Text>
+        )}
+        <Button
+          variant="light"
+          size="compact-sm"
+          loading={persistingGuest}
+          disabled={persistingGuest}
+          onClick={() => void handleEditToggle()}
+        >
+          {editingGuest ? "Xong" : "Sửa"}
+        </Button>
+      </Group>
+      <Group grow>
+        <Button
+          variant="default"
+          onClick={() => {
+            modals.close(modalId);
+            window.setTimeout(() => {
+              onManual(resolvedGuest);
+            }, MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS);
+          }}
+        >
+          Chọn thủ công
+        </Button>
+        <Button
+          onClick={() => {
+            modals.close(modalId);
+            onAuto(resolvedGuest);
+          }}
+        >
+          Tự động gán theo số khách
+        </Button>
+      </Group>
+    </Stack>
+  );
+}
+
 export default function BookingsPage() {
   const { filteredBranchIds } = useAppContext();
   return <BookingsPageContent key={branchScopeKey(filteredBranchIds)} />;
@@ -204,6 +279,7 @@ function BookingsPageContent() {
     filteredBranchIds,
     createBooking,
     assignBookingToTable,
+    updateBookingGuestCount,
     updateBookingStatus,
     checkInBooking,
     hasSupabase,
@@ -227,10 +303,6 @@ function BookingsPageContent() {
   const [listTableAssignFilter, setListTableAssignFilter] = useState<
     "all" | "assigned" | "unassigned"
   >("all");
-  const [isListeningSearch, setIsListeningSearch] = useState(false);
-  /** Mic priming before SpeechRecognition — avoids Chromium missing the first phrase. */
-  const [isWarmingVoiceSearch, setIsWarmingVoiceSearch] = useState(false);
-  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const [assignFormBooking, setAssignFormBooking] = useState<Booking | null>(null);
   const [assignManualGuestCount, setAssignManualGuestCount] = useState<number | undefined>(undefined);
   const [assignAreaId, setAssignAreaId] = useState<string | null>(null);
@@ -341,7 +413,7 @@ function BookingsPageContent() {
 
   const bookingStatusFilterOptions = useMemo(
     () =>
-      (["pending", "confirmed", "checked_in", "completed", "cancelled"] as const).map((s) => ({
+      (["pending", "confirmed", "seated", "checked_in", "no_show", "completed", "cancelled"] as const).map((s) => ({
         value: s,
         label: bookingStatusLabel[s],
       })),
@@ -373,94 +445,9 @@ function BookingsPageContent() {
     });
   }, [branchBookings, listStatusFilter, listTableAssignFilter]);
 
-  const startVoiceSearch = async () => {
-    const ww = window as SpeechApi;
-    const SR = getSpeechRecognition(ww);
-    if (!SR) {
-      notifications.show({
-        color: "red",
-        message: "Trình duyệt không hỗ trợ tìm kiếm bằng giọng nói.",
-      });
-      return;
-    }
-    if (isWarmingVoiceSearch || isListeningSearch) return;
-
-    setIsWarmingVoiceSearch(true);
-    try {
-      await warmUpMicrophoneForSpeech();
-    } catch (e) {
-      setIsWarmingVoiceSearch(false);
-      const name = e instanceof Error ? e.name : "";
-      notifications.show({
-        color: "red",
-        message:
-          name === "NotAllowedError"
-            ? "Cho phép micro trong trình duyệt rồi thử tìm bằng giọng nói lại."
-            : "Không bật được micro. Kiểm tra thiết bị rồi thử lại.",
-      });
-      return;
-    }
-    setIsWarmingVoiceSearch(false);
-
-    const rec = new SR();
-    recognitionRef.current = rec;
-    rec.lang = "vi-VN";
-    rec.continuous = false;
-    rec.interimResults = true;
-    let finalText = "";
-    rec.onresult = (event) => {
-      let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const txt = event.results[i][0]?.transcript ?? "";
-        if (event.results[i].isFinal) {
-          finalText += txt;
-        } else {
-          interim += txt;
-        }
-      }
-      setSearchQuery(trimVoiceSearchTranscript((finalText + " " + interim).trim()));
-    };
-    rec.onerror = () => setIsListeningSearch(false);
-    rec.onend = () => setIsListeningSearch(false);
-    setIsListeningSearch(true);
-    try {
-      rec.start();
-    } catch {
-      setIsListeningSearch(false);
-      recognitionRef.current = null;
-      notifications.show({
-        color: "red",
-        message: "Không khởi động được nhận diện giọng nói.",
-      });
-    }
-  };
-
-  const stopVoiceSearch = () => {
-    if (!isListeningSearch) {
-      return;
-    }
-    recognitionRef.current?.stop();
-  };
-
-  const hasConflictAtTable = (booking: Booking, tableId: string) =>
-    state.bookings.some(
-      (item) =>
-        item.id !== booking.id &&
-        item.tableId === tableId &&
-        dayjs(item.bookingAt).toISOString() === dayjs(booking.bookingAt).toISOString() &&
-        (item.status === "confirmed" || item.status === "checked_in")
-    );
-
   /** Use booking.branchId — not filteredBranchIds[0] — so areas/tables match the booking's chi nhánh. */
   const getCandidateTables = (booking: Booking, requiredSeats?: number) =>
-    state.tables
-      .filter((table) => table.branchId === booking.branchId && table.status !== "locked")
-      .filter((table) => {
-        if (requiredSeats && table.seats < requiredSeats) {
-          return false;
-        }
-        return !hasConflictAtTable(booking, table.id);
-      });
+    getAssignableCandidateTables(booking, state.tables, state.bookings, requiredSeats);
 
   const runAssign = async (
     booking: Booking,
@@ -488,11 +475,13 @@ function BookingsPageContent() {
 
   const openManualAssignModal = (booking: Booking, guestForAssign?: number) => {
     setAssignFormBooking(booking);
-    setAssignManualGuestCount(
+    const initialGuestCount =
       typeof guestForAssign === "number" && Number.isFinite(guestForAssign)
         ? guestForAssign
-        : undefined
-    );
+        : booking.guestCount > 0
+          ? booking.guestCount
+          : undefined;
+    setAssignManualGuestCount(initialGuestCount);
     setAssignAreaId(null);
     setAssignTableId(null);
   };
@@ -521,9 +510,14 @@ function BookingsPageContent() {
   };
 
   const openAssignOptions = (booking: Booking) => {
+    modals.closeAll();
     const guestSpecified = isGuestCountSpecified(booking);
     const modalId = modals.open({
       title: "Gán khách vào bàn",
+      children: <></>,
+    });
+    modals.updateModal({
+      modalId,
       children: (
         <Stack gap="sm">
           <Text size="sm">
@@ -534,30 +528,13 @@ function BookingsPageContent() {
             · {dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY")}
           </Text>
           {guestSpecified ? (
-            <>
-              <Text size="sm" c="dimmed">
-                Đã có số khách: <strong>{booking.guestCount}</strong>.
-              </Text>
-              <Group grow>
-                <Button
-                  variant="default"
-                  onClick={() => {
-                    modals.close(modalId);
-                    openManualAssignModal(booking, booking.guestCount);
-                  }}
-                >
-                  Chọn thủ công
-                </Button>
-                <Button
-                  onClick={() => {
-                    modals.close(modalId);
-                    void runAutoAssign(booking, booking.guestCount);
-                  }}
-                >
-                  Tự động gán theo số khách
-                </Button>
-              </Group>
-            </>
+            <AssignGuestSpecifiedOptionsBody
+              booking={booking}
+              modalId={modalId}
+              persistGuestCount={(id, n) => updateBookingGuestCount(id, n)}
+              onManual={(guestCount) => openManualAssignModal(booking, guestCount)}
+              onAuto={(guestCount) => void runAutoAssign(booking, guestCount)}
+            />
           ) : (
             <>
               <Text size="sm" c="dimmed">
@@ -567,18 +544,25 @@ function BookingsPageContent() {
                 <Button
                   variant="default"
                   onClick={() => {
-                    modals.close(modalId);
-                    let nestedModalId = "";
-                    nestedModalId = modals.open({
+                    const nestedModalId = modals.open({
                       title: "Nhập số khách rồi chọn cách gán",
+                      children: <></>,
+                    });
+                    modals.updateModal({
+                      modalId: nestedModalId,
                       children: (
                         <AssignGuestCountPromptBody
+                          onBack={() => modals.close(nestedModalId)}
                           onManual={(guest) => {
                             modals.close(nestedModalId);
-                            openManualAssignModal(booking, guest);
+                            modals.close(modalId);
+                            window.setTimeout(() => {
+                              openManualAssignModal(booking, guest);
+                            }, MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS);
                           }}
                           onAuto={(guest) => {
                             modals.close(nestedModalId);
+                            modals.close(modalId);
                             void runAutoAssign(booking, guest);
                           }}
                         />
@@ -819,122 +803,95 @@ function BookingsPageContent() {
     </PortalSectionCard>
   );
 
-  const voiceSearchInputSection = (actionIconSize: "sm" | "md") => (
-    <Tooltip label={isListeningSearch ? "Dừng ghi âm" : "Tìm bằng giọng nói"} withArrow>
-      <ActionIcon
-        variant={isListeningSearch ? "filled" : "subtle"}
-        color={isListeningSearch ? "red" : "gray"}
-        loading={isWarmingVoiceSearch}
-        size={actionIconSize}
-        radius="sm"
-        onClick={() => {
-          if (isListeningSearch) {
-            stopVoiceSearch();
-          } else {
-            void startVoiceSearch();
-          }
+  const bookingsSearchPlaceholder =
+    "Tìm theo khách, SĐT, giờ đến, giờ check-in, khu, bàn, trạng thái...";
+
+  const bookingsListFiltersCompact = (
+    <Stack gap="sm">
+      <TextInputWithVoice
+        placeholder={bookingsSearchPlaceholder}
+        value={searchQuery}
+        onChange={(event) => {
+          setSearchQuery(event.currentTarget.value);
+          setPage(1);
         }}
-        aria-label={isListeningSearch ? "Dừng ghi âm" : "Tìm bằng giọng nói"}
-      >
-        {isListeningSearch ? (
-          <Square size={actionIconSize === "md" ? 15 : 13} strokeWidth={2.5} fill="currentColor" />
-        ) : (
-          <Mic size={actionIconSize === "md" ? 19 : 17} strokeWidth={2} />
-        )}
-      </ActionIcon>
-    </Tooltip>
+        size="md"
+        voiceIconSize="md"
+      />
+      <Group grow align="flex-end" wrap="wrap" gap="sm">
+        <Select
+          label="Trạng thái"
+          placeholder="Tất cả"
+          clearable
+          data={bookingStatusFilterOptions}
+          value={listStatusFilter}
+          onChange={(value) => {
+            setListStatusFilter((value as BookingStatus | null) ?? null);
+            setPage(1);
+          }}
+          size="md"
+        />
+        <Select
+          label="Bàn"
+          data={tableAssignFilterOptions}
+          value={listTableAssignFilter}
+          onChange={(value) => {
+            setListTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
+            setPage(1);
+          }}
+          size="md"
+        />
+      </Group>
+    </Stack>
   );
 
   const bookingsTable = (
     <PortalSectionCard>
       <Stack gap="sm">
         <Text fw={600}>Danh sách booking</Text>
-        {isCompact ? (
-          <Stack gap="sm">
-            <TextInput
-              placeholder="Tìm theo khách, SĐT, giờ đến, giờ check-in, khu, bàn, trạng thái..."
-              value={searchQuery}
-              onChange={(event) => {
-                setSearchQuery(event.currentTarget.value);
-                setPage(1);
-              }}
-              size="md"
-              rightSection={voiceSearchInputSection("md")}
-              rightSectionWidth={44}
-              rightSectionPointerEvents="all"
-            />
-            <Group grow align="flex-end" wrap="wrap" gap="sm">
-              <Select
-                label="Trạng thái"
-                placeholder="Tất cả"
-                clearable
-                data={bookingStatusFilterOptions}
-                value={listStatusFilter}
-                onChange={(value) => {
-                  setListStatusFilter((value as BookingStatus | null) ?? null);
-                  setPage(1);
-                }}
-                size="md"
-              />
-              <Select
-                label="Bàn"
-                data={tableAssignFilterOptions}
-                value={listTableAssignFilter}
-                onChange={(value) => {
-                  setListTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
-                  setPage(1);
-                }}
-                size="md"
-              />
-            </Group>
-          </Stack>
-        ) : (
-          <Group align="flex-end" gap="sm" wrap="nowrap" justify="flex-start">
-            <TextInput
-              placeholder="Tìm theo khách, SĐT, giờ đến, giờ check-in, khu, bàn, trạng thái..."
-              value={searchQuery}
-              onChange={(event) => {
-                setSearchQuery(event.currentTarget.value);
-                setPage(1);
-              }}
-              size="sm"
-              style={{ flex: "1 1 12rem", minWidth: 0 }}
-              rightSection={voiceSearchInputSection("sm")}
-              rightSectionWidth={40}
-              rightSectionPointerEvents="all"
-            />
-            <Select
-              label="Trạng thái"
-              placeholder="Tất cả"
-              clearable
-              data={bookingStatusFilterOptions}
-              value={listStatusFilter}
-              onChange={(value) => {
-                setListStatusFilter((value as BookingStatus | null) ?? null);
-                setPage(1);
-              }}
-              size="sm"
-              w={168}
-              miw={168}
-            />
-            <Select
-              label="Bàn"
-              data={tableAssignFilterOptions}
-              value={listTableAssignFilter}
-              onChange={(value) => {
-                setListTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
-                setPage(1);
-              }}
-              size="sm"
-              w={168}
-              miw={168}
-            />
-          </Group>
-        )}
+        <Group align="flex-end" gap="sm" wrap="nowrap" justify="flex-start">
+          <TextInputWithVoice
+            placeholder={bookingsSearchPlaceholder}
+            value={searchQuery}
+            onChange={(event) => {
+              setSearchQuery(event.currentTarget.value);
+              setPage(1);
+            }}
+            size="sm"
+            style={{ flex: "1 1 12rem", minWidth: 0 }}
+            voiceIconSize="sm"
+          />
+          <Select
+            label="Trạng thái"
+            placeholder="Tất cả"
+            clearable
+            data={bookingStatusFilterOptions}
+            value={listStatusFilter}
+            onChange={(value) => {
+              setListStatusFilter((value as BookingStatus | null) ?? null);
+              setPage(1);
+            }}
+            size="sm"
+            w={168}
+            miw={168}
+          />
+          <Select
+            label="Bàn"
+            data={tableAssignFilterOptions}
+            value={listTableAssignFilter}
+            onChange={(value) => {
+              setListTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
+              setPage(1);
+            }}
+            size="sm"
+            w={168}
+            miw={168}
+          />
+        </Group>
       </Stack>
       <div style={{ height: 12 }} />
       <DataTable
-        minHeight={isCompact ? 200 : 260}
+        minHeight={260}
         scrollAreaProps={portalDataTableScrollAreaProps}
         withTableBorder
         records={pagedBookings}
@@ -1056,7 +1013,7 @@ function BookingsPageContent() {
             accessor: "actions",
             title: "Thao tác",
             render: (booking) => (
-              booking.status === "cancelled" || booking.status === "completed" ? null : (
+              booking.status === "cancelled" || booking.status === "completed" || booking.status === "no_show" ? null : (
                 <Group gap={6} wrap="wrap">
                   {booking.status === "pending" ? (
                     <Button
@@ -1073,7 +1030,7 @@ function BookingsPageContent() {
                     disabled={booking.status !== "confirmed"}
                     onCheckIn={() => runCheckIn(booking.id)}
                   />
-                  {booking.status === "checked_in" ? (
+                  {booking.status === "checked_in" || booking.status === "seated" ? (
                     <Button
                       size="compact-xs"
                       variant="filled"
@@ -1198,7 +1155,7 @@ function BookingsPageContent() {
                   </Text>
                 ) : null}
                 <Group grow gap="xs">
-                  {booking.status === "cancelled" || booking.status === "completed" ? null : (
+                  {booking.status === "cancelled" || booking.status === "completed" || booking.status === "no_show" ? null : (
                     <>
                       {booking.status === "pending" ? (
                         <Button
@@ -1215,7 +1172,7 @@ function BookingsPageContent() {
                         disabled={booking.status !== "confirmed"}
                         onCheckIn={() => runCheckIn(booking.id)}
                       />
-                      {booking.status === "checked_in" ? (
+                      {booking.status === "checked_in" || booking.status === "seated" ? (
                         <Button
                           size="sm"
                           variant="filled"
@@ -1336,34 +1293,8 @@ function BookingsPageContent() {
           {isCompact ? (
             <PortalSectionCard>
               <Stack gap="md">
-                <Text size="sm" fw={600}>
-                  Danh sách booking
-                </Text>
-                <Group gap="xs" grow>
-                  <TextInput
-                    placeholder="Tìm booking..."
-                    value={searchQuery}
-                    onChange={(event) => {
-                      setSearchQuery(event.currentTarget.value);
-                      setPage(1);
-                    }}
-                  />
-                  <Button
-                    size="sm"
-                    variant={isListeningSearch ? "filled" : "default"}
-                    color={isListeningSearch ? "red" : "gray"}
-                    loading={isWarmingVoiceSearch}
-                    onClick={() => {
-                      if (isListeningSearch) {
-                        stopVoiceSearch();
-                      } else {
-                        void startVoiceSearch();
-                      }
-                    }}
-                  >
-                    {isListeningSearch ? "Dừng" : "Giọng nói"}
-                  </Button>
-                </Group>
+                <Text fw={600}>Danh sách booking</Text>
+                {bookingsListFiltersCompact}
                 {bookingsCards}
               </Stack>
             </PortalSectionCard>
@@ -1378,24 +1309,44 @@ function BookingsPageContent() {
           onClose={() => setAssignFormBooking(null)}
           title="Gán thủ công booking vào bàn"
           size="lg"
+          centered
+          zIndex={MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX}
+          overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
         >
           <Stack gap="sm">
+            <Button
+              variant="default"
+              size="compact-sm"
+              w="fit-content"
+              onClick={() => {
+                const b = assignFormBooking;
+                setAssignFormBooking(null);
+                if (b) {
+                  window.setTimeout(() => openAssignOptions(b), 0);
+                }
+              }}
+            >
+              ← Quay lại
+            </Button>
             <Text size="sm" c="dimmed">
               {state.customers.find((item) => item.id === assignFormBooking.customerId)?.fullName ?? "—"} ·{" "}
               {dayjs(assignFormBooking.bookingAt).format("HH:mm DD/MM/YYYY")}
             </Text>
-            {!isGuestCountSpecified(assignFormBooking) ? (
-              <NumberInput
-                label="Số khách"
-                min={1}
-                value={assignManualGuestCount}
-                onChange={(value) =>
-                  setAssignManualGuestCount(parseGuestCountFromNumberInput(value))
-                }
-                allowDecimal={false}
-                clampBehavior="strict"
-              />
-            ) : null}
+            <NumberInput
+              label="Số khách"
+              description={
+                isGuestCountSpecified(assignFormBooking)
+                  ? "Có thể chỉnh lại trước khi gán bàn."
+                  : undefined
+              }
+              min={1}
+              value={assignManualGuestCount}
+              onChange={(value) =>
+                setAssignManualGuestCount(parseGuestCountFromNumberInput(value))
+              }
+              allowDecimal={false}
+              clampBehavior="strict"
+            />
             <Group grow>
               <Select
                 label="Khu vực"
@@ -1407,6 +1358,7 @@ function BookingsPageContent() {
                 }}
                 searchable
                 clearable
+                comboboxProps={{ zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX }}
               />
               <Select
                 label="Bàn"
@@ -1414,6 +1366,7 @@ function BookingsPageContent() {
                 value={assignTableId}
                 onChange={setAssignTableId}
                 searchable
+                comboboxProps={{ zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX }}
               />
             </Group>
             {assignModalTableCapacityHint ? (
@@ -1432,19 +1385,14 @@ function BookingsPageContent() {
                     notifications.show({ color: "red", message: "Vui lòng chọn khu vực và bàn." });
                     return;
                   }
-                  if (
-                    !isGuestCountSpecified(assignFormBooking) &&
-                    (typeof assignManualGuestCount !== "number" || assignManualGuestCount < 1)
-                  ) {
+                  if (typeof assignManualGuestCount !== "number" || assignManualGuestCount < 1) {
                     notifications.show({ color: "red", message: "Vui lòng nhập số khách hợp lệ." });
                     return;
                   }
                   void runAssign(assignFormBooking, {
                     areaId: assignAreaId,
                     tableId: assignTableId,
-                    guestCount: isGuestCountSpecified(assignFormBooking)
-                      ? undefined
-                      : assignManualGuestCount ?? undefined,
+                    guestCount: assignManualGuestCount,
                   });
                 }}
               >

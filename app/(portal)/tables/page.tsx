@@ -23,6 +23,7 @@ import { DataTable, type DataTableSortStatus } from "mantine-datatable";
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
+import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { getAreaSeatBudget } from "@/lib/area-capacity";
@@ -707,7 +708,7 @@ function TablesPageContent() {
 
       <PortalSectionCard>
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm" mb="md">
-          <TextInput
+          <TextInputWithVoice
             label="Tìm bàn"
             placeholder="Tên, chi nhánh, khu vực"
             value={search}
@@ -716,6 +717,7 @@ function TablesPageContent() {
               setPage(1);
             }}
             size={isCompact ? "md" : "sm"}
+            voiceIconSize={isCompact ? "md" : "sm"}
           />
           <Select
             label="Trạng thái"

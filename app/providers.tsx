@@ -5,6 +5,7 @@ import "@mantine/dates/styles.css";
 import "@mantine/notifications/styles.css";
 import {
   Button,
+  Modal,
   createTheme,
   MantineColorsTuple,
   MantineProvider,
@@ -28,6 +29,8 @@ const brandPalette: MantineColorsTuple = [
   "#0c61a4",
 ];
 
+const modalOverlayBlur = { backgroundOpacity: 0.55, blur: 4 } as const;
+
 const theme = createTheme({
   primaryColor: "brand",
   colors: {
@@ -35,6 +38,11 @@ const theme = createTheme({
   },
   fontFamily: "Inter, Arial, sans-serif",
   components: {
+    Modal: Modal.extend({
+      defaultProps: {
+        overlayProps: modalOverlayBlur,
+      },
+    }),
     Button: Button.extend({
       styles: {
         root: {
@@ -63,7 +71,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <MantineProvider theme={theme} defaultColorScheme="light">
       <DatesProvider settings={{ locale: "vi" }}>
-        <ModalsProvider modalProps={{ centered: true }}>
+        <ModalsProvider
+          modalProps={{ centered: true, overlayProps: modalOverlayBlur }}
+        >
           <Notifications />
           <AppContextProvider>{children}</AppContextProvider>
         </ModalsProvider>

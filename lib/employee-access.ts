@@ -27,7 +27,7 @@ export function assertEmployeeMaySetBookingStatus(
       : undefined;
   if (
     !booking ||
-    booking.status !== "checked_in" ||
+    (booking.status !== "checked_in" && booking.status !== "seated") ||
     !table ||
     table.status !== "occupied"
   ) {

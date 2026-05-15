@@ -89,9 +89,12 @@ export type Database = {
           checked_in_at: string | null
           created_by_user_id: string
           customer_id: string
+          end_time: string
           guest_count: number
           id: string
+          no_show_marked_at: string | null
           note: string | null
+          start_time: string
           status: string
           table_id: string | null
         }
@@ -102,9 +105,12 @@ export type Database = {
           checked_in_at?: string | null
           created_by_user_id: string
           customer_id: string
+          end_time?: string
           guest_count?: number
           id?: string
+          no_show_marked_at?: string | null
           note?: string | null
+          start_time?: string
           status?: string
           table_id?: string | null
         }
@@ -115,9 +121,12 @@ export type Database = {
           checked_in_at?: string | null
           created_by_user_id?: string
           customer_id?: string
+          end_time?: string
           guest_count?: number
           id?: string
+          no_show_marked_at?: string | null
           note?: string | null
+          start_time?: string
           status?: string
           table_id?: string | null
         }
@@ -152,6 +161,140 @@ export type Database = {
           },
           {
             foreignKeyName: "bookings_table_id_fkey"
+            columns: ["table_id"]
+            isOneToOne: false
+            referencedRelation: "tables"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      booking_runtime_settings: {
+        Row: {
+          id: boolean
+          no_show_grace_minutes: number
+          standard_turnaround_minutes: number
+          updated_at: string
+          waitlist_offer_ttl_minutes: number
+        }
+        Insert: {
+          id?: boolean
+          no_show_grace_minutes?: number
+          standard_turnaround_minutes?: number
+          updated_at?: string
+          waitlist_offer_ttl_minutes?: number
+        }
+        Update: {
+          id?: boolean
+          no_show_grace_minutes?: number
+          standard_turnaround_minutes?: number
+          updated_at?: string
+          waitlist_offer_ttl_minutes?: number
+        }
+        Relationships: []
+      }
+      booking_waitlist_entries: {
+        Row: {
+          area_id: string | null
+          booking_id: string | null
+          branch_id: string
+          created_at: string
+          created_by_user_id: string
+          customer_id: string
+          desired_end_time: string
+          desired_start_time: string
+          id: string
+          offer_expires_at: string | null
+          offered_at: string | null
+          party_size: number
+          promoted_booking_id: string | null
+          queue_position: number
+          status: string
+          table_id: string
+          updated_at: string
+        }
+        Insert: {
+          area_id?: string | null
+          booking_id?: string | null
+          branch_id: string
+          created_at?: string
+          created_by_user_id: string
+          customer_id: string
+          desired_end_time: string
+          desired_start_time: string
+          id?: string
+          offer_expires_at?: string | null
+          offered_at?: string | null
+          party_size: number
+          promoted_booking_id?: string | null
+          queue_position: number
+          status?: string
+          table_id: string
+          updated_at?: string
+        }
+        Update: {
+          area_id?: string | null
+          booking_id?: string | null
+          branch_id?: string
+          created_at?: string
+          created_by_user_id?: string
+          customer_id?: string
+          desired_end_time?: string
+          desired_start_time?: string
+          id?: string
+          offer_expires_at?: string | null
+          offered_at?: string | null
+          party_size?: number
+          promoted_booking_id?: string | null
+          queue_position?: number
+          status?: string
+          table_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_waitlist_entries_area_id_fkey"
+            columns: ["area_id"]
+            isOneToOne: false
+            referencedRelation: "areas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_waitlist_entries_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_waitlist_entries_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_waitlist_entries_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_waitlist_entries_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_waitlist_entries_promoted_booking_id_fkey"
+            columns: ["promoted_booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "booking_waitlist_entries_table_id_fkey"
             columns: ["table_id"]
             isOneToOne: false
             referencedRelation: "tables"
@@ -427,7 +570,73 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      assign_or_queue_pending_booking: {
+        Args: {
+          p_area_id: string
+          p_booking_id: string
+          p_end_time: string
+          p_guest_count: number
+          p_start_time: string
+          p_table_id: string
+        }
+        Returns: {
+          booking_id: string | null
+          end_time: string
+          message: string | null
+          outcome: string
+          start_time: string
+          waitlist_id: string | null
+        }[]
+      }
+      confirm_waitlist_offer: {
+        Args: { p_waitlist_entry_id: string }
+        Returns: Json
+      }
+      create_or_queue_booking: {
+        Args: {
+          p_area_id: string
+          p_branch_id: string
+          p_created_by_user_id: string
+          p_customer_id: string
+          p_end_time: string
+          p_guest_count: number
+          p_note: string | null
+          p_start_time: string
+          p_table_id: string
+        }
+        Returns: {
+          booking_id: string | null
+          end_time: string
+          message: string | null
+          outcome: string
+          start_time: string
+          waitlist_id: string | null
+        }[]
+      }
+      expire_waitlist_offers: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          expired_offer_count: number
+          promoted_count: number
+        }[]
+      }
+      promote_waitlist_for_booking_slot: {
+        Args: {
+          p_branch_id: string
+          p_slot_end_time: string
+          p_slot_start_time: string
+          p_table_id: string
+        }
+        Returns: number
+      }
+      run_booking_maintenance: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          expired_offer_count: number
+          no_show_count: number
+          promoted_count: number
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never

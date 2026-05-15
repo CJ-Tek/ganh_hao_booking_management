@@ -24,6 +24,7 @@ import {
   PortalStickyAction,
   PortalStickyPanel,
 } from "@/components/portal-page";
+import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { usePortalCompact } from "@/lib/use-portal-compact";
@@ -236,7 +237,7 @@ export default function AreasTablesSettingsPage() {
         <Text fw={600} mb="sm" size={isCompact ? "sm" : "md"}>
           Danh sách khu vực
         </Text>
-        <TextInput
+        <TextInputWithVoice
           label="Tìm khu vực"
           placeholder="Tên hoặc chi nhánh"
           value={search}
@@ -246,6 +247,7 @@ export default function AreasTablesSettingsPage() {
           }}
           mb="sm"
           size={isCompact ? "md" : "sm"}
+          voiceIconSize={isCompact ? "md" : "sm"}
         />
         {isCompact ? (
           <Stack gap="sm">

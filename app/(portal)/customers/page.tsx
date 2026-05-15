@@ -10,12 +10,12 @@ import {
   SegmentedControl,
   Stack,
   Text,
-  TextInput,
 } from "@mantine/core";
 import { DataTable, type DataTableSortStatus } from "mantine-datatable";
 import { Phone } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
+import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
@@ -148,7 +148,7 @@ export default function CustomersPage() {
       </PortalPageTitle>
       <PortalStickyPanel>
         <Group gap="sm" wrap="wrap" align="flex-end">
-          <TextInput
+          <TextInputWithVoice
             placeholder="Tìm tên hoặc SĐT"
             value={query}
             onChange={(event) => {
@@ -156,6 +156,7 @@ export default function CustomersPage() {
               setListPage(1);
             }}
             size={isCompact ? "md" : "sm"}
+            voiceIconSize={isCompact ? "md" : "sm"}
             style={{ flex: 1, minWidth: 240 }}
           />
           {!isCompact ? (

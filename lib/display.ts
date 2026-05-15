@@ -18,6 +18,8 @@ export const bookingStatusLabel: Record<BookingStatus, string> = {
   pending: "Chờ xếp bàn",
   confirmed: "Đã xác nhận",
   cancelled: "Đã hủy",
+  seated: "Đã vào bàn",
+  no_show: "Không đến",
   checked_in: "Đã check-in",
   completed: "Hoàn thành",
 };
@@ -26,6 +28,8 @@ export const bookingStatusColor: Record<BookingStatus, string> = {
   pending: "orange",
   confirmed: "cyan",
   cancelled: "red",
+  seated: "green",
+  no_show: "gray",
   checked_in: "green",
   completed: "teal",
 };

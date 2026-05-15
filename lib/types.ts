@@ -1,7 +1,14 @@
 export type Role = "admin" | "general_manager" | "manager" | "employee";
 
 export type TableStatus = "available" | "hold" | "occupied" | "locked";
-export type BookingStatus = "pending" | "confirmed" | "cancelled" | "checked_in" | "completed";
+export type BookingStatus =
+  | "pending"
+  | "confirmed"
+  | "seated"
+  | "cancelled"
+  | "no_show"
+  | "checked_in"
+  | "completed";
 
 export interface AppUser {
   id: string;
@@ -58,11 +65,49 @@ export interface Booking {
   tableId: string | null;
   guestCount: number;
   bookingAt: string;
+  startTime: string;
+  endTime: string;
   /** Set when status becomes checked_in (explicit check-in or walk-in assign). */
   checkedInAt?: string | null;
+  noShowMarkedAt?: string | null;
   note?: string;
   createdByUserId: string;
   status: BookingStatus;
+}
+
+export type WaitlistStatus = "waiting" | "offered" | "expired" | "cancelled" | "promoted";
+
+export interface BookingWaitlistEntry {
+  id: string;
+  tableId: string;
+  branchId: string;
+  areaId: string | null;
+  customerId: string;
+  bookingId?: string | null;
+  desiredStartTime: string;
+  desiredEndTime: string;
+  partySize: number;
+  status: WaitlistStatus;
+  position: number;
+  offeredAt?: string | null;
+  offerExpiresAt?: string | null;
+  promotedBookingId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BookingRuntimeSettings {
+  standardTurnaroundMinutes: number;
+  noShowGraceMinutes: number;
+  waitlistOfferTtlMinutes: number;
+}
+
+export interface TableBlockState {
+  tableId: string;
+  slotStartTime: string;
+  slotEndTime: string;
+  confirmedSchedule: Booking[];
+  waitlistQueue: BookingWaitlistEntry[];
 }
 
 export interface InternalNotification {
