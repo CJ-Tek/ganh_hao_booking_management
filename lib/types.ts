@@ -100,6 +100,12 @@ export interface BookingRuntimeSettings {
   standardTurnaroundMinutes: number;
   noShowGraceMinutes: number;
   waitlistOfferTtlMinutes: number;
+  /** SL từ đây trở lên → nhãn Đoàn (khi ghi chú không nói rõ). */
+  groupPartyGuestThreshold: number;
+  /** Số booking completed tối thiểu → Khách quen. */
+  repeatCustomerMinCompleted: number;
+  /** Cửa sổ phút quanh giờ đến cho trạng thái Chờ đến. */
+  receptionArrivalGraceMinutes: number;
 }
 
 export interface TableBlockState {
@@ -127,5 +133,6 @@ export interface AppStateSnapshot {
   customers: Customer[];
   bookings: Booking[];
   notifications: InternalNotification[];
+  bookingRuntimeSettings: BookingRuntimeSettings;
   activeBranchId?: string;
 }

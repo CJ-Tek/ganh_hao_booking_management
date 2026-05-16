@@ -18,6 +18,7 @@ import {
   setBranchPickRequired,
   shouldPickBranchOnLogin,
 } from "@/lib/branch-pick";
+import { type BookingDuplicateInfo, DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import { initialState } from "@/lib/initial-state";
 import {
   assertEmployeeMaySetBookingStatus,
@@ -57,11 +58,13 @@ import {
   upsertTableInSupabase,
   upsertTablesBatchInSupabase,
   updateBookingGuestCountInSupabase,
+  updateBookingRuntimeSettingsInSupabase,
 } from "@/lib/supabase-store";
 import { supabase } from "@/lib/supabase";
 import {
   AppStateSnapshot,
   AppUser,
+  BookingRuntimeSettings,
   BookingStatus,
   DiningTable,
   Role,
@@ -79,9 +82,16 @@ type CreateBookingInput = {
   guestCount?: number;
   bookingAt: string;
   note?: string;
+  guestType?: string | null;
+  allowDuplicate?: boolean;
 };
 
-type ActionResult = { ok: boolean; message: string };
+type ActionResult = {
+  ok: boolean;
+  message: string;
+  code?: typeof DUPLICATE_BOOKING_CODE;
+  duplicates?: BookingDuplicateInfo[];
+};
 
 interface AppContextValue {
   state: AppStateSnapshot;
@@ -97,6 +107,7 @@ interface AppContextValue {
     branchId: string,
     input: { name: string; address: string }
   ) => Promise<ActionResult>;
+  updateBookingRuntimeSettings: (input: BookingRuntimeSettings) => Promise<ActionResult>;
   createBooking: (input: CreateBookingInput) => Promise<ActionResult>;
   assignBookingToTable: (input: {
     bookingId: string;
@@ -352,6 +363,30 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return { ok: true, message: "Đã cập nhật chi nhánh." };
     }
     const result = await updateBranchInSupabase(branchId, input);
+    return result;
+  };
+
+  const updateBookingRuntimeSettings = async (input: BookingRuntimeSettings) => {
+    if (
+      !currentUser ||
+      (currentUser.role !== "admin" && currentUser.role !== "general_manager")
+    ) {
+      return { ok: false, message: "Chỉ Admin và Quản lý tổng được chỉnh cấu hình này." };
+    }
+    if (!hasSupabase) {
+      setState((prev) => ({
+        ...prev,
+        bookingRuntimeSettings: input,
+      }));
+      return { ok: true, message: "Đã lưu cấu hình (chế độ ngoại tuyến)." };
+    }
+    const result = await updateBookingRuntimeSettingsInSupabase(input);
+    if (result.ok) {
+      setState((prev) => ({
+        ...prev,
+        bookingRuntimeSettings: input,
+      }));
+    }
     return result;
   };
 
@@ -1035,6 +1070,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     reload,
     setActiveBranchId,
     updateBranch,
+    updateBookingRuntimeSettings,
     createBooking,
     assignBookingToTable,
     updateBookingGuestCount,

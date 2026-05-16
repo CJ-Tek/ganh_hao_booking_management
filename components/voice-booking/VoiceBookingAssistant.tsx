@@ -16,12 +16,19 @@ import {
 import { DateTimePicker } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { useMemo, useRef, useState } from "react";
+import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
+import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import { matchAreaId, matchTableId, type AreaLite, type TableLite } from "@/lib/voice-booking/match";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
 import { warmUpMicrophoneForSpeech } from "@/lib/voice-booking/mic-warmup";
 import { tableStatusLabel } from "@/lib/display";
 
-type ActionResult = { ok: boolean; message: string };
+type ActionResult = {
+  ok: boolean;
+  message: string;
+  code?: typeof DUPLICATE_BOOKING_CODE;
+  duplicates?: import("@/lib/booking-duplicate").BookingDuplicateInfo[];
+};
 
 type VoiceBookingDraft = {
   customerName?: string;
@@ -105,6 +112,7 @@ export function VoiceBookingAssistant(props: {
     guestCount?: number;
     bookingAt: string;
     note?: string;
+    allowDuplicate?: boolean;
   }) => Promise<ActionResult>;
 }) {
   const { branch, areas, tables, onCreateBooking } = props;
@@ -319,23 +327,36 @@ export function VoiceBookingAssistant(props: {
       return;
     }
 
-    const result = await onCreateBooking({
-      customerName: formatVietnamesePersonName(customerName),
-      customerPhone: phoneNorm || undefined,
-      branchId: branch.id,
-      areaId: areaId ?? undefined,
-      tableId: tableId ?? undefined,
-      guestCount: typeof guestCount === "number" && Number.isFinite(guestCount) ? guestCount : undefined,
-      bookingAt: dayjs(bookingAt).toISOString(),
-      note: note.trim() ? note.trim() : undefined,
-    });
+    const runCreate = async (allowDuplicate?: boolean) => {
+      const result = await onCreateBooking({
+        customerName: formatVietnamesePersonName(customerName),
+        customerPhone: phoneNorm || undefined,
+        branchId: branch.id,
+        areaId: areaId ?? undefined,
+        tableId: tableId ?? undefined,
+        guestCount: typeof guestCount === "number" && Number.isFinite(guestCount) ? guestCount : undefined,
+        bookingAt: dayjs(bookingAt).toISOString(),
+        note: note.trim() ? note.trim() : undefined,
+        allowDuplicate,
+      });
 
-    if (result.ok) {
-      notifications.show({ color: "green", title: "Thành công", message: "Đã tạo booking." });
-      setOpened(false);
-    } else {
-      notifications.show({ color: "red", title: "Tạo booking thất bại", message: result.message });
-    }
+      if (!result.ok && result.code === DUPLICATE_BOOKING_CODE && result.duplicates?.length) {
+        notifications.show({ color: "orange", title: "Booking trùng", message: result.message });
+        confirmDuplicateBookingSecond(result.duplicates, () => {
+          void runCreate(true);
+        });
+        return;
+      }
+
+      if (result.ok) {
+        notifications.show({ color: "green", title: "Thành công", message: "Đã tạo booking." });
+        setOpened(false);
+      } else {
+        notifications.show({ color: "red", title: "Tạo booking thất bại", message: result.message });
+      }
+    };
+
+    await runCreate();
   };
 
   return (

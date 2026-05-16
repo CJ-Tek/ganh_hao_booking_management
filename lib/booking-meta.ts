@@ -1,9 +1,71 @@
 import dayjs from "dayjs";
 
-import { type Booking, type DiningTable } from "@/lib/types";
+import { DEFAULT_BOOKING_RUNTIME_SETTINGS } from "@/lib/booking-runtime-defaults";
+import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
+import {
+  type Booking,
+  type BookingRuntimeSettings,
+  type BookingStatus,
+  type DiningTable,
+} from "@/lib/types";
 
 const UNKNOWN_GUEST_TAG = "[[guest_count_unknown]]";
+const GUEST_TYPE_TAG_PATTERN = /\[\[guest_type:([^\]]+)\]\]/;
 const SYNTHETIC_PHONE_PREFIX = "__no_phone__:";
+
+/** Nhãn loại khách — dùng trong form tạo booking và lọc màn hôm nay. */
+export const BOOKING_GUEST_TYPE_OPTIONS = [
+  "Khách thường",
+  "Khách quen",
+  "Đoàn",
+  "Sinh nhật",
+  "Khách VIP",
+  "Đặt món trước",
+] as const;
+
+export type BookingGuestTypeLabel = (typeof BOOKING_GUEST_TYPE_OPTIONS)[number];
+
+export function extractGuestTypeFromNote(note?: string | null): string | null {
+  const match = String(note ?? "").match(GUEST_TYPE_TAG_PATTERN);
+  const label = match?.[1]?.trim();
+  return label && label.length > 0 ? label : null;
+}
+
+export function stripGuestTypeTag(note?: string | null): string | undefined {
+  if (!note) {
+    return undefined;
+  }
+  const cleaned = note
+    .replace(/\[\[guest_type:[^\]]+\]\]/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+/** Gắn loại khách vào ghi chú (metadata nội bộ, không hiện ở cột Ghi chú). */
+export function appendGuestTypeTag(
+  note: string | undefined | null,
+  guestType?: string | null
+): string | null {
+  const base = stripGuestTypeTag(note ?? undefined) ?? "";
+  const label = guestType?.trim();
+  if (!label || label === "Khách thường") {
+    return base.length > 0 ? base : null;
+  }
+  const tag = `[[guest_type:${label}]]`;
+  return base ? `${base}\n${tag}` : tag;
+}
+
+export function buildBookingNoteForStorage(input: {
+  note?: string;
+  guestCountSpecified: boolean;
+  guestType?: string | null;
+}): string | null {
+  const withGuestCount = input.guestCountSpecified
+    ? stripUnknownGuestTag(input.note) ?? null
+    : appendUnknownGuestTag(input.note);
+  return appendGuestTypeTag(withGuestCount, input.guestType);
+}
 
 export function appendUnknownGuestTag(note?: string): string {
   const clean = stripUnknownGuestTag(note);
@@ -16,6 +78,7 @@ export function stripUnknownGuestTag(note?: string | null): string | undefined {
   }
   const cleaned = note
     .replaceAll(UNKNOWN_GUEST_TAG, "")
+    .replace(/\[\[guest_type:[^\]]+\]\]/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
   return cleaned.length > 0 ? cleaned : undefined;
@@ -43,6 +106,131 @@ export function displayCustomerPhone(phone?: string | null): string {
     return "-";
   }
   return phone;
+}
+
+export type ReceptionThresholdSettings = Pick<
+  BookingRuntimeSettings,
+  "groupPartyGuestThreshold" | "repeatCustomerMinCompleted" | "receptionArrivalGraceMinutes"
+>;
+
+function resolveReceptionThresholds(
+  thresholds?: Partial<ReceptionThresholdSettings>
+): ReceptionThresholdSettings {
+  return {
+    groupPartyGuestThreshold:
+      thresholds?.groupPartyGuestThreshold ??
+      DEFAULT_BOOKING_RUNTIME_SETTINGS.groupPartyGuestThreshold,
+    repeatCustomerMinCompleted:
+      thresholds?.repeatCustomerMinCompleted ??
+      DEFAULT_BOOKING_RUNTIME_SETTINGS.repeatCustomerMinCompleted,
+    receptionArrivalGraceMinutes:
+      thresholds?.receptionArrivalGraceMinutes ??
+      DEFAULT_BOOKING_RUNTIME_SETTINGS.receptionArrivalGraceMinutes,
+  };
+}
+
+function bookingNoteNormalized(booking: Pick<Booking, "note">): string {
+  return (stripUnknownGuestTag(booking.note) ?? "").toLowerCase();
+}
+
+export type InferGuestTypeOptions = {
+  /** Số booking `completed` của khách (cùng phạm vi chi nhánh đang xem). */
+  completedBookingCountForCustomer?: number;
+  thresholds?: Partial<ReceptionThresholdSettings>;
+};
+
+/** Loại khách cho màn lễ tân — suy từ ghi chú, số khách, lịch sử. */
+export function inferGuestTypeLabel(
+  booking: Pick<Booking, "guestCount" | "note">,
+  options?: InferGuestTypeOptions
+): string {
+  const explicit = extractGuestTypeFromNote(booking.note);
+  if (explicit) {
+    return explicit;
+  }
+
+  const thresholds = resolveReceptionThresholds(options?.thresholds);
+  const note = bookingNoteNormalized(booking);
+
+  if (/sinh\s*nhật|\bsn\b/.test(note)) {
+    return "Sinh nhật";
+  }
+  if (/đặt\s*món|order\s*trước|đặt\s*trước/.test(note)) {
+    return "Đặt món trước";
+  }
+  if (/đoàn|tour\b|đám\s*đông/.test(note)) {
+    return "Đoàn";
+  }
+  if (/\bvip\b/.test(note)) {
+    return "Khách VIP";
+  }
+  if (
+    isGuestCountSpecified(booking) &&
+    booking.guestCount >= thresholds.groupPartyGuestThreshold
+  ) {
+    return "Đoàn";
+  }
+
+  const completedCount = options?.completedBookingCountForCustomer ?? 0;
+  if (completedCount >= thresholds.repeatCustomerMinCompleted) {
+    return "Khách quen";
+  }
+
+  return "Khách thường";
+}
+
+export type ReceptionBookingStatus = {
+  label: string;
+  color: string;
+};
+
+/** Trạng thái hiển thị cho lễ tân (khác nhãn kỹ thuật nội bộ). */
+export function getReceptionBookingStatus(
+  booking: Booking,
+  thresholdsInput?: Partial<ReceptionThresholdSettings>
+): ReceptionBookingStatus {
+  const thresholds = resolveReceptionThresholds(thresholdsInput);
+  const note = bookingNoteNormalized(booking);
+  const hasDepositNote = /đã\s*cọc|đặt\s*cọc|\bcọc\b|chuyển\s*khoản|thanh\s*toán\s*trước/.test(
+    note
+  );
+
+  if (booking.status === "seated" || booking.status === "checked_in") {
+    return { label: "Đã vào bàn", color: "green" };
+  }
+
+  if (booking.status === "confirmed") {
+    if (hasDepositNote) {
+      return { label: "Đã cọc", color: "yellow" };
+    }
+    const bookingAt = dayjs(booking.bookingAt);
+    const minutesUntil = bookingAt.diff(dayjs(), "minute");
+    if (
+      !booking.checkedInAt &&
+      minutesUntil > -thresholds.receptionArrivalGraceMinutes
+    ) {
+      return { label: "Chờ đến", color: "blue" };
+    }
+    return { label: "Đã xác nhận", color: bookingStatusColor.confirmed };
+  }
+
+  const status = booking.status as BookingStatus;
+  return {
+    label: bookingStatusLabel[status],
+    color: bookingStatusColor[status],
+  };
+}
+
+/** Nhãn khu/bàn trên màn hôm nay — rút gọn khi chưa gán. */
+export function formatTodayBookingAreaTable(
+  booking: Pick<Booking, "areaId" | "tableId">,
+  areaName?: string,
+  tableName?: string
+): string {
+  if (!booking.areaId || !booking.tableId) {
+    return "Chờ xếp";
+  }
+  return `${areaName ?? "—"} · ${tableName ?? "—"}`;
 }
 
 function slotStartMs(booking: Pick<Booking, "startTime" | "bookingAt">): number {

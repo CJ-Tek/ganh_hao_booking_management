@@ -63,3 +63,22 @@ body {
     background: #f5f8fb;
   }
 }
+
+@keyframes booking-list-row-pulse {
+  0%,
+  100% {
+    background-color: transparent;
+    border-color: var(--mantine-color-default-border, #dee2e6);
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+
+  50% {
+    background-color: var(--mantine-color-blue-light);
+    border-color: var(--mantine-color-blue-6);
+    box-shadow: inset 0 0 0 2px var(--mantine-color-blue-6);
+  }
+}
+
+.booking-list-row-pulse {
+  animation: booking-list-row-pulse 1.15s ease-in-out 3 forwards;
+}

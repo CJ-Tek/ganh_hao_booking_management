@@ -170,22 +170,31 @@ export type Database = {
       }
       booking_runtime_settings: {
         Row: {
+          group_party_guest_threshold: number
           id: boolean
           no_show_grace_minutes: number
+          reception_arrival_grace_minutes: number
+          repeat_customer_min_completed: number
           standard_turnaround_minutes: number
           updated_at: string
           waitlist_offer_ttl_minutes: number
         }
         Insert: {
+          group_party_guest_threshold?: number
           id?: boolean
           no_show_grace_minutes?: number
+          reception_arrival_grace_minutes?: number
+          repeat_customer_min_completed?: number
           standard_turnaround_minutes?: number
           updated_at?: string
           waitlist_offer_ttl_minutes?: number
         }
         Update: {
+          group_party_guest_threshold?: number
           id?: boolean
           no_show_grace_minutes?: number
+          reception_arrival_grace_minutes?: number
+          repeat_customer_min_completed?: number
           standard_turnaround_minutes?: number
           updated_at?: string
           waitlist_offer_ttl_minutes?: number
@@ -591,6 +600,24 @@ export type Database = {
       confirm_waitlist_offer: {
         Args: { p_waitlist_entry_id: string }
         Returns: Json
+      }
+      find_booking_duplicates_by_phone_slot: {
+        Args: {
+          p_booking_at: string
+          p_branch_id: string
+          p_phone: string
+        }
+        Returns: {
+          booking_at: string
+          booking_id: string
+          guest_count: number
+          receiver_full_name: string
+          receiver_user_id: string
+        }[]
+      }
+      normalize_vietnam_phone: {
+        Args: { raw: string }
+        Returns: string
       }
       create_or_queue_booking: {
         Args: {

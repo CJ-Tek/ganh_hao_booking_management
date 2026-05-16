@@ -1,7 +1,20 @@
 import dayjs from "dayjs";
+import { DEFAULT_BOOKING_RUNTIME_SETTINGS } from "./booking-runtime-defaults";
 import { initialState } from "./initial-state";
 import { supabase } from "./supabase";
-import { appendUnknownGuestTag, pickPrimaryBookingOnTable, stripUnknownGuestTag } from "./booking-meta";
+import {
+  type BookingDuplicateInfo,
+  DUPLICATE_BOOKING_CODE,
+  formatBookingDuplicateAlertMessage,
+  isPlausibleVietnamPhone,
+  normalizeVietnamPhone,
+} from "./booking-duplicate";
+import {
+  appendUnknownGuestTag,
+  buildBookingNoteForStorage,
+  pickPrimaryBookingOnTable,
+  stripUnknownGuestTag,
+} from "./booking-meta";
 import {
   FLOOR_DEFAULT_NODE_SPACING_PX,
 } from "./floor-map-layout";
@@ -16,7 +29,14 @@ import {
   TableStatus,
 } from "./types";
 
-type Result = { ok: boolean; message: string };
+export type ActionResult = {
+  ok: boolean;
+  message: string;
+  code?: typeof DUPLICATE_BOOKING_CODE;
+  duplicates?: BookingDuplicateInfo[];
+};
+
+type Result = ActionResult;
 
 type CreateBookingInput = {
   customerName: string;
@@ -27,7 +47,10 @@ type CreateBookingInput = {
   guestCount?: number;
   bookingAt: string;
   note?: string;
+  guestType?: string | null;
   createdByUserId: string;
+  /** Skip phone+slot duplicate guard (e.g. khách đặt bàn thứ 2). */
+  allowDuplicate?: boolean;
 };
 
 type BookingCreateOrQueueResult =
@@ -45,12 +68,6 @@ type BookingCreateOrQueueResult =
       start_time: string;
       end_time: string;
     };
-
-const DEFAULT_BOOKING_RUNTIME_SETTINGS: BookingRuntimeSettings = {
-  standardTurnaroundMinutes: 90,
-  noShowGraceMinutes: 15,
-  waitlistOfferTtlMinutes: 5,
-};
 
 const ACTIVE_TABLE_SLOT_STATUSES: BookingStatus[] = ["confirmed", "seated", "checked_in"];
 const BOOKING_MAINTENANCE_INTERVAL_MS = 60_000;
@@ -96,19 +113,7 @@ function ensureClient() {
   return supabase;
 }
 
-async function getBookingRuntimeSettings(
-  client: ReturnType<typeof ensureClient>
-): Promise<BookingRuntimeSettings> {
-  const { data, error } = await (client as any)
-    .from("booking_runtime_settings")
-    .select("standard_turnaround_minutes, no_show_grace_minutes, waitlist_offer_ttl_minutes")
-    .eq("id", true)
-    .maybeSingle();
-
-  if (error || !data) {
-    return DEFAULT_BOOKING_RUNTIME_SETTINGS;
-  }
-
+function mapBookingRuntimeSettingsRow(data: Record<string, unknown>): BookingRuntimeSettings {
   return {
     standardTurnaroundMinutes:
       typeof data.standard_turnaround_minutes === "number"
@@ -122,7 +127,59 @@ async function getBookingRuntimeSettings(
       typeof data.waitlist_offer_ttl_minutes === "number"
         ? data.waitlist_offer_ttl_minutes
         : DEFAULT_BOOKING_RUNTIME_SETTINGS.waitlistOfferTtlMinutes,
+    groupPartyGuestThreshold:
+      typeof data.group_party_guest_threshold === "number"
+        ? data.group_party_guest_threshold
+        : DEFAULT_BOOKING_RUNTIME_SETTINGS.groupPartyGuestThreshold,
+    repeatCustomerMinCompleted:
+      typeof data.repeat_customer_min_completed === "number"
+        ? data.repeat_customer_min_completed
+        : DEFAULT_BOOKING_RUNTIME_SETTINGS.repeatCustomerMinCompleted,
+    receptionArrivalGraceMinutes:
+      typeof data.reception_arrival_grace_minutes === "number"
+        ? data.reception_arrival_grace_minutes
+        : DEFAULT_BOOKING_RUNTIME_SETTINGS.receptionArrivalGraceMinutes,
   };
+}
+
+async function getBookingRuntimeSettings(
+  client: ReturnType<typeof ensureClient>
+): Promise<BookingRuntimeSettings> {
+  const { data, error } = await (client as any)
+    .from("booking_runtime_settings")
+    .select(
+      "standard_turnaround_minutes, no_show_grace_minutes, waitlist_offer_ttl_minutes, group_party_guest_threshold, repeat_customer_min_completed, reception_arrival_grace_minutes"
+    )
+    .eq("id", true)
+    .maybeSingle();
+
+  if (error || !data) {
+    return DEFAULT_BOOKING_RUNTIME_SETTINGS;
+  }
+
+  return mapBookingRuntimeSettingsRow(data as Record<string, unknown>);
+}
+
+export async function updateBookingRuntimeSettingsInSupabase(
+  input: BookingRuntimeSettings
+): Promise<Result> {
+  const client = ensureClient();
+  const { error } = await (client as any)
+    .from("booking_runtime_settings")
+    .update({
+      standard_turnaround_minutes: input.standardTurnaroundMinutes,
+      no_show_grace_minutes: input.noShowGraceMinutes,
+      waitlist_offer_ttl_minutes: input.waitlistOfferTtlMinutes,
+      group_party_guest_threshold: input.groupPartyGuestThreshold,
+      repeat_customer_min_completed: input.repeatCustomerMinCompleted,
+      reception_arrival_grace_minutes: input.receptionArrivalGraceMinutes,
+      updated_at: dayjs().toISOString(),
+    })
+    .eq("id", true);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  return { ok: true, message: "Đã lưu cấu hình vận hành booking." };
 }
 
 async function upsertCustomerForBooking(
@@ -164,6 +221,57 @@ async function upsertCustomerForBooking(
   }
 
   return { customerId };
+}
+
+async function findBookingDuplicatesByPhoneSlotInSupabase(
+  client: ReturnType<typeof ensureClient>,
+  input: { branchId: string; customerPhone?: string; bookingAt: string }
+): Promise<BookingDuplicateInfo[]> {
+  const phoneRaw = input.customerPhone?.trim() ?? "";
+  if (!phoneRaw) {
+    return [];
+  }
+  const phoneNorm = normalizeVietnamPhone(phoneRaw);
+  if (!isPlausibleVietnamPhone(phoneNorm)) {
+    return [];
+  }
+
+  const { data, error } = await (client as any).rpc("find_booking_duplicates_by_phone_slot", {
+    p_branch_id: input.branchId,
+    p_phone: phoneNorm,
+    p_booking_at: dayjs(input.bookingAt).toISOString(),
+  });
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return ((data ?? []) as Array<{
+    booking_id: string;
+    booking_at: string;
+    guest_count: number;
+    receiver_full_name: string;
+    receiver_user_id: string;
+  }>).map((row) => ({
+    bookingId: row.booking_id,
+    bookingAt: row.booking_at,
+    guestCount: row.guest_count,
+    receiverFullName: row.receiver_full_name,
+    receiverUserId: row.receiver_user_id,
+  }));
+}
+
+function duplicateBookingResult(
+  duplicates: BookingDuplicateInfo[],
+  bookingAt: string
+): Result {
+  return {
+    ok: false,
+    code: DUPLICATE_BOOKING_CODE,
+    duplicates,
+    message:
+      formatBookingDuplicateAlertMessage(duplicates, bookingAt) ??
+      "Số điện thoại này đã có booking trùng khung giờ.",
+  };
 }
 
 async function refreshTableAvailabilityForBooking(
@@ -244,6 +352,7 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
     customersResult,
     bookingsResult,
     notificationsResult,
+    bookingRuntimeSettings,
   ] = await Promise.all([
     client.from("app_users").select("*"),
     client.from("branches").select("*"),
@@ -255,6 +364,7 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
       .from("internal_notifications")
       .select("*")
       .order("created_at", { ascending: false }),
+    getBookingRuntimeSettings(client),
   ]);
 
   const errors = [
@@ -373,6 +483,7 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
         isRead: item.is_read,
         branchId: item.branch_id ?? undefined,
       })) ?? [],
+    bookingRuntimeSettings,
     activeBranchId:
       branchesResult.data?.[0]?.id ?? initialState.activeBranchId ?? undefined,
   };
@@ -420,9 +531,11 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
       : 1;
   const guestCountSpecified =
     typeof input.guestCount === "number" && Number.isFinite(input.guestCount);
-  const bookingNote = guestCountSpecified
-    ? stripUnknownGuestTag(input.note) ?? null
-    : appendUnknownGuestTag(input.note);
+  const bookingNote = buildBookingNoteForStorage({
+    note: input.note,
+    guestCountSpecified,
+    guestType: input.guestType,
+  });
   const hasAssignedTable = Boolean(input.areaId && input.tableId);
 
   const customerResult = await upsertCustomerForBooking(client, {
@@ -433,6 +546,17 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     return { ok: false, message: customerResult.error };
   }
   const customerId = customerResult.customerId;
+
+  if (!input.allowDuplicate && input.customerPhone?.trim()) {
+    const duplicates = await findBookingDuplicatesByPhoneSlotInSupabase(client, {
+      branchId: input.branchId,
+      customerPhone: input.customerPhone,
+      bookingAt: normalizedAt,
+    });
+    if (duplicates.length > 0) {
+      return duplicateBookingResult(duplicates, normalizedAt);
+    }
+  }
 
   if (hasAssignedTable) {
     const { data: tableInfo, error: tableInfoError } = await client

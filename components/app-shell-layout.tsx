@@ -32,6 +32,7 @@ import {
   MapPin,
   MoreHorizontal,
   Settings,
+  SlidersHorizontal,
   SquareMenu,
   Users,
   UserCog,
@@ -65,6 +66,12 @@ const navItems: NavItem[] = [
   { label: "Quản lý bàn", href: "/tables", icon: <SquareMenu size={20} /> },
   { label: "Khách hàng", href: "/customers", icon: <Users size={20} /> },
   { label: "Khu vực & bàn", href: "/settings/areas-tables", icon: <Settings size={20} /> },
+  {
+    label: "Cấu hình Booking hôm nay",
+    href: "/settings/booking-rules",
+    icon: <SlidersHorizontal size={20} />,
+    adminOnly: true,
+  },
   {
     label: "Thông tin chi nhánh",
     href: "/settings/branches",

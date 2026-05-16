@@ -1,3 +1,4 @@
+import { DEFAULT_BOOKING_RUNTIME_SETTINGS } from "@/lib/booking-runtime-defaults";
 import type { AppStateSnapshot } from "./types";
 
 /**
@@ -12,6 +13,7 @@ export const initialState: AppStateSnapshot = {
   customers: [],
   bookings: [],
   notifications: [],
+  bookingRuntimeSettings: DEFAULT_BOOKING_RUNTIME_SETTINGS,
   activeBranchId: undefined,
 };
 

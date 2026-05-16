@@ -44,6 +44,8 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
+import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import {
   useCallback,
   useEffect,
@@ -70,8 +72,10 @@ import {
 import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
 import { bookingStatusColor, bookingStatusLabel, tableStatusColor, tableStatusLabel } from "@/lib/display";
 import {
+  BOOKING_GUEST_TYPE_OPTIONS,
   displayCustomerPhone,
   getAssignableCandidateTables,
+  inferGuestTypeLabel,
   pickPrimaryBookingOnTable,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
@@ -332,6 +336,7 @@ export default function FloorMapPage() {
     dayjs().format("HH:mm")
   );
   const [registerNote, setRegisterNote] = useState("");
+  const [registerGuestType, setRegisterGuestType] = useState<string | null>("Khách thường");
   const [registerPendingBookingId, setRegisterPendingBookingId] = useState<string | null>(null);
   const [registerModalTab, setRegisterModalTab] = useState<"book" | "assign">("book");
   const [registerSaving, setRegisterSaving] = useState(false);
@@ -1113,6 +1118,7 @@ export default function FloorMapPage() {
     setRegisterBookingDate(dayjs().format("YYYY-MM-DD"));
     setRegisterBookingTime(dayjs().format("HH:mm"));
     setRegisterNote("");
+    setRegisterGuestType("Khách thường");
     setRegisterPendingBookingId(null);
     setRegisterArrivalMode("immediate");
     setRegisterModalTab("book");
@@ -1127,6 +1133,7 @@ export default function FloorMapPage() {
     setRegisterBookingDate(dayjs().format("YYYY-MM-DD"));
     setRegisterBookingTime(dayjs().format("HH:mm"));
     setRegisterNote("");
+    setRegisterGuestType("Khách thường");
     setRegisterCustomerName("");
     setRegisterCustomerPhone("");
     setRegisterPendingBookingId(null);
@@ -1211,8 +1218,7 @@ export default function FloorMapPage() {
 
       bookingAtIso = bookingAt.toISOString();
     }
-    setRegisterSaving(true);
-    try {
+    const runCreate = async (allowDuplicate?: boolean) => {
       const result = await createBooking({
         customerName: registerCustomerName.trim(),
         customerPhone: registerCustomerPhone.trim(),
@@ -1222,7 +1228,16 @@ export default function FloorMapPage() {
         guestCount: nextGuestCount,
         bookingAt: bookingAtIso,
         note: registerNote.trim() || undefined,
+        guestType: registerGuestType,
+        allowDuplicate,
       });
+      if (!result.ok && result.code === DUPLICATE_BOOKING_CODE && result.duplicates?.length) {
+        notifications.show({ color: "orange", message: result.message });
+        confirmDuplicateBookingSecond(result.duplicates, () => {
+          void runCreate(true);
+        });
+        return;
+      }
       notifications.show({
         color: result.ok ? "green" : "red",
         message: result.message,
@@ -1230,6 +1245,11 @@ export default function FloorMapPage() {
       if (result.ok) {
         closeRegistrationPanel();
       }
+    };
+
+    setRegisterSaving(true);
+    try {
+      await runCreate();
     } catch (error) {
       notifications.show({
         color: "red",
@@ -2631,6 +2651,14 @@ export default function FloorMapPage() {
                     min={1}
                     max={registerTable.seats || undefined}
                   />
+                  <Select
+                    label="Loại khách"
+                    placeholder="Chọn loại khách"
+                    data={BOOKING_GUEST_TYPE_OPTIONS.map((label) => ({ value: label, label }))}
+                    value={registerGuestType}
+                    onChange={setRegisterGuestType}
+                    allowDeselect={false}
+                  />
                   <Textarea
                     label="Ghi chú"
                     placeholder="Tùy chọn"
@@ -2756,6 +2784,9 @@ export default function FloorMapPage() {
                     {dayjs(activeBookingForDetailTable.endTime).format("HH:mm DD/MM/YYYY")}
                   </Text>
                   <Text size="sm">Số khách: {activeBookingForDetailTable.guestCount}</Text>
+                  <Text size="sm">
+                    Loại khách: {inferGuestTypeLabel(activeBookingForDetailTable)}
+                  </Text>
                 </Group>
                 {activeBookingForDetailTable.checkedInAt ? (
                   <Text size="sm" c="dimmed">

@@ -2,6 +2,7 @@
 
 import dayjs from "dayjs";
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -20,19 +21,32 @@ import { DateTimePicker } from "@mantine/dates";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { DataTable, type DataTableSortStatus } from "mantine-datatable";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   PortalPageTitle,
   PortalSectionCard,
   PortalStickyAction,
 } from "@/components/portal-page";
+import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
 import { useAppContext } from "@/contexts/app-context";
+import {
+  bookingSlotKey,
+  DUPLICATE_BOOKING_CODE,
+  formatBookingDuplicateAlertMessage,
+  isPlausibleVietnamPhone,
+  normalizeVietnamPhone,
+  type BookingDuplicateInfo,
+} from "@/lib/booking-duplicate";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import {
+  BOOKING_GUEST_TYPE_OPTIONS,
   displayCustomerPhone,
+  formatTodayBookingAreaTable,
   getAssignableCandidateTables,
+  getReceptionBookingStatus,
+  inferGuestTypeLabel,
   isGuestCountSpecified,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
@@ -46,27 +60,15 @@ function branchScopeKey(branchIds: string[]) {
 }
 
 /** After `modals.close`, the Mantine overlay can still cover the viewport during exit (notably on mobile). */
+const LIST_BOOKING_PULSE_CYCLE_MS = 600;
+const LIST_BOOKING_PULSE_CYCLES = 2;
+const LIST_BOOKING_PULSE_TOTAL_MS = LIST_BOOKING_PULSE_CYCLE_MS * LIST_BOOKING_PULSE_CYCLES;
+
 const MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS = 220;
 
 /** Page `<Modal>` stacks above Mantine `modals`; Select dropdowns portal with a lower default z-index. */
 const MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX = 600;
 const MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX = 700;
-
-/** Chuẩn hóa số điện thoại VN (+84 → 0…). */
-function normalizeVietnamPhone(raw: string): string {
-  const s = raw.replace(/[\s.-]/g, "");
-  if (s.startsWith("+84")) {
-    return `0${s.slice(3)}`;
-  }
-  if (s.startsWith("84") && s.length >= 10) {
-    return `0${s.slice(2)}`;
-  }
-  return s;
-}
-
-function isPlausibleVietnamPhone(normalized: string): boolean {
-  return /^0[1-9]\d{8,9}$/.test(normalized);
-}
 
 function BookingCheckInButton(props: {
   size: "compact-xs" | "sm";
@@ -291,6 +293,15 @@ function BookingsPageContent() {
   const branchName =
     branchId ? state.branches.find((b) => b.id === branchId)?.name ?? "—" : "—";
 
+  const receptionThresholds = useMemo(
+    () => ({
+      groupPartyGuestThreshold: state.bookingRuntimeSettings.groupPartyGuestThreshold,
+      repeatCustomerMinCompleted: state.bookingRuntimeSettings.repeatCustomerMinCompleted,
+      receptionArrivalGraceMinutes: state.bookingRuntimeSettings.receptionArrivalGraceMinutes,
+    }),
+    [state.bookingRuntimeSettings]
+  );
+
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [guestCount, setGuestCount] = useState<number | undefined>(undefined);
@@ -298,6 +309,9 @@ function BookingsPageContent() {
     dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm")
   );
   const [note, setNote] = useState("");
+  const [guestType, setGuestType] = useState<string | null>("Khách thường");
+  const [activeTab, setActiveTab] = useState<string | null>("today");
+  const [listFocusBookingId, setListFocusBookingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [listStatusFilter, setListStatusFilter] = useState<BookingStatus | null>(null);
   const [listTableAssignFilter, setListTableAssignFilter] = useState<
@@ -320,7 +334,91 @@ function BookingsPageContent() {
   const MOBILE_BOOKINGS_PAGE_SIZE_OPTIONS = [4, 6, 8, 12, 16] as const;
   const [mobileBookingsPageSize, setMobileBookingsPageSize] = useState<number>(8);
 
+  const [todaySearchQuery, setTodaySearchQuery] = useState("");
+  const [todayStatusFilter, setTodayStatusFilter] = useState<BookingStatus | null>(null);
+  const [todayReceptionStatusFilter, setTodayReceptionStatusFilter] = useState<string | null>(null);
+  const [todayGuestTypeFilter, setTodayGuestTypeFilter] = useState<string | null>(null);
+  const [todayTableAssignFilter, setTodayTableAssignFilter] = useState<
+    "all" | "assigned" | "unassigned"
+  >("all");
+  const [todaySortStatus, setTodaySortStatus] = useState<DataTableSortStatus<Booking>>({
+    columnAccessor: "bookingAt",
+    direction: "asc",
+  });
+  const [todayPage, setTodayPage] = useState(1);
+  const TODAY_DESKTOP_PAGE_SIZE_OPTIONS = [8, 12, 16, 24, 32] as const;
+  const [todayDesktopPageSize, setTodayDesktopPageSize] = useState(12);
+
   const listPageSize = isCompact ? mobileBookingsPageSize : desktopBookingsPageSize;
+  const selectedBookingSlot = useMemo(() => (bookingAt ? bookingSlotKey(bookingAt) : null), [bookingAt]);
+  const normalizedCustomerPhone = useMemo(
+    () => normalizeVietnamPhone(customerPhone.trim()),
+    [customerPhone]
+  );
+
+  const duplicateCandidates = useMemo(() => {
+    if (!branchId || !selectedBookingSlot || !normalizedCustomerPhone) {
+      return [];
+    }
+    if (!isPlausibleVietnamPhone(normalizedCustomerPhone)) {
+      return [];
+    }
+    return state.bookings
+      .filter((booking) => booking.branchId === branchId)
+      .filter((booking) => !["cancelled", "completed", "no_show"].includes(booking.status))
+      .map((booking) => {
+        const customer = state.customers.find((item) => item.id === booking.customerId);
+        if (!customer?.phone) {
+          return null;
+        }
+        const bookingPhone = normalizeVietnamPhone(customer.phone);
+        if (bookingPhone !== normalizedCustomerPhone) {
+          return null;
+        }
+        const slot = bookingSlotKey(booking.bookingAt);
+        if (!slot) {
+          return null;
+        }
+        if (slot.dayKey !== selectedBookingSlot.dayKey || slot.timeKey !== selectedBookingSlot.timeKey) {
+          return null;
+        }
+        const receiverName =
+          state.users.find((user) => user.id === booking.createdByUserId)?.fullName ?? "Không rõ";
+        return {
+          booking,
+          receiverName,
+        };
+      })
+      .filter((item): item is { booking: Booking; receiverName: string } => item !== null)
+      .sort(
+        (a, b) =>
+          dayjs(a.booking.bookingAt).valueOf() - dayjs(b.booking.bookingAt).valueOf() ||
+          a.booking.id.localeCompare(b.booking.id)
+      );
+  }, [
+    branchId,
+    normalizedCustomerPhone,
+    selectedBookingSlot,
+    state.bookings,
+    state.customers,
+    state.users,
+  ]);
+
+  const duplicateInfosForAlert = useMemo<BookingDuplicateInfo[]>(
+    () =>
+      duplicateCandidates.map((item) => ({
+        bookingId: item.booking.id,
+        bookingAt: item.booking.bookingAt,
+        guestCount: item.booking.guestCount,
+        receiverFullName: item.receiverName,
+      })),
+    [duplicateCandidates]
+  );
+
+  const duplicateWarningMessage = useMemo(
+    () => formatBookingDuplicateAlertMessage(duplicateInfosForAlert, bookingAt ?? undefined),
+    [bookingAt, duplicateInfosForAlert]
+  );
 
   const openCancelBookingConfirm = (booking: Booking) => {
     const customer = state.customers.find((c) => c.id === booking.customerId);
@@ -665,6 +763,206 @@ function BookingsPageContent() {
     state.users,
   ]);
 
+  const completedBookingsByCustomer = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const booking of branchBookings) {
+      if (booking.status !== "completed") {
+        continue;
+      }
+      counts.set(booking.customerId, (counts.get(booking.customerId) ?? 0) + 1);
+    }
+    return counts;
+  }, [branchBookings]);
+
+  const todayBookings = useMemo(() => {
+    const todayStart = dayjs().startOf("day");
+    const todayEnd = todayStart.endOf("day");
+    return branchBookings
+      .filter((booking) => {
+        if (booking.status === "cancelled" || booking.status === "completed") {
+          return false;
+        }
+        const bookingTime = dayjs(booking.bookingAt);
+        return (
+          bookingTime.isSame(todayStart, "day") &&
+          bookingTime.isAfter(todayStart.subtract(1, "millisecond")) &&
+          bookingTime.isBefore(todayEnd.add(1, "millisecond"))
+        );
+      })
+  }, [branchBookings]);
+
+  const getTodayGuestTypeLabel = useCallback(
+    (booking: Booking) =>
+      inferGuestTypeLabel(booking, {
+        completedBookingCountForCustomer:
+          completedBookingsByCustomer.get(booking.customerId) ?? 0,
+        thresholds: receptionThresholds,
+      }),
+    [completedBookingsByCustomer, receptionThresholds]
+  );
+
+  const getTodayReceptionStatusLabel = useCallback(
+    (booking: Booking) => getReceptionBookingStatus(booking, receptionThresholds).label,
+    [receptionThresholds]
+  );
+
+  const todayReceptionStatusFilterOptions = useMemo(() => {
+    const labels = new Set(
+      todayBookings.map((booking) => getTodayReceptionStatusLabel(booking))
+    );
+    return [...labels]
+      .sort((a, b) => a.localeCompare(b, "vi"))
+      .map((label) => ({ value: label, label }));
+  }, [getTodayReceptionStatusLabel, todayBookings]);
+
+  const todayGuestTypeFilterOptions = useMemo(() => {
+    const labels = new Set(todayBookings.map((booking) => getTodayGuestTypeLabel(booking)));
+    return [...labels]
+      .sort((a, b) => a.localeCompare(b, "vi"))
+      .map((label) => ({ value: label, label }));
+  }, [getTodayGuestTypeLabel, todayBookings]);
+
+  const todayPipelineFilteredBookings = useMemo(() => {
+    return todayBookings.filter((booking) => {
+      if (todayStatusFilter && booking.status !== todayStatusFilter) {
+        return false;
+      }
+      const hasTable = Boolean(booking.areaId && booking.tableId);
+      if (todayTableAssignFilter === "assigned" && !hasTable) {
+        return false;
+      }
+      if (todayTableAssignFilter === "unassigned" && hasTable) {
+        return false;
+      }
+      if (
+        todayReceptionStatusFilter &&
+        getTodayReceptionStatusLabel(booking) !== todayReceptionStatusFilter
+      ) {
+        return false;
+      }
+      if (todayGuestTypeFilter && getTodayGuestTypeLabel(booking) !== todayGuestTypeFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [
+    getTodayGuestTypeLabel,
+    getTodayReceptionStatusLabel,
+    todayBookings,
+    todayGuestTypeFilter,
+    todayReceptionStatusFilter,
+    todayStatusFilter,
+    todayTableAssignFilter,
+  ]);
+
+  const todaySearchPlaceholder =
+    "Tìm theo khách, SĐT, giờ, loại khách, khu, bàn, trạng thái, người nhận, ghi chú...";
+
+  const todaySearchedBookings = useMemo(() => {
+    const q = todaySearchQuery.trim().toLowerCase();
+    if (!q) {
+      return todayPipelineFilteredBookings;
+    }
+    return todayPipelineFilteredBookings.filter((booking) => {
+      const customer = state.customers.find((item) => item.id === booking.customerId);
+      const area = state.areas.find((item) => item.id === booking.areaId);
+      const table = state.tables.find((item) => item.id === booking.tableId);
+      const noteText = stripUnknownGuestTag(booking.note) ?? "";
+      const haystack = [
+        customer?.fullName ?? "",
+        displayCustomerPhone(customer?.phone),
+        dayjs(booking.bookingAt).format("HH:mm"),
+        dayjs(booking.bookingAt).format("DD/MM/YYYY HH:mm"),
+        String(booking.guestCount),
+        area?.name ?? "",
+        table?.name ?? "",
+        formatTodayBookingAreaTable(booking, area?.name, table?.name),
+        getTodayGuestTypeLabel(booking),
+        getTodayReceptionStatusLabel(booking),
+        bookingStatusLabel[booking.status],
+        state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "",
+        noteText,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [
+    getTodayGuestTypeLabel,
+    getTodayReceptionStatusLabel,
+    state.areas,
+    state.customers,
+    state.tables,
+    state.users,
+    todayPipelineFilteredBookings,
+    todaySearchQuery,
+  ]);
+
+  const todaySortedBookings = useMemo(() => {
+    const getValue = (booking: Booking) => {
+      const acc = todaySortStatus.columnAccessor as string;
+      if (acc === "customerId") {
+        return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
+      }
+      if (acc === "guestCount") {
+        return booking.guestCount;
+      }
+      if (acc === "guestType") {
+        return getTodayGuestTypeLabel(booking);
+      }
+      if (acc === "areaTable") {
+        const areaName = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
+        const tableName = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
+        return formatTodayBookingAreaTable(booking, areaName, tableName);
+      }
+      if (acc === "note") {
+        return stripUnknownGuestTag(booking.note) ?? "";
+      }
+      if (acc === "createdByUserId") {
+        return state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
+      }
+      if (acc === "status") {
+        return getTodayReceptionStatusLabel(booking);
+      }
+      return dayjs(booking.bookingAt).valueOf();
+    };
+    return [...todaySearchedBookings].sort((a, b) => {
+      const left = getValue(a);
+      const right = getValue(b);
+      const compare =
+        typeof left === "number" && typeof right === "number"
+          ? left - right
+          : String(left).localeCompare(String(right), "vi");
+      return todaySortStatus.direction === "asc" ? compare : -compare;
+    });
+  }, [
+    getTodayGuestTypeLabel,
+    getTodayReceptionStatusLabel,
+    state.areas,
+    state.customers,
+    state.tables,
+    state.users,
+    todaySearchedBookings,
+    todaySortStatus,
+  ]);
+
+  const totalTodayListPages = useMemo(
+    () => Math.max(1, Math.ceil(todaySortedBookings.length / todayDesktopPageSize)),
+    [todayDesktopPageSize, todaySortedBookings.length]
+  );
+
+  useEffect(() => {
+    setTodayPage((p) => (p > totalTodayListPages ? totalTodayListPages : p));
+  }, [totalTodayListPages]);
+
+  const pagedTodayBookings = useMemo(() => {
+    const currentPage = Math.min(todayPage, totalTodayListPages);
+    return todaySortedBookings.slice(
+      (currentPage - 1) * todayDesktopPageSize,
+      currentPage * todayDesktopPageSize
+    );
+  }, [todayDesktopPageSize, todayPage, todaySortedBookings, totalTodayListPages]);
+
   const totalListPages = useMemo(
     () => Math.max(1, Math.ceil(sortedBookings.length / listPageSize)),
     [sortedBookings.length, listPageSize]
@@ -691,14 +989,53 @@ function BookingsPageContent() {
     [listPageSize, page, sortedBookings, totalListPages]
   );
 
-  const handleCreate = async () => {
+  const openBookingInList = useCallback(
+    (booking: Booking) => {
+      const customer = state.customers.find((item) => item.id === booking.customerId);
+      setListStatusFilter(null);
+      setListTableAssignFilter("all");
+      setSearchQuery(customer?.fullName ?? "");
+      setListFocusBookingId(booking.id);
+      setActiveTab("list");
+      notifications.show({
+        color: "blue",
+        message: customer?.fullName
+          ? `Đã mở danh sách booking · ${customer.fullName}`
+          : "Đã mở danh sách booking.",
+        autoClose: 2500,
+      });
+    },
+    [state.customers]
+  );
+
+  useEffect(() => {
+    if (!listFocusBookingId || activeTab !== "list") {
+      return;
+    }
+    const index = sortedBookings.findIndex((item) => item.id === listFocusBookingId);
+    if (index < 0) {
+      return;
+    }
+    const targetPage = Math.floor(index / listPageSize) + 1;
+    setPage((current) => (current === targetPage ? current : targetPage));
+  }, [activeTab, listFocusBookingId, listPageSize, sortedBookings]);
+
+  useEffect(() => {
+    if (!listFocusBookingId) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setListFocusBookingId(null);
+    }, LIST_BOOKING_PULSE_TOTAL_MS);
+    return () => window.clearTimeout(timer);
+  }, [listFocusBookingId]);
+
+  const submitCreateBooking = async (options?: { allowDuplicate?: boolean }) => {
     if (!customerName || !branchId || !bookingAt) {
       notifications.show({ color: "red", message: "Cần ít nhất tên khách và thời gian đến." });
       return;
     }
-    const phoneRaw = customerPhone.trim();
-    const phoneNorm = phoneRaw ? normalizeVietnamPhone(phoneRaw) : "";
-    if (phoneNorm && !isPlausibleVietnamPhone(phoneNorm)) {
+    if (normalizedCustomerPhone && !isPlausibleVietnamPhone(normalizedCustomerPhone)) {
       notifications.show({
         color: "red",
         message:
@@ -708,12 +1045,21 @@ function BookingsPageContent() {
     }
     const result = await createBooking({
       customerName: formatVietnamesePersonName(customerName),
-      customerPhone: phoneNorm || undefined,
+      customerPhone: normalizedCustomerPhone || undefined,
       branchId,
       guestCount: typeof guestCount === "number" && Number.isFinite(guestCount) ? Math.max(1, guestCount) : undefined,
       bookingAt: dayjs(bookingAt).toISOString(),
       note,
+      guestType,
+      allowDuplicate: options?.allowDuplicate,
     });
+    if (!result.ok && result.code === DUPLICATE_BOOKING_CODE && result.duplicates?.length) {
+      notifications.show({ color: "orange", message: result.message });
+      confirmDuplicateBookingSecond(result.duplicates, () => {
+        void submitCreateBooking({ allowDuplicate: true });
+      });
+      return;
+    }
     notifications.show({
       color: result.ok ? "green" : "red",
       message: result.message,
@@ -723,7 +1069,18 @@ function BookingsPageContent() {
       setCustomerPhone("");
       setGuestCount(undefined);
       setNote("");
+      setGuestType("Khách thường");
     }
+  };
+
+  const handleCreate = async () => {
+    if (duplicateInfosForAlert.length === 0) {
+      await submitCreateBooking();
+      return;
+    }
+    confirmDuplicateBookingSecond(duplicateInfosForAlert, () => {
+      void submitCreateBooking({ allowDuplicate: true });
+    });
   };
 
   const createForm = (
@@ -762,6 +1119,20 @@ function BookingsPageContent() {
           onChange={(event) => setCustomerPhone(event.currentTarget.value)}
           size={isCompact ? "md" : "sm"}
         />
+        <Select
+          label="Loại khách"
+          placeholder="Chọn loại khách"
+          data={BOOKING_GUEST_TYPE_OPTIONS.map((label) => ({ value: label, label }))}
+          value={guestType}
+          onChange={setGuestType}
+          allowDeselect={false}
+          size={isCompact ? "md" : "sm"}
+        />
+        {duplicateWarningMessage ? (
+          <Alert color="orange" variant="light" title="Cảnh báo trùng booking">
+            {duplicateWarningMessage}
+          </Alert>
+        ) : null}
         <Text size="sm" c="dimmed">
           Khu vực, trạng thái bàn và bàn gán sẽ được cấu hình ở mục <strong>Sơ đồ</strong>.
         </Text>
@@ -913,6 +1284,13 @@ function BookingsPageContent() {
           setSortStatus(next);
           setPage(1);
         }}
+        rowStyle={(booking) =>
+          booking.id === listFocusBookingId
+            ? {
+                animation: `booking-list-row-pulse ${LIST_BOOKING_PULSE_CYCLE_MS}ms ease-in-out ${LIST_BOOKING_PULSE_CYCLES} forwards`,
+              }
+            : undefined
+        }
         noRecordsText="Chưa có booking nào cho bộ lọc hiện tại."
         columns={[
           {
@@ -1119,7 +1497,15 @@ function BookingsPageContent() {
           const locationLine =
             booking.areaId && booking.tableId ? `${area} · Bàn ${table}` : "Chờ xếp bàn";
           return (
-            <Card key={booking.id} withBorder radius="md" padding="md">
+            <Card
+              key={booking.id}
+              withBorder
+              radius="md"
+              padding="md"
+              className={
+                booking.id === listFocusBookingId ? "booking-list-row-pulse" : undefined
+              }
+            >
               <Stack gap="sm">
                 <Group justify="space-between" align="flex-start" wrap="nowrap" gap="xs">
                   <div style={{ minWidth: 0 }}>
@@ -1203,6 +1589,264 @@ function BookingsPageContent() {
     </Stack>
   );
 
+  const todayTableFiltersCompact = (
+    <Stack gap="sm">
+      <TextInputWithVoice
+        placeholder={todaySearchPlaceholder}
+        value={todaySearchQuery}
+        onChange={(event) => {
+          setTodaySearchQuery(event.currentTarget.value);
+          setTodayPage(1);
+        }}
+        size="md"
+        voiceIconSize="md"
+      />
+      <Group grow align="flex-end" wrap="wrap" gap="sm">
+        <Select
+          label="Trạng thái"
+          placeholder="Tất cả"
+          clearable
+          data={bookingStatusFilterOptions}
+          value={todayStatusFilter}
+          onChange={(value) => {
+            setTodayStatusFilter((value as BookingStatus | null) ?? null);
+            setTodayPage(1);
+          }}
+          size="md"
+        />
+        <Select
+          label="Hiển thị lễ tân"
+          placeholder="Tất cả"
+          clearable
+          data={todayReceptionStatusFilterOptions}
+          value={todayReceptionStatusFilter}
+          onChange={(value) => {
+            setTodayReceptionStatusFilter(value);
+            setTodayPage(1);
+          }}
+          size="md"
+        />
+        <Select
+          label="Loại khách"
+          placeholder="Tất cả"
+          clearable
+          data={todayGuestTypeFilterOptions}
+          value={todayGuestTypeFilter}
+          onChange={(value) => {
+            setTodayGuestTypeFilter(value);
+            setTodayPage(1);
+          }}
+          size="md"
+        />
+        <Select
+          label="Bàn"
+          data={tableAssignFilterOptions}
+          value={todayTableAssignFilter}
+          onChange={(value) => {
+            setTodayTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
+            setTodayPage(1);
+          }}
+          size="md"
+        />
+      </Group>
+    </Stack>
+  );
+
+  const bookingsTodayTable = (
+    <PortalSectionCard>
+      <Stack gap="sm">
+        <Text fw={600}>Booking hôm nay</Text>
+        <Text size="sm" c="dimmed">
+          {todaySortedBookings.length}/{todayBookings.length} booking
+          {todayBookings.length !== todaySortedBookings.length ? " (đã lọc)" : ""} trong ngày.
+        </Text>
+        {isCompact ? (
+          todayTableFiltersCompact
+        ) : (
+          <Group align="flex-end" gap="sm" wrap="wrap" justify="flex-start">
+            <TextInputWithVoice
+              placeholder={todaySearchPlaceholder}
+              value={todaySearchQuery}
+              onChange={(event) => {
+                setTodaySearchQuery(event.currentTarget.value);
+                setTodayPage(1);
+              }}
+              size="sm"
+              style={{ flex: "1 1 12rem", minWidth: 0 }}
+              voiceIconSize="sm"
+            />
+            <Select
+              label="Trạng thái"
+              placeholder="Tất cả"
+              clearable
+              data={bookingStatusFilterOptions}
+              value={todayStatusFilter}
+              onChange={(value) => {
+                setTodayStatusFilter((value as BookingStatus | null) ?? null);
+                setTodayPage(1);
+              }}
+              size="sm"
+              w={148}
+              miw={148}
+            />
+            <Select
+              label="Hiển thị lễ tân"
+              placeholder="Tất cả"
+              clearable
+              data={todayReceptionStatusFilterOptions}
+              value={todayReceptionStatusFilter}
+              onChange={(value) => {
+                setTodayReceptionStatusFilter(value);
+                setTodayPage(1);
+              }}
+              size="sm"
+              w={148}
+              miw={148}
+            />
+            <Select
+              label="Loại khách"
+              placeholder="Tất cả"
+              clearable
+              data={todayGuestTypeFilterOptions}
+              value={todayGuestTypeFilter}
+              onChange={(value) => {
+                setTodayGuestTypeFilter(value);
+                setTodayPage(1);
+              }}
+              size="sm"
+              w={148}
+              miw={148}
+            />
+            <Select
+              label="Bàn"
+              data={tableAssignFilterOptions}
+              value={todayTableAssignFilter}
+              onChange={(value) => {
+                setTodayTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
+                setTodayPage(1);
+              }}
+              size="sm"
+              w={132}
+              miw={132}
+            />
+          </Group>
+        )}
+      </Stack>
+      <div style={{ height: 12 }} />
+      <DataTable
+        minHeight={260}
+        scrollAreaProps={portalDataTableScrollAreaProps}
+        withTableBorder
+        records={pagedTodayBookings}
+        totalRecords={todaySortedBookings.length}
+        recordsPerPage={todayDesktopPageSize}
+        recordsPerPageOptions={[...TODAY_DESKTOP_PAGE_SIZE_OPTIONS]}
+        recordsPerPageLabel="Số dòng mỗi trang"
+        onRecordsPerPageChange={(n) => {
+          setTodayDesktopPageSize(n);
+          setTodayPage(1);
+        }}
+        page={Math.min(
+          todayPage,
+          Math.max(1, Math.ceil(todaySortedBookings.length / todayDesktopPageSize))
+        )}
+        onPageChange={setTodayPage}
+        sortStatus={todaySortStatus}
+        onSortStatusChange={(next) => {
+          setTodaySortStatus(next);
+          setTodayPage(1);
+        }}
+        onRowClick={({ record }) => openBookingInList(record)}
+        rowStyle={() => ({ cursor: "pointer" })}
+        noRecordsText={
+          todayBookings.length === 0
+            ? "Chưa có booking nào cho hôm nay."
+            : "Không có booking khớp bộ lọc hiện tại."
+        }
+        columns={[
+          {
+            accessor: "bookingAt",
+            title: "Giờ",
+            sortable: true,
+            render: (booking) => dayjs(booking.bookingAt).format("HH:mm"),
+          },
+          {
+            accessor: "customerId",
+            title: "Tên khách",
+            sortable: true,
+            render: (booking) =>
+              state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—",
+          },
+          {
+            accessor: "guestCount",
+            title: "SL",
+            sortable: true,
+            render: (booking) =>
+              isGuestCountSpecified(booking) ? (
+                <Text size="sm">{booking.guestCount}</Text>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  Chưa rõ
+                </Text>
+              ),
+          },
+          {
+            accessor: "guestType",
+            title: "Loại khách",
+            sortable: true,
+            render: (booking) => getTodayGuestTypeLabel(booking),
+          },
+          {
+            accessor: "areaTable",
+            title: "Khu/Bàn",
+            sortable: true,
+            render: (booking) => {
+              const area = state.areas.find((item) => item.id === booking.areaId);
+              const table = state.tables.find((item) => item.id === booking.tableId);
+              return formatTodayBookingAreaTable(booking, area?.name, table?.name);
+            },
+          },
+          {
+            accessor: "status",
+            title: "Trạng thái",
+            sortable: true,
+            render: (booking) => {
+              const receptionStatus = getReceptionBookingStatus(booking, receptionThresholds);
+              return (
+                <Badge color={receptionStatus.color} variant="light">
+                  {receptionStatus.label}
+                </Badge>
+              );
+            },
+          },
+          {
+            accessor: "createdByUserId",
+            title: "Người nhận",
+            sortable: true,
+            render: (booking) =>
+              state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
+              "Không rõ",
+          },
+          {
+            accessor: "note",
+            title: "Ghi chú",
+            sortable: true,
+            render: (booking) =>
+              stripUnknownGuestTag(booking.note) ? (
+                <Text size="sm" lineClamp={2} maw={220}>
+                  {stripUnknownGuestTag(booking.note)}
+                </Text>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  —
+                </Text>
+              ),
+          },
+        ]}
+      />
+    </PortalSectionCard>
+  );
+
   const assignModalTableOptions = useMemo(() => {
     if (!assignFormBooking) {
       return [];
@@ -1281,11 +1925,15 @@ function BookingsPageContent() {
         {isCompact ? "Đặt bàn" : "Đặt bàn"}
       </PortalPageTitle>
 
-      <Tabs defaultValue="create" keepMounted={false}>
+      <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>
         <Tabs.List grow>
+          <Tabs.Tab value="today">Booking hôm nay</Tabs.Tab>
           <Tabs.Tab value="create">Tạo mới</Tabs.Tab>
           <Tabs.Tab value="list">Danh sách booking</Tabs.Tab>
         </Tabs.List>
+        <Tabs.Panel value="today" pt="md">
+          {bookingsTodayTable}
+        </Tabs.Panel>
         <Tabs.Panel value="create" pt="md">
           {createForm}
         </Tabs.Panel>
