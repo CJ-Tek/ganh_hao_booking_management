@@ -325,7 +325,16 @@ export function hasAssignableSlotConflictAtTable(
   tableId: string,
   allBookings: readonly Booking[]
 ): boolean {
-  return allBookings.some((item) => {
+  return findAssignableSlotConflictsAtTable(candidate, tableId, allBookings).length > 0;
+}
+
+/** Other reservations on the same table whose slot overlaps the candidate window. */
+export function findAssignableSlotConflictsAtTable(
+  candidate: Booking,
+  tableId: string,
+  allBookings: readonly Booking[]
+): Booking[] {
+  return allBookings.filter((item) => {
     if (item.id === candidate.id || item.tableId !== tableId) {
       return false;
     }
@@ -334,6 +343,25 @@ export function hasAssignableSlotConflictAtTable(
     }
     return bookingsTimeSlotsOverlap(candidate, item);
   });
+}
+
+export function formatTableSlotConflictMessage(
+  conflicts: readonly Pick<Booking, "bookingAt" | "guestCount">[],
+  options?: { tableName?: string; customerName?: string }
+): string | null {
+  if (conflicts.length === 0) {
+    return null;
+  }
+  const first = conflicts[0];
+  const at = dayjs(first.bookingAt);
+  const slotLabel = at.isSame(dayjs(), "day")
+    ? `hôm nay lúc ${at.format("HH:mm")}`
+    : `${at.format("DD/MM/YYYY")} lúc ${at.format("HH:mm")}`;
+  const tablePart = options?.tableName ? ` trên bàn ${options.tableName}` : "";
+  const guestPart = options?.customerName ? ` (${options.customerName})` : "";
+  const extraCount = conflicts.length - 1;
+  const suffix = extraCount > 0 ? ` (+${extraCount} booking trùng khung)` : "";
+  return `Khung giờ mới trùng booking${tablePart}${guestPart}: ${slotLabel} · ${first.guestCount} khách.${suffix}`;
 }
 
 /** Tables that may receive this booking (branch + seats + slot conflicts). Mirrors bookings-page assign modal. */

@@ -92,6 +92,8 @@ export type Database = {
           end_time: string
           guest_count: number
           id: string
+          last_edited_at: string | null
+          last_edited_by_user_id: string | null
           no_show_marked_at: string | null
           note: string | null
           start_time: string
@@ -108,6 +110,8 @@ export type Database = {
           end_time?: string
           guest_count?: number
           id?: string
+          last_edited_at?: string | null
+          last_edited_by_user_id?: string | null
           no_show_marked_at?: string | null
           note?: string | null
           start_time?: string
@@ -124,6 +128,8 @@ export type Database = {
           end_time?: string
           guest_count?: number
           id?: string
+          last_edited_at?: string | null
+          last_edited_by_user_id?: string | null
           no_show_marked_at?: string | null
           note?: string | null
           start_time?: string
@@ -148,6 +154,13 @@ export type Database = {
           {
             foreignKeyName: "bookings_created_by_user_id_fkey"
             columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_last_edited_by_user_id_fkey"
+            columns: ["last_edited_by_user_id"]
             isOneToOne: false
             referencedRelation: "app_users"
             referencedColumns: ["id"]

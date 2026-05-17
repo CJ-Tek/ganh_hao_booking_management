@@ -72,6 +72,9 @@ export interface Booking {
   noShowMarkedAt?: string | null;
   note?: string;
   createdByUserId: string;
+  /** Set when an order edit is saved (time, guest count, phone). */
+  lastEditedAt?: string | null;
+  lastEditedByUserId?: string | null;
   status: BookingStatus;
 }
 

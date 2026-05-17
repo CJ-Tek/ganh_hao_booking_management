@@ -121,6 +121,9 @@ interface AppContextValue {
     bookingId: string;
     bookingAt: string;
     guestCount?: number;
+    customerPhone?: string;
+    areaId: string | null;
+    tableId: string | null;
     allowDuplicate?: boolean;
   }) => Promise<ActionResult>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
@@ -509,6 +512,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     bookingId: string;
     bookingAt: string;
     guestCount?: number;
+    customerPhone?: string;
+    areaId: string | null;
+    tableId: string | null;
     allowDuplicate?: boolean;
   }) => {
     if (isEmployeeUser(currentUser)) {
@@ -517,7 +523,13 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase) {
       return { ok: false, message: "Chưa kết nối Supabase." };
     }
-    const result = await updateBookingOrderInSupabase(input);
+    if (!currentUser) {
+      return { ok: false, message: "Chưa đăng nhập." };
+    }
+    const result = await updateBookingOrderInSupabase({
+      ...input,
+      editedByUserId: currentUser.id,
+    });
     if (result.ok && !reloadInFlightRef.current) {
       reloadInFlightRef.current = true;
       lastReloadAtRef.current = Date.now();

@@ -11,7 +11,9 @@ import {
 } from "./booking-duplicate";
 import {
   appendUnknownGuestTag,
+  bookingsTimeSlotsOverlap,
   buildBookingNoteForStorage,
+  formatTableSlotConflictMessage,
   isSyntheticPhoneValue,
   pickPrimaryBookingOnTable,
   stripUnknownGuestTag,
@@ -261,6 +263,49 @@ async function findBookingDuplicatesByPhoneSlotInSupabase(
   }));
 }
 
+type TableSlotConflictRow = {
+  id: string;
+  booking_at: string;
+  start_time: string | null;
+  end_time: string | null;
+  guest_count: number;
+  customers: { full_name: string } | { full_name: string }[] | null;
+};
+
+async function findTableBookingSlotConflictsInSupabase(
+  client: ReturnType<typeof ensureClient>,
+  input: {
+    bookingId: string;
+    tableId: string;
+    startTime: string;
+    endTime: string;
+  }
+): Promise<TableSlotConflictRow[]> {
+  const { data, error } = await (client as any)
+    .from("bookings")
+    .select("id, booking_at, start_time, end_time, guest_count, customers(full_name)")
+    .eq("table_id", input.tableId)
+    .neq("id", input.bookingId)
+    .in("status", TABLE_RESERVATION_BOOKING_STATUSES);
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const candidate = {
+    bookingAt: input.startTime,
+    startTime: input.startTime,
+    endTime: input.endTime,
+  };
+
+  return ((data ?? []) as TableSlotConflictRow[]).filter((row) =>
+    bookingsTimeSlotsOverlap(candidate, {
+      bookingAt: row.booking_at,
+      startTime: row.start_time ?? row.booking_at,
+      endTime: row.end_time ?? input.endTime,
+    })
+  );
+}
+
 function duplicateBookingResult(
   duplicates: BookingDuplicateInfo[],
   bookingAt: string
@@ -401,6 +446,8 @@ export async function fetchSnapshot(): Promise<AppStateSnapshot> {
       noShowMarkedAt: item.no_show_marked_at ?? undefined,
       note: item.note ?? undefined,
       createdByUserId: item.created_by_user_id,
+      lastEditedAt: item.last_edited_at ?? undefined,
+      lastEditedByUserId: item.last_edited_by_user_id ?? undefined,
       status: item.status as BookingStatus,
     }));
 
@@ -823,12 +870,18 @@ export async function updateBookingOrderInSupabase(input: {
   bookingId: string;
   bookingAt: string;
   guestCount?: number;
+  customerPhone?: string;
+  areaId: string | null;
+  tableId: string | null;
+  editedByUserId: string;
   allowDuplicate?: boolean;
 }): Promise<Result> {
   const client = ensureClient();
   const { data: booking, error: loadErr } = await (client as any)
     .from("bookings")
-    .select("id, status, note, branch_id, table_id, guest_count, customer_id")
+    .select(
+      "id, status, note, branch_id, area_id, table_id, guest_count, customer_id, booking_at, start_time, end_time"
+    )
     .eq("id", input.bookingId)
     .maybeSingle();
   if (loadErr || !booking) {
@@ -838,8 +891,73 @@ export async function updateBookingOrderInSupabase(input: {
   if (status !== "pending" && status !== "confirmed") {
     return {
       ok: false,
-      message: "Chỉ chỉnh giờ và số khách khi booking chờ xếp bàn hoặc đã xác nhận.",
+      message:
+        "Chỉ chỉnh giờ, số khách, SĐT và khu/bàn khi booking chờ xếp bàn hoặc đã xác nhận.",
     };
+  }
+
+  const nextAreaId = input.areaId;
+  const nextTableId = input.tableId;
+  if (Boolean(nextAreaId) !== Boolean(nextTableId)) {
+    return {
+      ok: false,
+      message: "Vui lòng chọn cả khu vực và bàn, hoặc để trống để chờ xếp bàn.",
+    };
+  }
+
+  const { data: customerRow, error: customerLoadErr } = await client
+    .from("customers")
+    .select("phone")
+    .eq("id", booking.customer_id)
+    .maybeSingle();
+  if (customerLoadErr || !customerRow) {
+    return { ok: false, message: customerLoadErr?.message ?? "Không tìm thấy khách hàng." };
+  }
+  const existingPhone = customerRow.phone as string | null;
+
+  if (input.customerPhone !== undefined) {
+    const trimmed = input.customerPhone.trim();
+    if (trimmed.length > 0) {
+      const normalizedPhone = normalizeVietnamPhone(trimmed);
+      if (!isPlausibleVietnamPhone(normalizedPhone)) {
+        return {
+          ok: false,
+          message:
+            "Số điện thoại không đúng định dạng Việt Nam (ví dụ 0912345678, +84912345678).",
+        };
+      }
+      if (normalizedPhone !== (existingPhone ?? "")) {
+        const { data: phoneOwner, error: phoneOwnerErr } = await client
+          .from("customers")
+          .select("id")
+          .eq("phone", normalizedPhone)
+          .maybeSingle();
+        if (phoneOwnerErr) {
+          return { ok: false, message: phoneOwnerErr.message };
+        }
+        if (phoneOwner && phoneOwner.id !== booking.customer_id) {
+          return {
+            ok: false,
+            message: "Số điện thoại đã được dùng cho khách hàng khác.",
+          };
+        }
+        const { error: phoneUpdateErr } = await client
+          .from("customers")
+          .update({ phone: normalizedPhone })
+          .eq("id", booking.customer_id);
+        if (phoneUpdateErr) {
+          return { ok: false, message: phoneUpdateErr.message };
+        }
+      }
+    } else if (existingPhone && !isSyntheticPhoneValue(existingPhone)) {
+      const { error: phoneClearErr } = await client
+        .from("customers")
+        .update({ phone: null })
+        .eq("id", booking.customer_id);
+      if (phoneClearErr) {
+        return { ok: false, message: phoneClearErr.message };
+      }
+    }
   }
 
   const runtimeSettings = await getBookingRuntimeSettings(client);
@@ -848,21 +966,22 @@ export async function updateBookingOrderInSupabase(input: {
     .add(runtimeSettings.standardTurnaroundMinutes, "minute")
     .toISOString();
 
+  const { data: customerAfterPhone, error: customerAfterErr } = await client
+    .from("customers")
+    .select("phone")
+    .eq("id", booking.customer_id)
+    .maybeSingle();
+  if (customerAfterErr) {
+    return { ok: false, message: customerAfterErr.message };
+  }
+  const phoneForDuplicate = customerAfterPhone?.phone as string | null | undefined;
+
   if (!input.allowDuplicate) {
-    const { data: customer, error: customerErr } = await client
-      .from("customers")
-      .select("phone")
-      .eq("id", booking.customer_id)
-      .maybeSingle();
-    if (customerErr) {
-      return { ok: false, message: customerErr.message };
-    }
-    const phone = customer?.phone as string | null | undefined;
-    if (phone && !isSyntheticPhoneValue(phone)) {
+    if (phoneForDuplicate && !isSyntheticPhoneValue(phoneForDuplicate)) {
       const duplicates = (
         await findBookingDuplicatesByPhoneSlotInSupabase(client, {
           branchId: booking.branch_id,
-          customerPhone: phone,
+          customerPhone: phoneForDuplicate,
           bookingAt: normalizedAt,
         })
       ).filter((item) => item.bookingId !== input.bookingId);
@@ -872,33 +991,159 @@ export async function updateBookingOrderInSupabase(input: {
     }
   }
 
+  const previousStartIso = dayjs(booking.start_time ?? booking.booking_at).toISOString();
+  const timeChanged = previousStartIso !== normalizedAt;
+  const assignmentChanged =
+    (booking.area_id ?? null) !== nextAreaId || (booking.table_id ?? null) !== nextTableId;
+
+  const guestCountSpecified =
+    typeof input.guestCount === "number" && Number.isFinite(input.guestCount);
+  const effectiveGuestCount = guestCountSpecified
+    ? Math.max(1, Math.round(input.guestCount!))
+    : Math.max(1, Math.round(booking.guest_count));
+
+  if (nextTableId) {
+    const { data: table, error: tableErr } = await client
+      .from("tables")
+      .select("id, branch_id, area_id, seats, status")
+      .eq("id", nextTableId)
+      .maybeSingle();
+    if (tableErr || !table) {
+      return { ok: false, message: tableErr?.message ?? "Không tìm thấy bàn." };
+    }
+    if (table.branch_id !== booking.branch_id) {
+      return { ok: false, message: "Bàn không thuộc cùng chi nhánh với booking." };
+    }
+    if (table.area_id !== nextAreaId) {
+      return { ok: false, message: "Bàn không thuộc khu vực đã chọn." };
+    }
+    if ((table.status as TableStatus) === "locked") {
+      return { ok: false, message: "Bàn đang khóa, không thể gán booking." };
+    }
+    if (effectiveGuestCount > table.seats) {
+      return {
+        ok: false,
+        message: `Số khách không được vượt quá sức chứa bàn (${table.seats} ghế).`,
+      };
+    }
+
+    if (timeChanged || assignmentChanged) {
+      const tableConflicts = await findTableBookingSlotConflictsInSupabase(client, {
+        bookingId: input.bookingId,
+        tableId: nextTableId,
+        startTime: normalizedAt,
+        endTime: slotEnd,
+      });
+      if (tableConflicts.length > 0) {
+        const firstConflict = tableConflicts[0];
+        const customerJoin = firstConflict.customers;
+        const conflictCustomerName = Array.isArray(customerJoin)
+          ? customerJoin[0]?.full_name
+          : customerJoin?.full_name;
+        const message =
+          formatTableSlotConflictMessage(
+            tableConflicts.map((row) => ({
+              bookingAt: row.booking_at,
+              guestCount: row.guest_count,
+            })),
+            { tableName: table.name, customerName: conflictCustomerName }
+          ) ?? "Khung giờ mới trùng với booking khác trên cùng bàn.";
+        return { ok: false, message };
+      }
+    }
+  }
+
+  const lastEditedPatch = {
+    last_edited_at: dayjs().toISOString(),
+    last_edited_by_user_id: input.editedByUserId,
+  };
+
+  const refreshTableIds = new Set<string>();
+  if (booking.table_id) {
+    refreshTableIds.add(booking.table_id);
+  }
+  if (nextTableId) {
+    refreshTableIds.add(nextTableId);
+  }
+
+  if (status === "pending" && nextTableId && nextAreaId) {
+    const { data: assignData, error: assignErr } = await (client as any).rpc(
+      "assign_or_queue_pending_booking",
+      {
+        p_booking_id: input.bookingId,
+        p_table_id: nextTableId,
+        p_area_id: nextAreaId,
+        p_guest_count: effectiveGuestCount,
+        p_start_time: normalizedAt,
+        p_end_time: slotEnd,
+      }
+    );
+    if (assignErr) {
+      return { ok: false, message: assignErr.message };
+    }
+
+    const outcome = Array.isArray(assignData) ? assignData[0] : assignData;
+    if (!outcome || typeof outcome !== "object") {
+      return { ok: false, message: "Không nhận được phản hồi khi gán bàn." };
+    }
+
+    const clearedNote =
+      guestCountSpecified
+        ? stripUnknownGuestTag(booking.note as string | undefined) ?? null
+        : undefined;
+    const { error: metaErr } = await (client as any)
+      .from("bookings")
+      .update({
+        ...lastEditedPatch,
+        ...(clearedNote !== undefined ? { note: clearedNote } : {}),
+      })
+      .eq("id", input.bookingId);
+    if (metaErr) {
+      return { ok: false, message: metaErr.message };
+    }
+
+    for (const tableId of refreshTableIds) {
+      const { data: tableRow } = await client
+        .from("tables")
+        .select("status")
+        .eq("id", tableId)
+        .maybeSingle();
+      if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+        await refreshTableAvailabilityForBooking(client, tableId);
+      }
+    }
+
+    if ((outcome as BookingCreateOrQueueResult).outcome === "waitlisted") {
+      return {
+        ok: true,
+        message:
+          (outcome as BookingCreateOrQueueResult).message ??
+          "Khung giờ đã kín, booking đã được đưa vào hàng chờ.",
+      };
+    }
+    return { ok: true, message: "Đã cập nhật booking và gán bàn." };
+  }
+
   const updatePayload: Record<string, unknown> = {
     booking_at: normalizedAt,
     start_time: normalizedAt,
     end_time: slotEnd,
+    area_id: nextAreaId,
+    table_id: nextTableId,
+    ...lastEditedPatch,
   };
 
-  const guestCountSpecified =
-    typeof input.guestCount === "number" && Number.isFinite(input.guestCount);
+  if (!nextTableId) {
+    updatePayload.status = "pending";
+    updatePayload.checked_in_at = null;
+  } else if (status === "pending") {
+    updatePayload.status = "confirmed";
+    updatePayload.checked_in_at = null;
+    updatePayload.no_show_marked_at = null;
+  }
+
   if (guestCountSpecified) {
-    const normalizedGuest = Math.max(1, Math.round(input.guestCount!));
-    if (booking.table_id) {
-      const { data: table, error: tableErr } = await client
-        .from("tables")
-        .select("seats")
-        .eq("id", booking.table_id)
-        .maybeSingle();
-      if (tableErr || !table) {
-        return { ok: false, message: tableErr?.message ?? "Không tìm thấy bàn." };
-      }
-      if (normalizedGuest > table.seats) {
-        return {
-          ok: false,
-          message: `Số khách không được vượt quá sức chứa bàn (${table.seats} ghế).`,
-        };
-      }
-    }
-    updatePayload.guest_count = normalizedGuest;
+    updatePayload.guest_count = effectiveGuestCount;
     updatePayload.note = stripUnknownGuestTag(booking.note as string | undefined) ?? null;
   }
 
@@ -910,14 +1155,14 @@ export async function updateBookingOrderInSupabase(input: {
     return { ok: false, message: error.message };
   }
 
-  if (booking.table_id) {
+  for (const tableId of refreshTableIds) {
     const { data: tableRow } = await client
       .from("tables")
       .select("status")
-      .eq("id", booking.table_id)
+      .eq("id", tableId)
       .maybeSingle();
     if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-      await refreshTableAvailabilityForBooking(client, booking.table_id);
+      await refreshTableAvailabilityForBooking(client, tableId);
     }
   }
 
@@ -1137,6 +1382,8 @@ export async function getTableBlockStateInSupabase(input: {
         noShowMarkedAt: item.no_show_marked_at,
         note: item.note ?? undefined,
         createdByUserId: item.created_by_user_id,
+        lastEditedAt: item.last_edited_at ?? undefined,
+        lastEditedByUserId: item.last_edited_by_user_id ?? undefined,
         status: item.status as BookingStatus,
       })) ?? [],
     waitlistQueue:

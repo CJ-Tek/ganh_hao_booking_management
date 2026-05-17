@@ -7,6 +7,8 @@ import {
   Button,
   Card,
   Collapse,
+  Divider,
+  Drawer,
   Group,
   Modal,
   NumberInput,
@@ -23,7 +25,7 @@ import { DateTimePicker } from "@mantine/dates";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { DataTable, type DataTableSortStatus } from "mantine-datatable";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   PortalPageTitle,
   PortalSectionCard,
@@ -45,11 +47,14 @@ import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import {
   BOOKING_GUEST_TYPE_OPTIONS,
   displayCustomerPhone,
+  findAssignableSlotConflictsAtTable,
+  formatTableSlotConflictMessage,
   formatTodayBookingAreaTable,
   getAssignableCandidateTables,
   getReceptionBookingStatus,
   inferGuestTypeLabel,
   isGuestCountSpecified,
+  isSyntheticPhoneValue,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
 import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
@@ -101,6 +106,28 @@ function BookingCheckInButton(props: {
 
 function canEditBookingOrder(booking: Pick<Booking, "status">): boolean {
   return booking.status === "pending" || booking.status === "confirmed";
+}
+
+function bookingLastEditorName(
+  booking: Pick<Booking, "lastEditedByUserId">,
+  users: { id: string; fullName: string }[]
+): string {
+  if (!booking.lastEditedByUserId) {
+    return "—";
+  }
+  return users.find((item) => item.id === booking.lastEditedByUserId)?.fullName ?? "Không rõ";
+}
+
+function BookingDetailField(props: { label: string; value: ReactNode }) {
+  const { label, value } = props;
+  return (
+    <Group justify="space-between" align="flex-start" wrap="nowrap" gap="md">
+      <Text size="sm" c="dimmed" style={{ flexShrink: 0 }}>
+        {label}
+      </Text>
+      <div style={{ minWidth: 0, flex: 1, textAlign: "right" }}>{value}</div>
+    </Group>
+  );
 }
 
 /** Mantine NumberInput may emit string while editing; keep a single parse path for guest counts. */
@@ -322,7 +349,12 @@ function BookingsPageContent() {
   const [editBooking, setEditBooking] = useState<Booking | null>(null);
   const [editBookingAt, setEditBookingAt] = useState<string | null>(null);
   const [editGuestCount, setEditGuestCount] = useState<number | undefined>(undefined);
+  const [editCustomerPhone, setEditCustomerPhone] = useState("");
+  const [editAreaId, setEditAreaId] = useState<string | null>(null);
+  const [editTableId, setEditTableId] = useState<string | null>(null);
   const [isEditSaving, setIsEditSaving] = useState(false);
+  const [mobileDetailBooking, setMobileDetailBooking] = useState<Booking | null>(null);
+  const [mobileDetailSource, setMobileDetailSource] = useState<"list" | "today">("list");
   const [listMobileFiltersOpen, setListMobileFiltersOpen] = useState(false);
   const [todayMobileFiltersOpen, setTodayMobileFiltersOpen] = useState(false);
   const [listFocusBookingId, setListFocusBookingId] = useState<string | null>(null);
@@ -524,6 +556,112 @@ function BookingsPageContent() {
     [filteredBranchIds, state.bookings]
   );
 
+  const editBookingSlotKey = useMemo(
+    () => (editBookingAt ? bookingSlotKey(editBookingAt) : null),
+    [editBookingAt]
+  );
+
+  const editNormalizedPhone = useMemo(
+    () => normalizeVietnamPhone(editCustomerPhone.trim()),
+    [editCustomerPhone]
+  );
+
+  const editDuplicateCandidates = useMemo(() => {
+    if (!editBooking || !editBookingSlotKey || !editNormalizedPhone) {
+      return [];
+    }
+    if (!isPlausibleVietnamPhone(editNormalizedPhone)) {
+      return [];
+    }
+    return branchBookings.filter((booking) => {
+      if (booking.id === editBooking.id) {
+        return false;
+      }
+      const customer = state.customers.find((item) => item.id === booking.customerId);
+      if (!customer?.phone || isSyntheticPhoneValue(customer.phone)) {
+        return false;
+      }
+      const bookingPhone = normalizeVietnamPhone(customer.phone);
+      if (bookingPhone !== editNormalizedPhone) {
+        return false;
+      }
+      const slot = bookingSlotKey(booking.bookingAt);
+      if (!slot) {
+        return false;
+      }
+      return (
+        slot.dayKey === editBookingSlotKey.dayKey && slot.timeKey === editBookingSlotKey.timeKey
+      );
+    });
+  }, [branchBookings, editBooking, editBookingSlotKey, editNormalizedPhone, state.customers]);
+
+  const editDuplicateWarningMessage = useMemo(
+    () =>
+      formatBookingDuplicateAlertMessage(
+        editDuplicateCandidates.map((item) => {
+          const customer = state.customers.find((c) => c.id === item.customerId);
+          return {
+            bookingId: item.id,
+            bookingAt: item.bookingAt,
+            guestCount: item.guestCount,
+            receiverFullName:
+              state.users.find((u) => u.id === item.createdByUserId)?.fullName ?? "Không rõ",
+          };
+        }),
+        editBookingAt ?? undefined
+      ),
+    [editBookingAt, editDuplicateCandidates, state.customers, state.users]
+  );
+
+  const editAssignCandidate = useMemo((): Booking | null => {
+    if (!editBooking || !editBookingAt) {
+      return null;
+    }
+    const startIso = dayjs(editBookingAt).toISOString();
+    const endIso = dayjs(editBookingAt)
+      .add(state.bookingRuntimeSettings.standardTurnaroundMinutes, "minute")
+      .toISOString();
+    return {
+      ...editBooking,
+      bookingAt: startIso,
+      startTime: startIso,
+      endTime: endIso,
+      areaId: editAreaId,
+      tableId: editTableId,
+    };
+  }, [
+    editAreaId,
+    editBooking,
+    editBookingAt,
+    editTableId,
+    state.bookingRuntimeSettings.standardTurnaroundMinutes,
+  ]);
+
+  const editTableSlotConflicts = useMemo(() => {
+    if (!editAssignCandidate?.tableId) {
+      return [];
+    }
+    return findAssignableSlotConflictsAtTable(
+      editAssignCandidate,
+      editAssignCandidate.tableId,
+      branchBookings
+    );
+  }, [branchBookings, editAssignCandidate]);
+
+  const editTableConflictMessage = useMemo(() => {
+    if (!editTableId || editTableSlotConflicts.length === 0) {
+      return null;
+    }
+    const tableName = state.tables.find((item) => item.id === editTableId)?.name;
+    const conflictCustomer = state.customers.find(
+      (item) => item.id === editTableSlotConflicts[0]?.customerId
+    )?.fullName;
+    return formatTableSlotConflictMessage(editTableSlotConflicts, {
+      tableName,
+      customerName: conflictCustomer,
+    });
+  }, [editTableId, editTableSlotConflicts, state.customers, state.tables]);
+
   const bookingStatusFilterOptions = useMemo(
     () =>
       (["pending", "confirmed", "seated", "checked_in", "no_show", "completed", "cancelled"] as const).map((s) => ({
@@ -623,22 +761,56 @@ function BookingsPageContent() {
   };
 
   const openEditBookingModal = (booking: Booking) => {
+    const customer = state.customers.find((item) => item.id === booking.customerId);
+    const phone =
+      customer?.phone && !isSyntheticPhoneValue(customer.phone) ? customer.phone : "";
     setEditBooking(booking);
     setEditBookingAt(booking.bookingAt);
     setEditGuestCount(
       isGuestCountSpecified(booking) ? Math.max(1, booking.guestCount) : undefined
     );
+    setEditCustomerPhone(phone);
+    setEditAreaId(booking.areaId);
+    setEditTableId(booking.tableId);
   };
 
   const closeEditBookingModal = () => {
     setEditBooking(null);
     setEditBookingAt(null);
     setEditGuestCount(undefined);
+    setEditCustomerPhone("");
+    setEditAreaId(null);
+    setEditTableId(null);
   };
 
   const submitEditBooking = async (options?: { allowDuplicate?: boolean }) => {
     if (!editBooking || !editBookingAt) {
       notifications.show({ color: "red", message: "Vui lòng chọn thời gian đến." });
+      return;
+    }
+    const normalizedEditPhone = normalizeVietnamPhone(editCustomerPhone.trim());
+    if (normalizedEditPhone && !isPlausibleVietnamPhone(normalizedEditPhone)) {
+      notifications.show({
+        color: "red",
+        message:
+          "Số điện thoại không đúng định dạng Việt Nam (ví dụ 0912345678, +84912345678).",
+      });
+      return;
+    }
+    if ((editAreaId && !editTableId) || (!editAreaId && editTableId)) {
+      notifications.show({
+        color: "red",
+        message: "Vui lòng chọn cả khu vực và bàn, hoặc để trống để chờ xếp bàn.",
+      });
+      return;
+    }
+    if (editTableSlotConflicts.length > 0) {
+      notifications.show({
+        color: "red",
+        message:
+          editTableConflictMessage ??
+          "Khung giờ mới trùng với booking khác trên cùng bàn.",
+      });
       return;
     }
     setIsEditSaving(true);
@@ -650,6 +822,9 @@ function BookingsPageContent() {
           typeof editGuestCount === "number" && Number.isFinite(editGuestCount)
             ? Math.max(1, editGuestCount)
             : undefined,
+        customerPhone: editCustomerPhone,
+        areaId: editAreaId,
+        tableId: editTableId,
         allowDuplicate: options?.allowDuplicate,
       });
       if (!result.ok && result.code === DUPLICATE_BOOKING_CODE && result.duplicates?.length) {
@@ -801,6 +976,12 @@ function BookingsPageContent() {
       }
       if (acc === "createdByUserId") {
         return state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
+      }
+      if (acc === "lastEditedByUserId") {
+        return bookingLastEditorName(booking, state.users);
+      }
+      if (acc === "lastEditedAt") {
+        return booking.lastEditedAt ? dayjs(booking.lastEditedAt).valueOf() : 0;
       }
       if (acc === "status") {
         return bookingStatusLabel[booking.status];
@@ -1071,6 +1252,22 @@ function BookingsPageContent() {
     },
     [state.customers]
   );
+
+  const openMobileBookingDetail = useCallback((booking: Booking, source: "list" | "today") => {
+    setMobileDetailBooking(booking);
+    setMobileDetailSource(source);
+  }, []);
+
+  const closeMobileBookingDetail = useCallback(() => {
+    setMobileDetailBooking(null);
+  }, []);
+
+  const mobileDetailBookingLive = useMemo(() => {
+    if (!mobileDetailBooking) {
+      return null;
+    }
+    return state.bookings.find((item) => item.id === mobileDetailBooking.id) ?? mobileDetailBooking;
+  }, [mobileDetailBooking, state.bookings]);
 
   useEffect(() => {
     if (!listFocusBookingId || activeTab !== "list") {
@@ -1444,6 +1641,27 @@ function BookingsPageContent() {
               "Không rõ",
           },
           {
+            accessor: "lastEditedByUserId",
+            title: "Người sửa",
+            sortable: true,
+            render: (booking) => (
+              <Text size="sm">{bookingLastEditorName(booking, state.users)}</Text>
+            ),
+          },
+          {
+            accessor: "lastEditedAt",
+            title: "Lúc sửa",
+            sortable: true,
+            render: (booking) =>
+              booking.lastEditedAt ? (
+                <Text size="sm">{dayjs(booking.lastEditedAt).format("HH:mm DD/MM/YYYY")}</Text>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  —
+                </Text>
+              ),
+          },
+          {
             accessor: "note",
             title: "Ghi chú",
             sortable: true,
@@ -1621,9 +1839,11 @@ function BookingsPageContent() {
               withBorder
               radius="md"
               padding="md"
+              style={{ cursor: "pointer" }}
               className={
                 booking.id === listFocusBookingId ? "booking-list-row-pulse" : undefined
               }
+              onClick={() => openMobileBookingDetail(booking, "list")}
             >
               <Stack gap="sm">
                 <Group justify="space-between" align="flex-start" wrap="nowrap" gap="xs">
@@ -1654,12 +1874,18 @@ function BookingsPageContent() {
                   {isGuestCountSpecified(booking) ? `${booking.guestCount} khách` : "Chưa rõ số khách"} ·{" "}
                   {creator}
                 </Text>
+                {booking.lastEditedAt ? (
+                  <Text size="xs" c="dimmed">
+                    Sửa: {bookingLastEditorName(booking, state.users)} ·{" "}
+                    {dayjs(booking.lastEditedAt).format("HH:mm DD/MM/YYYY")}
+                  </Text>
+                ) : null}
                 {stripUnknownGuestTag(booking.note) ? (
                   <Text size="xs" c="dimmed" lineClamp={3}>
                     {stripUnknownGuestTag(booking.note)}
                   </Text>
                 ) : null}
-                <Group grow gap="xs">
+                <Group grow gap="xs" onClick={(event) => event.stopPropagation()}>
                   {booking.status === "cancelled" || booking.status === "completed" || booking.status === "no_show" ? null : (
                     <>
                       {canEditBookingOrder(booking) ? (
@@ -1768,7 +1994,7 @@ function BookingsPageContent() {
               radius="md"
               padding="md"
               style={{ cursor: "pointer" }}
-              onClick={() => openBookingInList(booking)}
+              onClick={() => openMobileBookingDetail(booking, "today")}
             >
               <Stack gap="sm">
                 <Group justify="space-between" align="flex-start" wrap="nowrap" gap="xs">
@@ -2182,6 +2408,91 @@ function BookingsPageContent() {
       }));
   }, [assignFormBooking, state.areas]);
 
+  const editModalAreaOptions = useMemo(() => {
+    if (!editBooking) {
+      return [];
+    }
+    return [...state.areas.filter((area) => area.branchId === editBooking.branchId)]
+      .sort((a, b) => a.name.localeCompare(b.name, "vi") || a.id.localeCompare(b.id))
+      .map((area) => ({
+        value: area.id,
+        label: area.name,
+      }));
+  }, [editBooking, state.areas]);
+
+  const editModalTableOptions = useMemo(() => {
+    if (!editAssignCandidate) {
+      return [];
+    }
+    const requiredSeats =
+      typeof editGuestCount === "number" && Number.isFinite(editGuestCount)
+        ? editGuestCount
+        : isGuestCountSpecified(editAssignCandidate)
+          ? editAssignCandidate.guestCount
+          : undefined;
+    const options = getCandidateTables(editAssignCandidate, requiredSeats)
+      .filter((table) => (editAreaId ? table.areaId === editAreaId : true))
+      .map((table) => ({
+        value: table.id,
+        label: `${table.name} · ${table.seats} ghế`,
+      }));
+    if (editTableId && !options.some((item) => item.value === editTableId)) {
+      const current = state.tables.find((table) => table.id === editTableId);
+      if (current) {
+        options.unshift({
+          value: current.id,
+          label: `${current.name} · ${current.seats} ghế`,
+        });
+      }
+    }
+    return options;
+  }, [
+    editAreaId,
+    editAssignCandidate,
+    editGuestCount,
+    editTableId,
+    state.bookings,
+    state.tables,
+  ]);
+
+  const editModalTableCapacityHint = useMemo(() => {
+    if (!editAssignCandidate) {
+      return null;
+    }
+    const requiredSeats =
+      typeof editGuestCount === "number" && Number.isFinite(editGuestCount)
+        ? editGuestCount
+        : isGuestCountSpecified(editAssignCandidate)
+          ? editAssignCandidate.guestCount
+          : undefined;
+    const candidateTables = getCandidateTables(editAssignCandidate, requiredSeats).filter(
+      (table) => (editAreaId ? table.areaId === editAreaId : true)
+    );
+    if (candidateTables.length > 0) {
+      return null;
+    }
+    if (!requiredSeats || requiredSeats < 1) {
+      return null;
+    }
+    const branchTables = state.tables.filter(
+      (table) =>
+        table.branchId === editAssignCandidate.branchId && table.status !== "locked"
+    );
+    const tablesInScope = editAreaId
+      ? branchTables.filter((table) => table.areaId === editAreaId)
+      : branchTables;
+    if (tablesInScope.length === 0) {
+      return null;
+    }
+    const maxSeatsInScope = Math.max(...tablesInScope.map((table) => table.seats));
+    if (requiredSeats <= maxSeatsInScope) {
+      return null;
+    }
+    return editAreaId
+      ? `Trong khu vực đã chọn, không có bàn nào đủ chỗ cho ${requiredSeats} khách (tối đa ${maxSeatsInScope} ghế/bàn).`
+      : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất: ${maxSeatsInScope} ghế).`;
+  }, [editAreaId, editAssignCandidate, editGuestCount, state.bookings, state.tables]);
+
   return (
     <Stack gap="md">
       <Group justify="space-between" align="center" wrap="wrap" gap="md">
@@ -2233,6 +2544,203 @@ function BookingsPageContent() {
           )}
         </Tabs.Panel>
       </Tabs>
+      <Drawer
+        opened={mobileDetailBookingLive != null}
+        onClose={closeMobileBookingDetail}
+        title={
+          mobileDetailBookingLive
+            ? (state.customers.find((item) => item.id === mobileDetailBookingLive.customerId)
+                ?.fullName ?? "Chi tiết booking")
+            : "Chi tiết booking"
+        }
+        position="bottom"
+        size="92%"
+        transitionProps={{ transition: "slide-up" }}
+        styles={{
+          content: { height: "92dvh", maxHeight: "92dvh" },
+          body: { paddingTop: 4 },
+        }}
+      >
+        {mobileDetailBookingLive ? (
+          (() => {
+            const booking = mobileDetailBookingLive;
+            const customer = state.customers.find((item) => item.id === booking.customerId);
+            const area = state.areas.find((item) => item.id === booking.areaId)?.name;
+            const table = state.tables.find((item) => item.id === booking.tableId)?.name;
+            const locationLine =
+              booking.areaId && booking.tableId
+                ? `${area ?? "—"} · Bàn ${table ?? "—"}`
+                : "Chờ xếp bàn";
+            const creator =
+              state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
+              "Không rõ";
+            const note = stripUnknownGuestTag(booking.note);
+            const receptionStatus = getReceptionBookingStatus(booking, receptionThresholds);
+            const statusBadge =
+              mobileDetailSource === "today" ? (
+                <Badge color={receptionStatus.color} variant="light" size="lg">
+                  {receptionStatus.label}
+                </Badge>
+              ) : (
+                <Badge color={bookingStatusColor[booking.status]} variant="light" size="lg">
+                  {bookingStatusLabel[booking.status]}
+                </Badge>
+              );
+
+            return (
+              <Stack gap="md">
+                <Group justify="flex-end">{statusBadge}</Group>
+                <Stack gap="sm">
+                  <BookingDetailField
+                    label="Giờ đặt"
+                    value={
+                      <Text size="sm" fw={500}>
+                        {dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}
+                      </Text>
+                    }
+                  />
+                  {mobileDetailSource === "list" ? (
+                    <BookingDetailField
+                      label="Giờ check-in"
+                      value={
+                        booking.checkedInAt ? (
+                          <Text size="sm">{dayjs(booking.checkedInAt).format("HH:mm · DD/MM/YYYY")}</Text>
+                        ) : (
+                          <Text size="sm" c="dimmed">
+                            —
+                          </Text>
+                        )
+                      }
+                    />
+                  ) : null}
+                  <BookingDetailField
+                    label="Số điện thoại"
+                    value={<Text size="sm">{displayCustomerPhone(customer?.phone)}</Text>}
+                  />
+                  <BookingDetailField
+                    label="Khu vực / Bàn"
+                    value={
+                      <Text size="sm">
+                        {mobileDetailSource === "today"
+                          ? formatTodayBookingAreaTable(booking, area, table)
+                          : locationLine}
+                      </Text>
+                    }
+                  />
+                  <BookingDetailField
+                    label="Số khách"
+                    value={
+                      <Text size="sm">
+                        {isGuestCountSpecified(booking)
+                          ? `${booking.guestCount} khách`
+                          : "Chưa rõ"}
+                      </Text>
+                    }
+                  />
+                  {mobileDetailSource === "today" ? (
+                    <BookingDetailField
+                      label="Loại khách"
+                      value={<Text size="sm">{getTodayGuestTypeLabel(booking)}</Text>}
+                    />
+                  ) : null}
+                  <BookingDetailField
+                    label={mobileDetailSource === "today" ? "Người nhận" : "Người tạo"}
+                    value={<Text size="sm">{creator}</Text>}
+                  />
+                  <BookingDetailField
+                    label="Người sửa"
+                    value={<Text size="sm">{bookingLastEditorName(booking, state.users)}</Text>}
+                  />
+                  <BookingDetailField
+                    label="Lúc sửa"
+                    value={
+                      booking.lastEditedAt ? (
+                        <Text size="sm">{dayjs(booking.lastEditedAt).format("HH:mm · DD/MM/YYYY")}</Text>
+                      ) : (
+                        <Text size="sm" c="dimmed">
+                          —
+                        </Text>
+                      )
+                    }
+                  />
+                  <BookingDetailField
+                    label="Ghi chú"
+                    value={
+                      note ? (
+                        <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                          {note}
+                        </Text>
+                      ) : (
+                        <Text size="sm" c="dimmed">
+                          —
+                        </Text>
+                      )
+                    }
+                  />
+                </Stack>
+                {booking.status === "cancelled" ||
+                booking.status === "completed" ||
+                booking.status === "no_show" ? null : (
+                  <>
+                    <Divider />
+                    <Group grow gap="xs">
+                      {canEditBookingOrder(booking) ? (
+                        <Button
+                          size="md"
+                          variant="outline"
+                          onClick={() => {
+                            closeMobileBookingDetail();
+                            openEditBookingModal(booking);
+                          }}
+                        >
+                          Sửa
+                        </Button>
+                      ) : null}
+                      {booking.status === "pending" ? (
+                        <Button
+                          size="md"
+                          variant="outline"
+                          color="blue"
+                          onClick={() => {
+                            closeMobileBookingDetail();
+                            openAssignOptions(booking);
+                          }}
+                        >
+                          Gán vào bàn
+                        </Button>
+                      ) : null}
+                      <BookingCheckInButton
+                        size="compact-xs"
+                        disabled={booking.status !== "confirmed"}
+                        onCheckIn={() => void runCheckIn(booking.id)}
+                      />
+                      {booking.status === "checked_in" || booking.status === "seated" ? (
+                        <Button
+                          size="md"
+                          variant="filled"
+                          color="green"
+                          onClick={() => openCompleteBookingConfirm(booking)}
+                        >
+                          Hoàn thành
+                        </Button>
+                      ) : (
+                        <Button
+                          size="md"
+                          variant="outline"
+                          color="red"
+                          onClick={() => openCancelBookingConfirm(booking)}
+                        >
+                          Hủy
+                        </Button>
+                      )}
+                    </Group>
+                  </>
+                )}
+              </Stack>
+            );
+          })()
+        ) : null}
+      </Drawer>
       <Modal
         opened={createModalOpened}
         onClose={() => setCreateModalOpened(false)}
@@ -2246,8 +2754,9 @@ function BookingsPageContent() {
         opened={editBooking != null}
         onClose={closeEditBookingModal}
         title="Chỉnh booking"
-        size="md"
+        size="lg"
         centered
+        zIndex={MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX}
       >
         {editBooking ? (
           <Stack gap="sm">
@@ -2265,6 +2774,24 @@ function BookingsPageContent() {
               valueFormat="DD/MM/YYYY HH:mm"
               size={isCompact ? "md" : "sm"}
             />
+            {editTableConflictMessage ? (
+              <Alert color="red" variant="light" title="Trùng khung giờ trên bàn">
+                {editTableConflictMessage}
+              </Alert>
+            ) : null}
+            {editDuplicateWarningMessage ? (
+              <Alert color="orange" variant="light" title="Cảnh báo trùng booking">
+                {editDuplicateWarningMessage}
+              </Alert>
+            ) : null}
+            <TextInput
+              label="Số điện thoại"
+              placeholder="09… (tùy chọn)"
+              inputMode="tel"
+              value={editCustomerPhone}
+              onChange={(event) => setEditCustomerPhone(event.currentTarget.value)}
+              size={isCompact ? "md" : "sm"}
+            />
             <NumberInput
               label="Số khách"
               description="Để trống nếu chưa rõ số khách."
@@ -2276,11 +2803,51 @@ function BookingsPageContent() {
               placeholder="Chưa rõ"
               size={isCompact ? "md" : "sm"}
             />
+            <Group grow align="flex-start">
+              <Select
+                label="Khu vực"
+                placeholder="Chờ xếp bàn"
+                data={editModalAreaOptions}
+                value={editAreaId}
+                onChange={(value) => {
+                  setEditAreaId(value);
+                  setEditTableId(null);
+                }}
+                searchable
+                clearable
+                size={isCompact ? "md" : "sm"}
+                comboboxProps={{ zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX }}
+              />
+              <Select
+                label="Bàn"
+                placeholder={editAreaId ? "Chọn bàn" : "Chọn khu vực trước"}
+                data={editModalTableOptions}
+                value={editTableId}
+                onChange={setEditTableId}
+                searchable
+                clearable
+                disabled={!editAreaId}
+                size={isCompact ? "md" : "sm"}
+                comboboxProps={{ zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX }}
+              />
+            </Group>
+            {editModalTableCapacityHint ? (
+              <Text size="xs" c="dimmed">
+                {editModalTableCapacityHint}
+              </Text>
+            ) : null}
+            <Text size="xs" c="dimmed">
+              Để trống khu vực và bàn nếu booking vẫn chờ xếp bàn.
+            </Text>
             <Group justify="flex-end" gap="sm">
               <Button variant="default" onClick={closeEditBookingModal}>
                 Hủy
               </Button>
-              <Button loading={isEditSaving} onClick={() => void submitEditBooking()}>
+              <Button
+                loading={isEditSaving}
+                disabled={editTableSlotConflicts.length > 0}
+                onClick={() => void submitEditBooking()}
+              >
                 Lưu
               </Button>
             </Group>
