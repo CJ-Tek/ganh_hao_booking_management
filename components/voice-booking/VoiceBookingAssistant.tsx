@@ -17,7 +17,9 @@ import { DateTimePicker } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { useMemo, useRef, useState } from "react";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
+import { BOOKING_GUEST_TYPE_OPTIONS } from "@/lib/booking-meta";
 import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
+import { normalizeGuestTypeHint } from "@/lib/voice-booking/guest-type";
 import { matchAreaId, matchTableId, type AreaLite, type TableLite } from "@/lib/voice-booking/match";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
 import { warmUpMicrophoneForSpeech } from "@/lib/voice-booking/mic-warmup";
@@ -38,6 +40,7 @@ type VoiceBookingDraft = {
   areaNameHint?: string;
   tableNameHint?: string;
   note?: string;
+  guestType?: string;
 };
 
 type VoiceBookingResponse =
@@ -112,6 +115,7 @@ export function VoiceBookingAssistant(props: {
     guestCount?: number;
     bookingAt: string;
     note?: string;
+    guestType?: string | null;
     allowDuplicate?: boolean;
   }) => Promise<ActionResult>;
 }) {
@@ -139,7 +143,13 @@ export function VoiceBookingAssistant(props: {
   const [areaId, setAreaId] = useState<string | null>(null);
   const [tableId, setTableId] = useState<string | null>(null);
   const [note, setNote] = useState("");
+  const [guestType, setGuestType] = useState<string | null>("Khách thường");
   const [clarify, setClarify] = useState<string | null>(null);
+
+  const guestTypeOptions = useMemo(
+    () => BOOKING_GUEST_TYPE_OPTIONS.map((label) => ({ value: label, label })),
+    []
+  );
 
   const areaOptions = useMemo(
     () => areas.map((a) => ({ value: a.id, label: a.name })),
@@ -288,6 +298,9 @@ export function VoiceBookingAssistant(props: {
       if (d.bookingAtLocal) setBookingAt(d.bookingAtLocal);
       if (d.note) setNote(d.note);
 
+      const parsedGuestType = normalizeGuestTypeHint(d.guestType);
+      if (parsedGuestType) setGuestType(parsedGuestType);
+
       const matchedAreaId = matchAreaId(areas, d.areaNameHint);
       const matchedTableId = matchTableId(tables, d.tableNameHint, {
         preferAreaId: matchedAreaId,
@@ -337,6 +350,7 @@ export function VoiceBookingAssistant(props: {
         guestCount: typeof guestCount === "number" && Number.isFinite(guestCount) ? guestCount : undefined,
         bookingAt: dayjs(bookingAt).toISOString(),
         note: note.trim() ? note.trim() : undefined,
+        guestType,
         allowDuplicate,
       });
 
@@ -350,6 +364,7 @@ export function VoiceBookingAssistant(props: {
 
       if (result.ok) {
         notifications.show({ color: "green", title: "Thành công", message: "Đã tạo booking." });
+        setGuestType("Khách thường");
         setOpened(false);
       } else {
         notifications.show({ color: "red", title: "Tạo booking thất bại", message: result.message });
@@ -418,7 +433,7 @@ export function VoiceBookingAssistant(props: {
             onChange={(e) => setTranscript(e.currentTarget.value)}
             autosize
             minRows={3}
-            placeholder="Ví dụ: đặt bàn 4 người lúc 19:30 tối nay, khu A, bàn 3, tên Huy, số 0912..."
+            placeholder="Ví dụ: đặt bàn VIP 4 người lúc 19:30 tối nay, khu A, bàn 3, tên Huy, số 0912..."
           />
 
           {isListening ? (
@@ -448,6 +463,15 @@ export function VoiceBookingAssistant(props: {
               onChange={(e) => setCustomerPhone(e.currentTarget.value)}
             />
           </Group>
+
+          <Select
+            label="Loại khách"
+            placeholder="Chọn loại khách"
+            data={guestTypeOptions}
+            value={guestType}
+            onChange={setGuestType}
+            allowDeselect={false}
+          />
 
           <Group grow align="flex-start">
             <NumberInput

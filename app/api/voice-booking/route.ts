@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { generateObject } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
+import { BOOKING_GUEST_TYPE_OPTIONS } from "@/lib/booking-meta";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +41,12 @@ const DraftSchema = z.object({
   areaNameHint: z.string().optional(),
   tableNameHint: z.string().optional(),
   note: z.string().optional(),
+  guestType: z
+    .enum(BOOKING_GUEST_TYPE_OPTIONS)
+    .optional()
+    .describe(
+      `Loại khách khi được nói rõ. Chỉ dùng một trong: ${BOOKING_GUEST_TYPE_OPTIONS.join(", ")}.`
+    ),
 });
 
 const ResponseSchema = z.object({
@@ -68,7 +75,9 @@ export async function POST(req: Request) {
       "Minimum required fields to create a booking are ONLY customerName and bookingAtLocal.",
       "Do NOT invent table IDs. Only return tableNameHint / areaNameHint as plain strings when mentioned.",
       `Time handling: now is ${input.nowIso}. Convert relative times (e.g. 'tối nay', 'mai', 'thứ bảy') into local time string YYYY-MM-DDTHH:mm (24h) in Vietnam time.`,
-      "Phone, guestCount, area and table are optional.",
+      "Phone, guestCount, area, table, guestType and note are optional.",
+      "guestType: set only when the speaker clearly indicates customer type (VIP, sinh nhật, đoàn, khách quen, đặt món trước). Otherwise omit.",
+      `guestType must be exactly one of: ${BOOKING_GUEST_TYPE_OPTIONS.join(", ")}.`,
       "Phone handling: keep raw digits as spoken; accept +84 forms when present.",
       "If the transcript contains multiple bookings, only draft the first one and ignore the rest.",
     ].join("\n");
