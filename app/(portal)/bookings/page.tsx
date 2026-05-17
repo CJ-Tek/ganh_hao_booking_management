@@ -6,6 +6,7 @@ import {
   Badge,
   Button,
   Card,
+  Collapse,
   Group,
   Modal,
   NumberInput,
@@ -17,6 +18,7 @@ import {
   Textarea,
   Tooltip,
 } from "@mantine/core";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { DateTimePicker } from "@mantine/dates";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
@@ -311,6 +313,9 @@ function BookingsPageContent() {
   const [note, setNote] = useState("");
   const [guestType, setGuestType] = useState<string | null>("Khách thường");
   const [activeTab, setActiveTab] = useState<string | null>("today");
+  const [createModalOpened, setCreateModalOpened] = useState(false);
+  const [listMobileFiltersOpen, setListMobileFiltersOpen] = useState(false);
+  const [todayMobileFiltersOpen, setTodayMobileFiltersOpen] = useState(false);
   const [listFocusBookingId, setListFocusBookingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [listStatusFilter, setListStatusFilter] = useState<BookingStatus | null>(null);
@@ -350,6 +355,7 @@ function BookingsPageContent() {
   const [todayDesktopPageSize, setTodayDesktopPageSize] = useState(12);
 
   const listPageSize = isCompact ? mobileBookingsPageSize : desktopBookingsPageSize;
+  const todayPageSize = isCompact ? mobileBookingsPageSize : todayDesktopPageSize;
   const selectedBookingSlot = useMemo(() => (bookingAt ? bookingSlotKey(bookingAt) : null), [bookingAt]);
   const normalizedCustomerPhone = useMemo(
     () => normalizeVietnamPhone(customerPhone.trim()),
@@ -947,8 +953,8 @@ function BookingsPageContent() {
   ]);
 
   const totalTodayListPages = useMemo(
-    () => Math.max(1, Math.ceil(todaySortedBookings.length / todayDesktopPageSize)),
-    [todayDesktopPageSize, todaySortedBookings.length]
+    () => Math.max(1, Math.ceil(todaySortedBookings.length / todayPageSize)),
+    [todayPageSize, todaySortedBookings.length]
   );
 
   useEffect(() => {
@@ -958,10 +964,10 @@ function BookingsPageContent() {
   const pagedTodayBookings = useMemo(() => {
     const currentPage = Math.min(todayPage, totalTodayListPages);
     return todaySortedBookings.slice(
-      (currentPage - 1) * todayDesktopPageSize,
-      currentPage * todayDesktopPageSize
+      (currentPage - 1) * todayPageSize,
+      currentPage * todayPageSize
     );
-  }, [todayDesktopPageSize, todayPage, todaySortedBookings, totalTodayListPages]);
+  }, [todayPageSize, todayPage, todaySortedBookings, totalTodayListPages]);
 
   const totalListPages = useMemo(
     () => Math.max(1, Math.ceil(sortedBookings.length / listPageSize)),
@@ -1070,6 +1076,7 @@ function BookingsPageContent() {
       setGuestCount(undefined);
       setNote("");
       setGuestType("Khách thường");
+      setCreateModalOpened(false);
     }
   };
 
@@ -1179,40 +1186,56 @@ function BookingsPageContent() {
 
   const bookingsListFiltersCompact = (
     <Stack gap="sm">
-      <TextInputWithVoice
-        placeholder={bookingsSearchPlaceholder}
-        value={searchQuery}
-        onChange={(event) => {
-          setSearchQuery(event.currentTarget.value);
-          setPage(1);
-        }}
-        size="md"
-        voiceIconSize="md"
-      />
-      <Group grow align="flex-end" wrap="wrap" gap="sm">
-        <Select
-          label="Trạng thái"
-          placeholder="Tất cả"
-          clearable
-          data={bookingStatusFilterOptions}
-          value={listStatusFilter}
-          onChange={(value) => {
-            setListStatusFilter((value as BookingStatus | null) ?? null);
+      <Group align="flex-end" gap="sm" wrap="nowrap">
+        <TextInputWithVoice
+          placeholder={bookingsSearchPlaceholder}
+          value={searchQuery}
+          onChange={(event) => {
+            setSearchQuery(event.currentTarget.value);
             setPage(1);
           }}
           size="md"
+          voiceIconSize="md"
+          style={{ flex: 1, minWidth: 0 }}
         />
-        <Select
-          label="Bàn"
-          data={tableAssignFilterOptions}
-          value={listTableAssignFilter}
-          onChange={(value) => {
-            setListTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
-            setPage(1);
-          }}
+        <Button
+          variant="default"
           size="md"
-        />
+          aria-expanded={listMobileFiltersOpen}
+          onClick={() => setListMobileFiltersOpen((open) => !open)}
+          rightSection={
+            listMobileFiltersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />
+          }
+        >
+          {listMobileFiltersOpen ? "Ẩn bộ lọc" : "Bộ lọc"}
+        </Button>
       </Group>
+      <Collapse expanded={listMobileFiltersOpen}>
+        <Stack gap="sm" pt="xs">
+          <Select
+            label="Trạng thái"
+            placeholder="Tất cả"
+            clearable
+            data={bookingStatusFilterOptions}
+            value={listStatusFilter}
+            onChange={(value) => {
+              setListStatusFilter((value as BookingStatus | null) ?? null);
+              setPage(1);
+            }}
+            size="md"
+          />
+          <Select
+            label="Bàn"
+            data={tableAssignFilterOptions}
+            value={listTableAssignFilter}
+            onChange={(value) => {
+              setListTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
+              setPage(1);
+            }}
+            size="md"
+          />
+        </Stack>
+      </Collapse>
     </Stack>
   );
 
@@ -1438,7 +1461,6 @@ function BookingsPageContent() {
 
   const mobileListPaginationNav = (
     <Group justify="center" gap="xs">
-      
       <Button
         variant="default"
         size="compact-sm"
@@ -1461,25 +1483,55 @@ function BookingsPageContent() {
     </Group>
   );
 
+  const mobileTodayPaginationNav = (
+    <Group justify="center" gap="xs">
+      <Button
+        variant="default"
+        size="compact-sm"
+        disabled={todayPage <= 1}
+        onClick={() => setTodayPage((p) => Math.max(1, p - 1))}
+      >
+        Trước
+      </Button>
+      <Text size="sm" c="dimmed">
+        {todayPage}/{totalTodayListPages}
+      </Text>
+      <Button
+        variant="default"
+        size="compact-sm"
+        disabled={todayPage >= totalTodayListPages}
+        onClick={() => setTodayPage((p) => Math.min(totalTodayListPages, p + 1))}
+      >
+        Sau
+      </Button>
+    </Group>
+  );
+
+  const mobileListPaginationBar =
+    sortedBookings.length > 0 ? (
+      <Stack gap="xs">
+        <Select
+          label="Số thẻ mỗi trang"
+          size="sm"
+          data={mobilePageSizeSelectData}
+          value={String(mobileBookingsPageSize)}
+          onChange={(v) => {
+            if (!v) return;
+            setMobileBookingsPageSize(Number(v));
+            setPage(1);
+          }}
+          allowDeselect={false}
+        />
+        {mobileListPaginationNav}
+        <Text size="xs" c="dimmed" ta="center">
+          {sortedBookings.length} booking · trang {page}/{totalListPages}
+        </Text>
+      </Stack>
+    ) : null;
+
   const bookingsCards = (
     <Stack gap="sm">
-      {sortedBookings.length > 0 ? (
-        <Stack gap="sm">
-          <Select
-            label="Số thẻ mỗi trang"
-            size="sm"
-            data={mobilePageSizeSelectData}
-            value={String(mobileBookingsPageSize)}
-            onChange={(v) => {
-              if (!v) return;
-              setMobileBookingsPageSize(Number(v));
-              setPage(1);
-            }}
-            allowDeselect={false}
-          />
-          {totalListPages > 1 ? mobileListPaginationNav : null}
-        </Stack>
-      ) : null}
+      {mobileListPaginationBar}
       {pagedBookings.length === 0 ? (
         <Text c="dimmed" size="sm">
           Chưa có booking nào.
@@ -1585,70 +1637,180 @@ function BookingsPageContent() {
           );
         })
       )}
-      {sortedBookings.length > 0 && totalListPages > 1 ? mobileListPaginationNav : null}
+      {mobileListPaginationBar}
+    </Stack>
+  );
+
+  const mobileTodayPaginationBar =
+    todaySortedBookings.length > 0 ? (
+      <Stack gap="xs">
+        <Select
+          label="Số thẻ mỗi trang"
+          size="sm"
+          data={mobilePageSizeSelectData}
+          value={String(mobileBookingsPageSize)}
+          onChange={(v) => {
+            if (!v) return;
+            setMobileBookingsPageSize(Number(v));
+            setTodayPage(1);
+          }}
+          allowDeselect={false}
+        />
+        {mobileTodayPaginationNav}
+        <Text size="xs" c="dimmed" ta="center">
+          {todaySortedBookings.length} booking · trang {todayPage}/{totalTodayListPages}
+        </Text>
+      </Stack>
+    ) : null;
+
+  const todayCards = (
+    <Stack gap="sm">
+      {mobileTodayPaginationBar}
+      {pagedTodayBookings.length === 0 ? (
+        <Text c="dimmed" size="sm">
+          {todayBookings.length === 0
+            ? "Chưa có booking nào cho hôm nay."
+            : "Không có booking khớp bộ lọc hiện tại."}
+        </Text>
+      ) : (
+        pagedTodayBookings.map((booking) => {
+          const cust = state.customers.find((item) => item.id === booking.customerId);
+          const customer = cust?.fullName ?? "—";
+          const phone = displayCustomerPhone(cust?.phone);
+          const area = state.areas.find((item) => item.id === booking.areaId)?.name;
+          const table = state.tables.find((item) => item.id === booking.tableId)?.name;
+          const locationLine = formatTodayBookingAreaTable(booking, area, table);
+          const receptionStatus = getReceptionBookingStatus(booking, receptionThresholds);
+          const creator =
+            state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
+            "Không rõ";
+          const note = stripUnknownGuestTag(booking.note);
+          return (
+            <Card
+              key={booking.id}
+              withBorder
+              radius="md"
+              padding="md"
+              style={{ cursor: "pointer" }}
+              onClick={() => openBookingInList(booking)}
+            >
+              <Stack gap="sm">
+                <Group justify="space-between" align="flex-start" wrap="nowrap" gap="xs">
+                  <div style={{ minWidth: 0 }}>
+                    <Text fw={700} lineClamp={2}>
+                      {customer}
+                    </Text>
+                    <Text size="sm" c="dimmed" mt={4}>
+                      {phone}
+                    </Text>
+                  </div>
+                  <Badge color={receptionStatus.color} variant="light" size="lg">
+                    {receptionStatus.label}
+                  </Badge>
+                </Group>
+                <Text size="sm" fw={500}>
+                  {dayjs(booking.bookingAt).format("HH:mm")}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  {isGuestCountSpecified(booking) ? `${booking.guestCount} khách` : "Chưa rõ số khách"} ·{" "}
+                  {getTodayGuestTypeLabel(booking)}
+                </Text>
+                <Text size="sm" c="dimmed">
+                  {locationLine}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Người nhận: {creator}
+                </Text>
+                {note ? (
+                  <Text size="xs" c="dimmed" lineClamp={3}>
+                    {note}
+                  </Text>
+                ) : null}
+              </Stack>
+            </Card>
+          );
+        })
+      )}
+      {mobileTodayPaginationBar}
     </Stack>
   );
 
   const todayTableFiltersCompact = (
     <Stack gap="sm">
-      <TextInputWithVoice
-        placeholder={todaySearchPlaceholder}
-        value={todaySearchQuery}
-        onChange={(event) => {
-          setTodaySearchQuery(event.currentTarget.value);
-          setTodayPage(1);
-        }}
-        size="md"
-        voiceIconSize="md"
-      />
-      <Group grow align="flex-end" wrap="wrap" gap="sm">
-        <Select
-          label="Trạng thái"
-          placeholder="Tất cả"
-          clearable
-          data={bookingStatusFilterOptions}
-          value={todayStatusFilter}
-          onChange={(value) => {
-            setTodayStatusFilter((value as BookingStatus | null) ?? null);
+      <Group align="flex-end" gap="sm" wrap="nowrap">
+        <TextInputWithVoice
+          placeholder={todaySearchPlaceholder}
+          value={todaySearchQuery}
+          onChange={(event) => {
+            setTodaySearchQuery(event.currentTarget.value);
             setTodayPage(1);
           }}
           size="md"
+          voiceIconSize="md"
+          style={{ flex: 1, minWidth: 0 }}
         />
-        <Select
-          label="Hiển thị lễ tân"
-          placeholder="Tất cả"
-          clearable
-          data={todayReceptionStatusFilterOptions}
-          value={todayReceptionStatusFilter}
-          onChange={(value) => {
-            setTodayReceptionStatusFilter(value);
-            setTodayPage(1);
-          }}
+        <Button
+          variant="default"
           size="md"
-        />
-        <Select
-          label="Loại khách"
-          placeholder="Tất cả"
-          clearable
-          data={todayGuestTypeFilterOptions}
-          value={todayGuestTypeFilter}
-          onChange={(value) => {
-            setTodayGuestTypeFilter(value);
-            setTodayPage(1);
-          }}
-          size="md"
-        />
-        <Select
-          label="Bàn"
-          data={tableAssignFilterOptions}
-          value={todayTableAssignFilter}
-          onChange={(value) => {
-            setTodayTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
-            setTodayPage(1);
-          }}
-          size="md"
-        />
+          aria-expanded={todayMobileFiltersOpen}
+          onClick={() => setTodayMobileFiltersOpen((open) => !open)}
+          rightSection={
+            todayMobileFiltersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />
+          }
+        >
+          {todayMobileFiltersOpen ? "Ẩn bộ lọc" : "Bộ lọc"}
+        </Button>
       </Group>
+      <Collapse expanded={todayMobileFiltersOpen}>
+        <Stack gap="sm" pt="xs">
+          <Select
+            label="Trạng thái"
+            placeholder="Tất cả"
+            clearable
+            data={bookingStatusFilterOptions}
+            value={todayStatusFilter}
+            onChange={(value) => {
+              setTodayStatusFilter((value as BookingStatus | null) ?? null);
+              setTodayPage(1);
+            }}
+            size="md"
+          />
+          <Select
+            label="Hiển thị lễ tân"
+            placeholder="Tất cả"
+            clearable
+            data={todayReceptionStatusFilterOptions}
+            value={todayReceptionStatusFilter}
+            onChange={(value) => {
+              setTodayReceptionStatusFilter(value);
+              setTodayPage(1);
+            }}
+            size="md"
+          />
+          <Select
+            label="Loại khách"
+            placeholder="Tất cả"
+            clearable
+            data={todayGuestTypeFilterOptions}
+            value={todayGuestTypeFilter}
+            onChange={(value) => {
+              setTodayGuestTypeFilter(value);
+              setTodayPage(1);
+            }}
+            size="md"
+          />
+          <Select
+            label="Bàn"
+            data={tableAssignFilterOptions}
+            value={todayTableAssignFilter}
+            onChange={(value) => {
+              setTodayTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
+              setTodayPage(1);
+            }}
+            size="md"
+          />
+        </Stack>
+      </Collapse>
     </Stack>
   );
 
@@ -1660,10 +1822,7 @@ function BookingsPageContent() {
           {todaySortedBookings.length}/{todayBookings.length} booking
           {todayBookings.length !== todaySortedBookings.length ? " (đã lọc)" : ""} trong ngày.
         </Text>
-        {isCompact ? (
-          todayTableFiltersCompact
-        ) : (
-          <Group align="flex-end" gap="sm" wrap="wrap" justify="flex-start">
+        <Group align="flex-end" gap="sm" wrap="wrap" justify="flex-start">
             <TextInputWithVoice
               placeholder={todaySearchPlaceholder}
               value={todaySearchQuery}
@@ -1729,8 +1888,7 @@ function BookingsPageContent() {
               w={132}
               miw={132}
             />
-          </Group>
-        )}
+        </Group>
       </Stack>
       <div style={{ height: 12 }} />
       <DataTable
@@ -1921,21 +2079,40 @@ function BookingsPageContent() {
 
   return (
     <Stack gap="md">
-      <PortalPageTitle order={isCompact ? 3 : 2}>
-        {isCompact ? "Đặt bàn" : "Đặt bàn"}
-      </PortalPageTitle>
+      <Group justify="space-between" align="center" wrap="wrap" gap="md">
+        <PortalPageTitle order={isCompact ? 3 : 2} mb={0}>
+          Đặt bàn
+        </PortalPageTitle>
+        <Button
+          color="brand"
+          size={isCompact ? "md" : "sm"}
+          onClick={() => setCreateModalOpened(true)}
+        >
+          Tạo mới
+        </Button>
+      </Group>
 
       <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>
         <Tabs.List grow>
           <Tabs.Tab value="today">Booking hôm nay</Tabs.Tab>
-          <Tabs.Tab value="create">Tạo mới</Tabs.Tab>
           <Tabs.Tab value="list">Danh sách booking</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="today" pt="md">
-          {bookingsTodayTable}
-        </Tabs.Panel>
-        <Tabs.Panel value="create" pt="md">
-          {createForm}
+          {isCompact ? (
+            <PortalSectionCard>
+              <Stack gap="md">
+                <Text fw={600}>Booking hôm nay</Text>
+                <Text size="sm" c="dimmed">
+                  {todaySortedBookings.length}/{todayBookings.length} booking
+                  {todayBookings.length !== todaySortedBookings.length ? " (đã lọc)" : ""} trong ngày.
+                </Text>
+                {todayTableFiltersCompact}
+                {todayCards}
+              </Stack>
+            </PortalSectionCard>
+          ) : (
+            bookingsTodayTable
+          )}
         </Tabs.Panel>
         <Tabs.Panel value="list" pt="md">
           {isCompact ? (
@@ -1951,6 +2128,15 @@ function BookingsPageContent() {
           )}
         </Tabs.Panel>
       </Tabs>
+      <Modal
+        opened={createModalOpened}
+        onClose={() => setCreateModalOpened(false)}
+        title="Tạo mới"
+        size="lg"
+        centered
+      >
+        {createForm}
+      </Modal>
       {assignFormBooking ? (
         <Modal
           opened
