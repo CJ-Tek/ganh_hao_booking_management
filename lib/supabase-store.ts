@@ -1005,7 +1005,7 @@ export async function updateBookingOrderInSupabase(input: {
   if (nextTableId) {
     const { data: table, error: tableErr } = await client
       .from("tables")
-      .select("id, branch_id, area_id, seats, status")
+      .select("id, branch_id, area_id, seats, status, name")
       .eq("id", nextTableId)
       .maybeSingle();
     if (tableErr || !table) {
