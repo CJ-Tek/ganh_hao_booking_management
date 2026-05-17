@@ -58,6 +58,7 @@ import {
   upsertTableInSupabase,
   upsertTablesBatchInSupabase,
   updateBookingGuestCountInSupabase,
+  updateBookingOrderInSupabase,
   updateBookingRuntimeSettingsInSupabase,
 } from "@/lib/supabase-store";
 import { supabase } from "@/lib/supabase";
@@ -116,6 +117,12 @@ interface AppContextValue {
     guestCount?: number;
   }) => Promise<ActionResult>;
   updateBookingGuestCount: (bookingId: string, guestCount: number) => Promise<ActionResult>;
+  updateBookingOrder: (input: {
+    bookingId: string;
+    bookingAt: string;
+    guestCount?: number;
+    allowDuplicate?: boolean;
+  }) => Promise<ActionResult>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   checkInBooking: (bookingId: string) => Promise<void>;
   deleteCustomers: (customerIds: string[]) => Promise<ActionResult>;
@@ -486,6 +493,31 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return { ok: false, message: "Chưa kết nối Supabase." };
     }
     const result = await updateBookingGuestCountInSupabase(bookingId, guestCount);
+    if (result.ok && !reloadInFlightRef.current) {
+      reloadInFlightRef.current = true;
+      lastReloadAtRef.current = Date.now();
+      try {
+        await reload();
+      } finally {
+        reloadInFlightRef.current = false;
+      }
+    }
+    return result;
+  };
+
+  const updateBookingOrder = async (input: {
+    bookingId: string;
+    bookingAt: string;
+    guestCount?: number;
+    allowDuplicate?: boolean;
+  }) => {
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    if (!hasSupabase) {
+      return { ok: false, message: "Chưa kết nối Supabase." };
+    }
+    const result = await updateBookingOrderInSupabase(input);
     if (result.ok && !reloadInFlightRef.current) {
       reloadInFlightRef.current = true;
       lastReloadAtRef.current = Date.now();
@@ -1074,6 +1106,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     createBooking,
     assignBookingToTable,
     updateBookingGuestCount,
+    updateBookingOrder,
     updateBookingStatus,
     checkInBooking,
     deleteCustomers,

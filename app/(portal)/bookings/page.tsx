@@ -99,6 +99,10 @@ function BookingCheckInButton(props: {
   );
 }
 
+function canEditBookingOrder(booking: Pick<Booking, "status">): boolean {
+  return booking.status === "pending" || booking.status === "confirmed";
+}
+
 /** Mantine NumberInput may emit string while editing; keep a single parse path for guest counts. */
 function parseGuestCountFromNumberInput(value: number | string | undefined): number | undefined {
   if (value === undefined || value === "") return undefined;
@@ -284,6 +288,7 @@ function BookingsPageContent() {
     createBooking,
     assignBookingToTable,
     updateBookingGuestCount,
+    updateBookingOrder,
     updateBookingStatus,
     checkInBooking,
     hasSupabase,
@@ -314,6 +319,10 @@ function BookingsPageContent() {
   const [guestType, setGuestType] = useState<string | null>("Khách thường");
   const [activeTab, setActiveTab] = useState<string | null>("today");
   const [createModalOpened, setCreateModalOpened] = useState(false);
+  const [editBooking, setEditBooking] = useState<Booking | null>(null);
+  const [editBookingAt, setEditBookingAt] = useState<string | null>(null);
+  const [editGuestCount, setEditGuestCount] = useState<number | undefined>(undefined);
+  const [isEditSaving, setIsEditSaving] = useState(false);
   const [listMobileFiltersOpen, setListMobileFiltersOpen] = useState(false);
   const [todayMobileFiltersOpen, setTodayMobileFiltersOpen] = useState(false);
   const [listFocusBookingId, setListFocusBookingId] = useState<string | null>(null);
@@ -611,6 +620,55 @@ function BookingsPageContent() {
       tableId: picked.id,
       guestCount: guestForAssign,
     });
+  };
+
+  const openEditBookingModal = (booking: Booking) => {
+    setEditBooking(booking);
+    setEditBookingAt(booking.bookingAt);
+    setEditGuestCount(
+      isGuestCountSpecified(booking) ? Math.max(1, booking.guestCount) : undefined
+    );
+  };
+
+  const closeEditBookingModal = () => {
+    setEditBooking(null);
+    setEditBookingAt(null);
+    setEditGuestCount(undefined);
+  };
+
+  const submitEditBooking = async (options?: { allowDuplicate?: boolean }) => {
+    if (!editBooking || !editBookingAt) {
+      notifications.show({ color: "red", message: "Vui lòng chọn thời gian đến." });
+      return;
+    }
+    setIsEditSaving(true);
+    try {
+      const result = await updateBookingOrder({
+        bookingId: editBooking.id,
+        bookingAt: dayjs(editBookingAt).toISOString(),
+        guestCount:
+          typeof editGuestCount === "number" && Number.isFinite(editGuestCount)
+            ? Math.max(1, editGuestCount)
+            : undefined,
+        allowDuplicate: options?.allowDuplicate,
+      });
+      if (!result.ok && result.code === DUPLICATE_BOOKING_CODE && result.duplicates?.length) {
+        notifications.show({ color: "orange", message: result.message });
+        confirmDuplicateBookingSecond(result.duplicates, () => {
+          void submitEditBooking({ allowDuplicate: true });
+        });
+        return;
+      }
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        closeEditBookingModal();
+      }
+    } finally {
+      setIsEditSaving(false);
+    }
   };
 
   const openAssignOptions = (booking: Booking) => {
@@ -1416,6 +1474,15 @@ function BookingsPageContent() {
             render: (booking) => (
               booking.status === "cancelled" || booking.status === "completed" || booking.status === "no_show" ? null : (
                 <Group gap={6} wrap="wrap">
+                  {canEditBookingOrder(booking) ? (
+                    <Button
+                      size="compact-xs"
+                      variant="outline"
+                      onClick={() => openEditBookingModal(booking)}
+                    >
+                      Sửa
+                    </Button>
+                  ) : null}
                   {booking.status === "pending" ? (
                     <Button
                       size="compact-xs"
@@ -1595,6 +1662,15 @@ function BookingsPageContent() {
                 <Group grow gap="xs">
                   {booking.status === "cancelled" || booking.status === "completed" || booking.status === "no_show" ? null : (
                     <>
+                      {canEditBookingOrder(booking) ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openEditBookingModal(booking)}
+                        >
+                          Sửa
+                        </Button>
+                      ) : null}
                       {booking.status === "pending" ? (
                         <Button
                           size="sm"
@@ -1725,6 +1801,18 @@ function BookingsPageContent() {
                   <Text size="xs" c="dimmed" lineClamp={3}>
                     {note}
                   </Text>
+                ) : null}
+                {canEditBookingOrder(booking) ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openEditBookingModal(booking);
+                    }}
+                  >
+                    Sửa giờ / số khách
+                  </Button>
                 ) : null}
               </Stack>
             </Card>
@@ -2000,6 +2088,23 @@ function BookingsPageContent() {
                 </Text>
               ),
           },
+          {
+            accessor: "actions",
+            title: "Thao tác",
+            render: (booking) =>
+              canEditBookingOrder(booking) ? (
+                <Button
+                  size="compact-xs"
+                  variant="outline"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openEditBookingModal(booking);
+                  }}
+                >
+                  Sửa
+                </Button>
+              ) : null,
+          },
         ]}
       />
     </PortalSectionCard>
@@ -2136,6 +2241,51 @@ function BookingsPageContent() {
         centered
       >
         {createForm}
+      </Modal>
+      <Modal
+        opened={editBooking != null}
+        onClose={closeEditBookingModal}
+        title="Chỉnh booking"
+        size="md"
+        centered
+      >
+        {editBooking ? (
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">
+              Khách{" "}
+              <strong>
+                {state.customers.find((item) => item.id === editBooking.customerId)?.fullName ??
+                  "—"}
+              </strong>
+            </Text>
+            <DateTimePicker
+              value={editBookingAt}
+              onChange={setEditBookingAt}
+              label="Thời gian đến"
+              valueFormat="DD/MM/YYYY HH:mm"
+              size={isCompact ? "md" : "sm"}
+            />
+            <NumberInput
+              label="Số khách"
+              description="Để trống nếu chưa rõ số khách."
+              value={editGuestCount}
+              onChange={(value) => setEditGuestCount(parseGuestCountFromNumberInput(value))}
+              min={1}
+              allowDecimal={false}
+              clampBehavior="strict"
+              placeholder="Chưa rõ"
+              size={isCompact ? "md" : "sm"}
+            />
+            <Group justify="flex-end" gap="sm">
+              <Button variant="default" onClick={closeEditBookingModal}>
+                Hủy
+              </Button>
+              <Button loading={isEditSaving} onClick={() => void submitEditBooking()}>
+                Lưu
+              </Button>
+            </Group>
+          </Stack>
+        ) : null}
       </Modal>
       {assignFormBooking ? (
         <Modal
