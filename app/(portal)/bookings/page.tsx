@@ -73,9 +73,14 @@ const LIST_BOOKING_PULSE_TOTAL_MS = LIST_BOOKING_PULSE_CYCLE_MS * LIST_BOOKING_P
 
 const MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS = 220;
 
-/** Page `<Modal>` stacks above Mantine `modals`; Select dropdowns portal with a lower default z-index. */
+/** Page `<Modal>` stacks above Mantine `modals`; portaled overlays need a higher z-index. */
 const MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX = 600;
 const MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX = 700;
+
+const portalModalOverlayPopoverProps = {
+  zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX,
+  withinPortal: true,
+} as const;
 
 function BookingCheckInButton(props: {
   size: "compact-xs" | "sm";
@@ -1407,6 +1412,8 @@ function BookingsPageContent() {
           label="Thời gian đến"
           valueFormat="DD/MM/YYYY HH:mm"
           size={isCompact ? "md" : "sm"}
+          popoverProps={portalModalOverlayPopoverProps}
+          timePickerProps={{ popoverProps: portalModalOverlayPopoverProps }}
         />
         <NumberInput
           label="Số khách (tùy chọn)"
@@ -2773,6 +2780,8 @@ function BookingsPageContent() {
               label="Thời gian đến"
               valueFormat="DD/MM/YYYY HH:mm"
               size={isCompact ? "md" : "sm"}
+              popoverProps={portalModalOverlayPopoverProps}
+              timePickerProps={{ popoverProps: portalModalOverlayPopoverProps }}
             />
             {editTableConflictMessage ? (
               <Alert color="red" variant="light" title="Trùng khung giờ trên bàn">
@@ -2816,7 +2825,7 @@ function BookingsPageContent() {
                 searchable
                 clearable
                 size={isCompact ? "md" : "sm"}
-                comboboxProps={{ zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX }}
+                comboboxProps={{ zIndex: portalModalOverlayPopoverProps.zIndex }}
               />
               <Select
                 label="Bàn"
@@ -2828,7 +2837,7 @@ function BookingsPageContent() {
                 clearable
                 disabled={!editAreaId}
                 size={isCompact ? "md" : "sm"}
-                comboboxProps={{ zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX }}
+                comboboxProps={{ zIndex: portalModalOverlayPopoverProps.zIndex }}
               />
             </Group>
             {editModalTableCapacityHint ? (

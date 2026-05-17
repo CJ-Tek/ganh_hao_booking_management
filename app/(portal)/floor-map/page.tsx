@@ -45,6 +45,7 @@ import {
   X,
 } from "lucide-react";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
+import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
 import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import {
   useCallback,
@@ -74,6 +75,8 @@ import { bookingStatusColor, bookingStatusLabel, tableStatusColor, tableStatusLa
 import {
   BOOKING_GUEST_TYPE_OPTIONS,
   displayCustomerPhone,
+  findAssignableSlotConflictsAtTable,
+  formatTableSlotConflictMessage,
   getAssignableCandidateTables,
   inferGuestTypeLabel,
   pickPrimaryBookingOnTable,
@@ -191,6 +194,17 @@ function getTableGridPosition(table: DiningTable, gridColumns: number, gridRows:
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function formatScheduleVisitDate(iso: string): string {
+  const date = dayjs(iso);
+  if (date.isSame(dayjs(), "day")) {
+    return "Hôm nay";
+  }
+  if (date.isSame(dayjs().add(1, "day"), "day")) {
+    return "Ngày mai";
+  }
+  return date.format("DD/MM/YYYY");
 }
 
 function isTableInGrid(table: DiningTable, gridColumns: number, gridRows: number) {
@@ -435,6 +449,116 @@ export default function FloorMapPage() {
     const customer = state.customers.find((c) => c.id === activeBookingForDetailTable.customerId);
     return customer?.fullName ?? "";
   }, [activeBookingForDetailTable, state.customers]);
+
+  const registerTableBranch = useMemo(() => {
+    if (!registerTable) {
+      return null;
+    }
+    const branch = state.branches.find((item) => item.id === registerTable.branchId);
+    return branch ? { id: branch.id, name: branch.name } : null;
+  }, [registerTable, state.branches]);
+
+  const registerVoiceAreas = useMemo(() => {
+    if (!registerTable) {
+      return [];
+    }
+    return state.areas
+      .filter(
+        (area) =>
+          area.branchId === registerTable.branchId && filteredBranchIds.includes(area.branchId)
+      )
+      .map((area) => ({ id: area.id, name: area.name }));
+  }, [filteredBranchIds, registerTable, state.areas]);
+
+  const registerVoiceTables = useMemo(() => {
+    if (!registerTable) {
+      return [];
+    }
+    return state.tables
+      .filter(
+        (table) =>
+          table.branchId === registerTable.branchId && filteredBranchIds.includes(table.branchId)
+      )
+      .map((table) => ({
+        id: table.id,
+        name: table.name,
+        seats: table.seats,
+        areaId: table.areaId,
+        status: table.status,
+      }));
+  }, [filteredBranchIds, registerTable, state.tables]);
+
+  const registerBookingCandidate = useMemo((): Booking | null => {
+    if (!registerTable) {
+      return null;
+    }
+    let startIso: string | null = null;
+    if (registerArrivalMode === "immediate") {
+      startIso = dayjs().toISOString();
+    } else if (registerBookingDate && registerBookingTime) {
+      const [hour, minute] = registerBookingTime.split(":").map((value) => Number(value) || 0);
+      startIso = dayjs(registerBookingDate, "YYYY-MM-DD")
+        .hour(hour)
+        .minute(minute)
+        .second(0)
+        .millisecond(0)
+        .toISOString();
+    }
+    if (!startIso) {
+      return null;
+    }
+    const endIso = dayjs(startIso)
+      .add(state.bookingRuntimeSettings.standardTurnaroundMinutes, "minute")
+      .toISOString();
+    return {
+      id: "__floor_register__",
+      customerId: "",
+      branchId: registerTable.branchId,
+      areaId: registerTable.areaId,
+      tableId: registerTable.id,
+      guestCount: Math.max(1, Number(registerGuestCount || 1)),
+      bookingAt: startIso,
+      startTime: startIso,
+      endTime: endIso,
+      status: "confirmed",
+      createdByUserId: "",
+    };
+  }, [
+    registerArrivalMode,
+    registerBookingDate,
+    registerBookingTime,
+    registerGuestCount,
+    registerTable,
+    state.bookingRuntimeSettings.standardTurnaroundMinutes,
+  ]);
+
+  const registerTableSlotConflicts = useMemo(() => {
+    if (!registerBookingCandidate?.tableId) {
+      return [];
+    }
+    return findAssignableSlotConflictsAtTable(
+      registerBookingCandidate,
+      registerBookingCandidate.tableId,
+      state.bookings
+    );
+  }, [registerBookingCandidate, state.bookings]);
+
+  const registerTableConflictMessage = useMemo(() => {
+    if (!registerTable || registerTableSlotConflicts.length === 0) {
+      return null;
+    }
+    const conflictCustomer = state.customers.find(
+      (item) => item.id === registerTableSlotConflicts[0]?.customerId
+    )?.fullName;
+    return formatTableSlotConflictMessage(registerTableSlotConflicts, {
+      tableName: registerTable.name,
+      customerName: conflictCustomer,
+    });
+  }, [registerTable, registerTableSlotConflicts, state.customers]);
+
+  const registerImmediateBlocked =
+    registerTable?.status === "occupied" && registerArrivalMode === "immediate";
+
   const pendingBookings = useMemo(
     () =>
       state.bookings
@@ -1124,21 +1248,50 @@ export default function FloorMapPage() {
     setRegisterModalTab("book");
   }, []);
 
-  const openRegistrationForTable = (table: DiningTable) => {
+  const openRegistrationForTable = (table: DiningTable, options?: { preferHoldAfterOccupied?: boolean }) => {
     panStateRef.current = null;
     placementTapRef.current = null;
     setDetailTable(null);
     setRegisterTable(table);
     setRegisterGuestCount(Math.max(1, table.seats || 1));
-    setRegisterBookingDate(dayjs().format("YYYY-MM-DD"));
-    setRegisterBookingTime(dayjs().format("HH:mm"));
     setRegisterNote("");
     setRegisterGuestType("Khách thường");
     setRegisterCustomerName("");
     setRegisterCustomerPhone("");
     setRegisterPendingBookingId(null);
-    setRegisterArrivalMode("immediate");
     setRegisterModalTab("book");
+
+    const preferHold =
+      options?.preferHoldAfterOccupied && (table.status === "occupied" || table.status === "hold");
+    if (preferHold) {
+      const primaryBooking = pickPrimaryBookingOnTable(table.id, state.bookings);
+      const afterEnd = primaryBooking?.endTime
+        ? dayjs(primaryBooking.endTime).add(1, "minute")
+        : dayjs().add(1, "hour");
+      setRegisterArrivalMode("hold");
+      setRegisterBookingDate(afterEnd.format("YYYY-MM-DD"));
+      setRegisterBookingTime(afterEnd.format("HH:mm"));
+    } else {
+      setRegisterArrivalMode("immediate");
+      setRegisterBookingDate(dayjs().format("YYYY-MM-DD"));
+      setRegisterBookingTime(dayjs().format("HH:mm"));
+    }
+  };
+
+  const openNewBookingForTable = (table: DiningTable) => {
+    if (registerTable?.id === table.id) {
+      closeRegistrationPanel();
+      return;
+    }
+    closeDetailModal();
+    openRegistrationForTable(table, { preferHoldAfterOccupied: true });
+  };
+
+  const openDetailForTable = (table: DiningTable) => {
+    panStateRef.current = null;
+    placementTapRef.current = null;
+    setRegisterTable(null);
+    setDetailTable(table);
   };
 
   const handleViewOrRegisterForTable = (table: DiningTable) => {
@@ -1150,20 +1303,28 @@ export default function FloorMapPage() {
         });
         return;
       }
-      setRegisterTable(null);
-      setDetailTable(table);
+      openDetailForTable(table);
       return;
     }
-    if (table.status === "available") {
+    if (table.status === "occupied") {
+      if (detailTable?.id === table.id) {
+        closeDetailModal();
+        return;
+      }
+      openDetailForTable(table);
+      return;
+    }
+    if (table.status === "available" || table.status === "hold") {
       if (registerTable?.id === table.id) {
         closeRegistrationPanel();
         return;
       }
-      openRegistrationForTable(table);
+      openRegistrationForTable(table, {
+        preferHoldAfterOccupied: table.status === "hold",
+      });
       return;
     }
-    setRegisterTable(null);
-    setDetailTable(table);
+    openDetailForTable(table);
   };
 
   const handleRegisterCustomer = async () => {
@@ -1186,6 +1347,20 @@ export default function FloorMapPage() {
       notifications.show({
         color: "red",
         message: "Vui lòng chọn ngày và giờ đến khi chọn Giữ chỗ.",
+      });
+      return;
+    }
+    if (registerTable.status === "occupied" && registerArrivalMode === "immediate") {
+      notifications.show({
+        color: "red",
+        message: "Bàn đang có khách — chọn Giữ chỗ và đặt khung giờ sau khi bàn trống.",
+      });
+      return;
+    }
+    if (registerTableSlotConflicts.length > 0) {
+      notifications.show({
+        color: "red",
+        message: registerTableConflictMessage ?? "Khung giờ trùng với booking khác trên bàn này.",
       });
       return;
     }
@@ -2101,7 +2276,13 @@ export default function FloorMapPage() {
                               </ActionIcon>
                             </Menu.Target>
                             <Menu.Dropdown>
-                                  {(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
+                              <Menu.Item
+                                onClick={() => openDetailForTable(table)}
+                              >
+                                Lịch & booking hiện tại
+                              </Menu.Item>
+                              <Menu.Divider />
+                              {(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
                                 (nextStatus) => (
                                   <Menu.Item
                                     key={nextStatus}
@@ -2581,9 +2762,20 @@ export default function FloorMapPage() {
       >
         {registerTable ? (
           <Stack gap="sm">
-            <Text size="sm" c="dimmed">
-              {registerTable.seats} ghế · {tableStatusLabel[registerTable.status]}
-            </Text>
+            <Group justify="space-between" align="flex-start" wrap="wrap" gap="xs">
+              <Text size="sm" c="dimmed">
+                {registerTable.seats} ghế · {tableStatusLabel[registerTable.status]}
+              </Text>
+              {registerTable.status === "occupied" || registerTable.status === "hold" ? (
+                <Button
+                  variant="subtle"
+                  size="compact-xs"
+                  onClick={() => openDetailForTable(registerTable)}
+                >
+                  Lịch & booking hiện tại
+                </Button>
+              ) : null}
+            </Group>
             <Tabs
               value={registerModalTab}
               onChange={(value) =>
@@ -2597,6 +2789,80 @@ export default function FloorMapPage() {
 
               <Tabs.Panel value="book" pt="sm">
                 <Stack gap="sm">
+                  {registerTableBranch ? (
+                    <Group justify="flex-start">
+                      <VoiceBookingAssistant
+                        branch={registerTableBranch}
+                        areas={registerVoiceAreas}
+                        tables={registerVoiceTables}
+                        onCreateBooking={async (input) => {
+                          if (!registerTable) {
+                            return { ok: false, message: "Không có bàn được chọn." };
+                          }
+                          const bookingAtIso = dayjs(input.bookingAt).toISOString();
+                          const candidate: Booking = {
+                            id: "__floor_voice__",
+                            customerId: "",
+                            branchId: registerTable.branchId,
+                            areaId: registerTable.areaId,
+                            tableId: registerTable.id,
+                            guestCount:
+                              typeof input.guestCount === "number" && Number.isFinite(input.guestCount)
+                                ? Math.max(1, Math.round(input.guestCount))
+                                : 1,
+                            bookingAt: bookingAtIso,
+                            startTime: bookingAtIso,
+                            endTime: dayjs(bookingAtIso)
+                              .add(
+                                state.bookingRuntimeSettings.standardTurnaroundMinutes,
+                                "minute"
+                              )
+                              .toISOString(),
+                            status: "confirmed",
+                            createdByUserId: "",
+                          };
+                          const conflicts = findAssignableSlotConflictsAtTable(
+                            candidate,
+                            registerTable.id,
+                            state.bookings
+                          );
+                          if (conflicts.length > 0) {
+                            const conflictCustomer = state.customers.find(
+                              (item) => item.id === conflicts[0]?.customerId
+                            )?.fullName;
+                            return {
+                              ok: false,
+                              message:
+                                formatTableSlotConflictMessage(conflicts, {
+                                  tableName: registerTable.name,
+                                  customerName: conflictCustomer,
+                                }) ?? "Khung giờ trùng với booking khác trên bàn này.",
+                            };
+                          }
+                          if (
+                            registerTable.status === "occupied" &&
+                            dayjs(bookingAtIso).isBefore(dayjs().add(1, "minute"))
+                          ) {
+                            return {
+                              ok: false,
+                              message:
+                                "Bàn đang có khách — chọn khung giờ sau khi bàn trống.",
+                            };
+                          }
+                          const result = await createBooking({
+                            ...input,
+                            branchId: registerTable.branchId,
+                            areaId: registerTable.areaId,
+                            tableId: registerTable.id,
+                          });
+                          if (result.ok) {
+                            closeRegistrationPanel();
+                          }
+                          return result;
+                        }}
+                      />
+                    </Group>
+                  ) : null}
                   <Radio.Group
                     label="Đặt bàn"
                     value={registerArrivalMode}
@@ -2606,9 +2872,23 @@ export default function FloorMapPage() {
                   >
                     <Stack gap={6} mt={4}>
                       <Radio value="hold" label="Giữ chỗ" />
-                      <Radio value="immediate" label="Vào bàn ngay" />
+                      <Radio
+                        value="immediate"
+                        label="Vào bàn ngay"
+                        disabled={registerTable.status === "occupied"}
+                      />
                     </Stack>
                   </Radio.Group>
+                  {registerTable.status === "occupied" ? (
+                    <Text size="xs" c="dimmed">
+                      Bàn đang có khách — chỉ đặt thêm booking ở khung giờ không trùng lịch hiện tại.
+                    </Text>
+                  ) : null}
+                  {registerTableConflictMessage ? (
+                    <Alert color="red" variant="light" title="Trùng khung giờ trên bàn">
+                      {registerTableConflictMessage}
+                    </Alert>
+                  ) : null}
                   {registerArrivalMode === "hold" ? (
                     <Flex
                       direction={{ base: "column", sm: "row" }}
@@ -2673,7 +2953,12 @@ export default function FloorMapPage() {
                     </Button>
                     <Button
                       loading={registerSaving}
-                      disabled={!hasSupabase || isLoading}
+                      disabled={
+                        !hasSupabase ||
+                        isLoading ||
+                        registerImmediateBlocked ||
+                        registerTableSlotConflicts.length > 0
+                      }
                       onClick={() => void handleRegisterCustomer()}
                     >
                       Tạo booking
@@ -2750,21 +3035,35 @@ export default function FloorMapPage() {
               ) : null}
             </Group>
 
-            {!isEmployee && detailTable.status === "hold" ? (
-              <Button
-                variant="light"
-                size="compact-sm"
-                w="fit-content"
-                onClick={() => {
-                  const t = detailTable;
-                  closeDetailModal();
-                  setRegisterTable(t);
-                  setRegisterModalTab("assign");
-                  setRegisterPendingBookingId(null);
-                }}
-              >
-                Gán booking chờ vào bàn này…
-              </Button>
+            {!isEmployee ? (
+              <Group gap="xs">
+                {detailTable.status === "occupied" || detailTable.status === "hold" ? (
+                  <Button
+                    variant="filled"
+                    color="brand"
+                    size="compact-sm"
+                    onClick={() => openNewBookingForTable(detailTable)}
+                  >
+                    Đặt bàn mới
+                  </Button>
+                ) : null}
+                {detailTable.status === "hold" ? (
+                  <Button
+                    variant="filled"
+                    color="blue"
+                    size="compact-sm"
+                    onClick={() => {
+                      const t = detailTable;
+                      closeDetailModal();
+                      setRegisterTable(t);
+                      setRegisterModalTab("assign");
+                      setRegisterPendingBookingId(null);
+                    }}
+                  >
+                    Gán booking chờ vào bàn này…
+                  </Button>
+                ) : null}
+              </Group>
             ) : null}
 
             {activeBookingForDetailTable ? (
@@ -2826,7 +3125,7 @@ export default function FloorMapPage() {
                         const checkInBtn = (
                           <Button
                             size="xs"
-                            variant="light"
+                            variant="filled"
                             color="green"
                             disabled={checkInDisabled}
                             loading={detailBookingActionLoading}
@@ -2845,12 +3144,7 @@ export default function FloorMapPage() {
                       })() : null}
                       <Button
                         size="xs"
-                        variant={
-                          activeBookingForDetailTable.status === "checked_in" ||
-                          activeBookingForDetailTable.status === "seated"
-                            ? "filled"
-                            : "light"
-                        }
+                        variant="filled"
                         color={
                           activeBookingForDetailTable.status === "checked_in" ||
                           activeBookingForDetailTable.status === "seated"
@@ -2906,6 +3200,7 @@ export default function FloorMapPage() {
                 <Table striped highlightOnHover withTableBorder withColumnBorders>
                   <Table.Thead>
                     <Table.Tr>
+                      <Table.Th>Ngày đến</Table.Th>
                       <Table.Th>Giờ</Table.Th>
                       <Table.Th>Khách</Table.Th>
                       <Table.Th>Số khách</Table.Th>
@@ -2915,7 +3210,7 @@ export default function FloorMapPage() {
                   <Table.Tbody>
                     {(detailTableBlockState?.confirmedSchedule ?? []).length === 0 ? (
                       <Table.Tr>
-                        <Table.Td colSpan={4}>
+                        <Table.Td colSpan={5}>
                           <Text size="sm" c="dimmed" ta="center">
                             Chưa có booking sắp tới trên bàn này.
                           </Text>
@@ -2925,8 +3220,10 @@ export default function FloorMapPage() {
                       detailTableBlockState!.confirmedSchedule.map((booking) => {
                         const customerName =
                           state.customers.find((c) => c.id === booking.customerId)?.fullName ?? "—";
+                        const visitAt = booking.startTime ?? booking.bookingAt;
                         return (
                           <Table.Tr key={booking.id}>
+                            <Table.Td>{formatScheduleVisitDate(visitAt)}</Table.Td>
                             <Table.Td>
                               {dayjs(booking.startTime).format("HH:mm")} –{" "}
                               {dayjs(booking.endTime).format("HH:mm")}
@@ -3015,7 +3312,7 @@ export default function FloorMapPage() {
                                 {entry.status === "offered" ? (
                                   <Button
                                     size="compact-xs"
-                                    variant="light"
+                                    variant="filled"
                                     color="green"
                                     loading={detailWaitlistActionId === entry.id}
                                     onClick={() => void handleConfirmWaitlistOffer(entry.id)}
