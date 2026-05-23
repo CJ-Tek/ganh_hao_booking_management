@@ -13,11 +13,9 @@ import {
   Modal,
   NumberInput,
   Radio,
-  ScrollArea,
   Select,
   SegmentedControl,
   Stack,
-  Table,
   Tabs,
   Text,
   TextInput,
@@ -49,6 +47,9 @@ import {
   BookingCalendarPanel,
   type BookingCalendarPanelHandle,
 } from "@/components/booking-calendar-panel";
+import { RegisterPendingAssignTable } from "@/components/floor-map/register-pending-assign-table";
+import { TableBlockConfirmedScheduleTable } from "@/components/floor-map/table-block-confirmed-schedule-table";
+import { TableBlockWaitlistTable } from "@/components/floor-map/table-block-waitlist-table";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
 import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import {
@@ -85,6 +86,7 @@ import {
   findAssignableSlotConflictsAtTable,
   formatTableSlotConflictMessage,
   getAssignableCandidateTables,
+  pickNonOverlappingBookingsForTable,
   inferGuestTypeLabel,
   deriveTableStatusFromDayBookings,
   pickPrimaryBookingOnTable,
@@ -99,7 +101,6 @@ import {
 } from "@/lib/supabase-store";
 import {
   type Booking,
-  type BookingWaitlistEntry,
   type Customer,
   type DiningTable,
   type TableBlockState,
@@ -137,22 +138,6 @@ function TableBlockBookingPeek(props: {
     </Stack>
   );
 }
-
-const waitlistStatusLabel: Record<BookingWaitlistEntry["status"], string> = {
-  waiting: "Đang chờ",
-  offered: "Được mời xác nhận",
-  expired: "Hết hạn",
-  cancelled: "Đã hủy",
-  promoted: "Đã xác nhận",
-};
-
-const waitlistStatusColor: Record<BookingWaitlistEntry["status"], string> = {
-  waiting: "orange",
-  offered: "cyan",
-  expired: "gray",
-  cancelled: "red",
-  promoted: "green",
-};
 
 const TABLE_STATUS_SURFACE_CLASS: Record<TableStatus, string> = {
   available: classes.statusSurface_available,
@@ -205,17 +190,6 @@ function getTableGridPosition(table: DiningTable, gridColumns: number, gridRows:
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
-}
-
-function formatScheduleVisitDate(iso: string): string {
-  const date = dayjs(iso);
-  if (date.isSame(dayjs(), "day")) {
-    return "Hôm nay";
-  }
-  if (date.isSame(dayjs().add(1, "day"), "day")) {
-    return "Ngày mai";
-  }
-  return date.format("DD/MM/YYYY");
 }
 
 function isTableInGrid(table: DiningTable, gridColumns: number, gridRows: number) {
@@ -362,7 +336,7 @@ export default function FloorMapPage() {
   );
   const [registerNote, setRegisterNote] = useState("");
   const [registerGuestType, setRegisterGuestType] = useState<string | null>("Khách thường");
-  const [registerPendingBookingId, setRegisterPendingBookingId] = useState<string | null>(null);
+  const [registerPendingSelected, setRegisterPendingSelected] = useState<Booking[]>([]);
   const [registerModalTab, setRegisterModalTab] = useState<"book" | "assign">("book");
   const [registerSaving, setRegisterSaving] = useState(false);
   const { isBusy: isTableStatusBusy, run: runTableStatusAction } = useBusyId();
@@ -1316,10 +1290,47 @@ export default function FloorMapPage() {
     setRegisterBookingTime(dayjs().format("HH:mm"));
     setRegisterNote("");
     setRegisterGuestType("Khách thường");
-    setRegisterPendingBookingId(null);
+    setRegisterPendingSelected([]);
     setRegisterArrivalMode("immediate");
     setRegisterModalTab("book");
   }, []);
+
+  const openAssignPendingForTable = (table: DiningTable) => {
+    panStateRef.current = null;
+    placementTapRef.current = null;
+    setDetailTable(null);
+    setDetailTableBlockState(null);
+    setDetailTableBlockLoading(false);
+    setDetailWaitlistActionId(null);
+    setRegisterTable(table);
+    setRegisterPendingSelected([]);
+    setRegisterModalTab("assign");
+  };
+
+  const confirmNavigateToDayBookingList = useCallback(
+    (booking: Booking) => {
+      const customer = state.customers.find((item) => item.id === booking.customerId);
+      const visitLabel = dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY");
+      modals.openConfirmModal({
+        title: "Mở Danh sách booking",
+        children: (
+          <Text size="sm">
+            Chuyển đến Danh sách booking ngày {dayjs(booking.bookingAt).format("DD/MM/YYYY")} (suất{" "}
+            {visitLabel}
+            {customer?.fullName ? ` · ${customer.fullName}` : ""})? Form gán bàn sẽ đóng.
+          </Text>
+        ),
+        labels: { cancel: "Ở lại", confirm: "Mở danh sách" },
+        onConfirm: () => {
+          closeRegistrationPanel();
+          closeDetailModal();
+          setFloorMapSelectedDate(dayjs(booking.bookingAt));
+          calendarPanelRef.current?.openDayListModalForBooking(booking);
+        },
+      });
+    },
+    [closeRegistrationPanel, state.customers]
+  );
 
   const openRegistrationForTable = (table: DiningTable, options?: { preferHoldAfterOccupied?: boolean }) => {
     panStateRef.current = null;
@@ -1331,7 +1342,7 @@ export default function FloorMapPage() {
     setRegisterGuestType("Khách thường");
     setRegisterCustomerName("");
     setRegisterCustomerPhone("");
-    setRegisterPendingBookingId(null);
+    setRegisterPendingSelected([]);
     setRegisterModalTab("book");
 
     const preferHold =
@@ -1506,27 +1517,91 @@ export default function FloorMapPage() {
     }
   };
 
-  const handleAssignPendingBooking = async () => {
-    if (!registerTable || !registerPendingBookingId) {
+  const registerPendingAssignPlan = useMemo(() => {
+    if (!registerTable) {
+      return null;
+    }
+    return pickNonOverlappingBookingsForTable(
+      registerPendingSelected,
+      registerTable.id,
+      state.bookings,
+      { maxSeats: registerTable.seats > 0 ? registerTable.seats : undefined }
+    );
+  }, [registerPendingSelected, registerTable, state.bookings]);
+
+  const handleAssignPendingBookings = async () => {
+    if (!registerTable || registerPendingSelected.length === 0) {
       notifications.show({
         color: "red",
-        message: "Vui lòng chọn booking chờ để gán.",
+        message: "Vui lòng chọn ít nhất một booking chờ để gán.",
+      });
+      return;
+    }
+    const plan =
+      registerPendingAssignPlan ??
+      pickNonOverlappingBookingsForTable(
+        registerPendingSelected,
+        registerTable.id,
+        state.bookings,
+        { maxSeats: registerTable.seats > 0 ? registerTable.seats : undefined }
+      );
+    if (plan.assignable.length === 0) {
+      notifications.show({
+        color: "red",
+        message: "Không có booking nào trong lựa chọn có thể gán (trùng giờ hoặc vượt sức chứa bàn).",
       });
       return;
     }
     setRegisterSaving(true);
     try {
-      const result = await assignBookingToTable({
-        bookingId: registerPendingBookingId,
-        areaId: registerTable.areaId,
-        tableId: registerTable.id,
-      });
-      notifications.show({
-        color: result.ok ? "green" : "red",
-        message: result.message,
-      });
-      if (result.ok) {
-        closeRegistrationPanel();
+      let successCount = 0;
+      const failureMessages: string[] = [];
+      for (const booking of plan.assignable) {
+        const result = await assignBookingToTable({
+          bookingId: booking.id,
+          areaId: registerTable.areaId,
+          tableId: registerTable.id,
+        });
+        if (result.ok) {
+          successCount += 1;
+        } else {
+          failureMessages.push(result.message);
+        }
+      }
+      const skippedCount =
+        plan.skippedSelectionOverlap.length +
+        plan.skippedTableConflict.length +
+        plan.skippedOverCapacity.length;
+      if (successCount > 0) {
+        const base =
+          successCount === 1
+            ? "Đã gán 1 booking vào bàn."
+            : `Đã gán ${successCount} booking vào bàn.`;
+        const skipNote =
+          skippedCount > 0 ? ` Bỏ qua ${skippedCount} booking không hợp lệ trong lựa chọn.` : "";
+        const failNote =
+          failureMessages.length > 0
+            ? ` ${failureMessages.length} booking không gán được: ${failureMessages[0]}`
+            : "";
+        notifications.show({
+          color: failureMessages.length > 0 ? "yellow" : "green",
+          message: `${base}${skipNote}${failNote}`,
+        });
+        if (failureMessages.length === 0) {
+          closeRegistrationPanel();
+        } else {
+          const assignedIds = new Set(
+            plan.assignable.slice(0, successCount).map((booking) => booking.id)
+          );
+          setRegisterPendingSelected((current) =>
+            current.filter((booking) => !assignedIds.has(booking.id))
+          );
+        }
+      } else {
+        notifications.show({
+          color: "red",
+          message: failureMessages[0] ?? "Không thể gán booking chờ.",
+        });
       }
     } catch (error) {
       notifications.show({
@@ -2814,7 +2889,7 @@ export default function FloorMapPage() {
         closeOnClickOutside={!registerSaving}
         closeOnEscape={!registerSaving}
         title={registerTable ? `Đăng ký - ${registerTable.name}` : "Đăng ký"}
-        size="md"
+        size={registerModalTab === "assign" ? "xl" : "md"}
         centered
         overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
       >
@@ -2842,7 +2917,7 @@ export default function FloorMapPage() {
             >
               <Tabs.List grow>
                 <Tabs.Tab value="book">Đặt bàn</Tabs.Tab>
-                <Tabs.Tab value="assign">Gán booking chờ</Tabs.Tab>
+                <Tabs.Tab value="assign">Gán bàn đang chờ</Tabs.Tab>
               </Tabs.List>
 
               <Tabs.Panel value="book" pt="sm">
@@ -3036,29 +3111,15 @@ export default function FloorMapPage() {
 
               <Tabs.Panel value="assign" pt="sm">
                 <Stack gap="sm">
-                  <Select
-                    label="Booking chờ"
-                    placeholder="Chọn booking đang chờ xếp bàn"
-                    value={registerPendingBookingId}
-                    onChange={setRegisterPendingBookingId}
+                  <RegisterPendingAssignTable
+                    records={pendingBookings}
+                    tableId={registerTable.id}
+                    tableSeats={registerTable.seats}
+                    selectedBookings={registerPendingSelected}
+                    onSelectedBookingsChange={setRegisterPendingSelected}
+                    onNavigateToBookingList={confirmNavigateToDayBookingList}
                     disabled={registerSaving}
-                    data={pendingBookings.map((booking) => {
-                      const customer =
-                        state.customers.find((item) => item.id === booking.customerId)?.fullName ??
-                        "Khách vãng lai";
-                      return {
-                        value: booking.id,
-                        label: `${dayjs(booking.bookingAt).format("HH:mm DD/MM")} · ${customer} · ${booking.guestCount} khách`,
-                      };
-                    })}
-                    searchable
-                    clearable
                   />
-                  {pendingBookings.length === 0 ? (
-                    <Text size="xs" c="dimmed">
-                      Không có booking chờ trong phạm vi chi nhánh hiện tại.
-                    </Text>
-                  ) : null}
                   <Group justify="flex-end" gap={8}>
                     <Button variant="default" disabled={registerSaving} onClick={closeRegistrationPanel}>
                       Hủy
@@ -3066,10 +3127,17 @@ export default function FloorMapPage() {
                     <Button
                       variant="light"
                       loading={registerSaving}
-                      disabled={registerSaving || !hasSupabase || isLoading || !registerPendingBookingId}
-                      onClick={() => void handleAssignPendingBooking()}
+                      disabled={
+                        registerSaving ||
+                        !hasSupabase ||
+                        isLoading ||
+                        (registerPendingAssignPlan?.assignable.length ?? 0) === 0
+                      }
+                      onClick={() => void handleAssignPendingBookings()}
                     >
-                      Gán booking chờ
+                      {(registerPendingAssignPlan?.assignable.length ?? 0) > 1
+                        ? `Gán ${registerPendingAssignPlan?.assignable.length} booking`
+                        : "Gán booking chờ"}
                     </Button>
                   </Group>
                 </Stack>
@@ -3124,15 +3192,9 @@ export default function FloorMapPage() {
                     variant="filled"
                     color="blue"
                     size="compact-sm"
-                    onClick={() => {
-                      const t = detailTable;
-                      closeDetailModal();
-                      setRegisterTable(t);
-                      setRegisterModalTab("assign");
-                      setRegisterPendingBookingId(null);
-                    }}
+                    onClick={() => openAssignPendingForTable(detailTable)}
                   >
-                    Gán booking chờ vào bàn này…
+                    Gán booking chờ vào bàn này
                   </Button>
                 ) : null}
               </Group>
@@ -3268,56 +3330,9 @@ export default function FloorMapPage() {
               <Text size="xs" c="dimmed">
                 Các booking đã gán bàn từ hôm nay trở đi (đã xác nhận / đang phục vụ).
               </Text>
-              <ScrollArea.Autosize mah={220} type="auto" offsetScrollbars="present">
-                <Table striped highlightOnHover withTableBorder withColumnBorders>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>Ngày đến</Table.Th>
-                      <Table.Th>Giờ</Table.Th>
-                      <Table.Th>Khách</Table.Th>
-                      <Table.Th>Số khách</Table.Th>
-                      <Table.Th>Trạng thái</Table.Th>
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {(detailTableBlockState?.confirmedSchedule ?? []).length === 0 ? (
-                      <Table.Tr>
-                        <Table.Td colSpan={5}>
-                          <Text size="sm" c="dimmed" ta="center">
-                            Chưa có booking sắp tới trên bàn này.
-                          </Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    ) : (
-                      detailTableBlockState!.confirmedSchedule.map((booking) => {
-                        const customerName =
-                          state.customers.find((c) => c.id === booking.customerId)?.fullName ?? "—";
-                        const visitAt = booking.startTime ?? booking.bookingAt;
-                        return (
-                          <Table.Tr key={booking.id}>
-                            <Table.Td>{formatScheduleVisitDate(visitAt)}</Table.Td>
-                            <Table.Td>
-                              {dayjs(booking.startTime).format("HH:mm")} –{" "}
-                              {dayjs(booking.endTime).format("HH:mm")}
-                            </Table.Td>
-                            <Table.Td>{customerName}</Table.Td>
-                            <Table.Td>{booking.guestCount}</Table.Td>
-                            <Table.Td>
-                              <Badge
-                                color={bookingStatusColor[booking.status]}
-                                variant="light"
-                                size="sm"
-                              >
-                                {bookingStatusLabel[booking.status]}
-                              </Badge>
-                            </Table.Td>
-                          </Table.Tr>
-                        );
-                      })
-                    )}
-                  </Table.Tbody>
-                </Table>
-              </ScrollArea.Autosize>
+              <TableBlockConfirmedScheduleTable
+                records={detailTableBlockState?.confirmedSchedule ?? []}
+              />
             </Stack>
 
             <Stack gap="xs">
@@ -3327,84 +3342,12 @@ export default function FloorMapPage() {
               <Text size="xs" c="dimmed">
                 Khách xếp hàng khi khung giờ đã kín (khác với booking đã xác nhận ở trên).
               </Text>
-              <ScrollArea.Autosize mah={220} type="auto" offsetScrollbars="present">
-                <Table striped highlightOnHover withTableBorder withColumnBorders>
-                  <Table.Thead>
-                    <Table.Tr>
-                      <Table.Th>#</Table.Th>
-                      <Table.Th>Khung giờ</Table.Th>
-                      <Table.Th>Khách</Table.Th>
-                      <Table.Th>Số khách</Table.Th>
-                      <Table.Th>Trạng thái</Table.Th>
-                      {!isEmployee ? <Table.Th>Thao tác</Table.Th> : null}
-                    </Table.Tr>
-                  </Table.Thead>
-                  <Table.Tbody>
-                    {(detailTableBlockState?.waitlistQueue ?? []).length === 0 ? (
-                      <Table.Tr>
-                        <Table.Td colSpan={isEmployee ? 5 : 6}>
-                          <Text size="sm" c="dimmed" ta="center">
-                            Không có khách trong hàng chờ.
-                          </Text>
-                        </Table.Td>
-                      </Table.Tr>
-                    ) : (
-                      detailTableBlockState!.waitlistQueue.map((entry) => {
-                        const customerName =
-                          state.customers.find((c) => c.id === entry.customerId)?.fullName ?? "—";
-                        return (
-                          <Table.Tr key={entry.id}>
-                            <Table.Td>{entry.position}</Table.Td>
-                            <Table.Td>
-                              {dayjs(entry.desiredStartTime).format("HH:mm")} –{" "}
-                              {dayjs(entry.desiredEndTime).format("HH:mm")}
-                            </Table.Td>
-                            <Table.Td>{customerName}</Table.Td>
-                            <Table.Td>{entry.partySize}</Table.Td>
-                            <Table.Td>
-                              <Stack gap={2}>
-                                <Badge
-                                  color={waitlistStatusColor[entry.status]}
-                                  variant="light"
-                                  size="sm"
-                                  w="fit-content"
-                                >
-                                  {waitlistStatusLabel[entry.status]}
-                                </Badge>
-                                {entry.status === "offered" && entry.offerExpiresAt ? (
-                                  <Text size="xs" c="dimmed">
-                                    Hết hạn:{" "}
-                                    {dayjs(entry.offerExpiresAt).format("HH:mm DD/MM/YYYY")}
-                                  </Text>
-                                ) : null}
-                              </Stack>
-                            </Table.Td>
-                            {!isEmployee ? (
-                              <Table.Td>
-                                {entry.status === "offered" ? (
-                                  <Button
-                                    size="compact-xs"
-                                    variant="filled"
-                                    color="green"
-                                    loading={detailWaitlistActionId === entry.id}
-                                    onClick={() => void handleConfirmWaitlistOffer(entry.id)}
-                                  >
-                                    Xác nhận
-                                  </Button>
-                                ) : (
-                                  <Text size="xs" c="dimmed">
-                                    —
-                                  </Text>
-                                )}
-                              </Table.Td>
-                            ) : null}
-                          </Table.Tr>
-                        );
-                      })
-                    )}
-                  </Table.Tbody>
-                </Table>
-              </ScrollArea.Autosize>
+              <TableBlockWaitlistTable
+                records={detailTableBlockState?.waitlistQueue ?? []}
+                isEmployee={isEmployee}
+                confirmLoadingId={detailWaitlistActionId}
+                onConfirmOffer={(entryId) => void handleConfirmWaitlistOffer(entryId)}
+              />
             </Stack>
           </Stack>
         ) : null}

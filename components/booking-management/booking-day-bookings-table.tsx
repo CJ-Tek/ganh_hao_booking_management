@@ -5,12 +5,16 @@ import { Badge, Select, Stack, Text } from "@mantine/core";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { useAppContext } from "@/contexts/app-context";
+import { bookingListRowStyle } from "@/lib/busy-row-style";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import {
   displayCustomerPhone,
   isGuestCountSpecified,
 } from "@/lib/booking-meta";
 import { type Booking, type BookingStatus } from "@/lib/types";
+
+const DAY_LIST_BOOKING_PULSE_CYCLE_MS = 600;
+const DAY_LIST_BOOKING_PULSE_CYCLES = 2;
 
 const bookingStatusSelectData = (
   ["pending", "confirmed", "seated", "checked_in", "no_show", "completed", "cancelled"] as const
@@ -26,9 +30,17 @@ export function BookingDayBookingsTable(props: {
   sortRecords: (records: Booking[], sortStatus: DataTableSortStatus<Booking>) => Booking[];
   getRecordSearchValue: (booking: Booking) => string;
   onRowClick: (booking: Booking) => void;
+  focusBookingId?: string | null;
 }) {
-  const { records, statusFilter, onStatusFilterChange, sortRecords, getRecordSearchValue, onRowClick } =
-    props;
+  const {
+    records,
+    statusFilter,
+    onStatusFilterChange,
+    sortRecords,
+    getRecordSearchValue,
+    onRowClick,
+    focusBookingId = null,
+  } = props;
   const { state } = useAppContext();
 
   return (
@@ -41,7 +53,17 @@ export function BookingDayBookingsTable(props: {
       noRecordsText="Không có booking trong ngày đã chọn."
       minHeight={260}
       onRowClick={({ record }) => onRowClick(record)}
-      rowStyle={() => ({ cursor: "pointer" })}
+      rowStyle={(record) =>
+        bookingListRowStyle(record.id, {
+          busyBookingId: null,
+          focusBookingId,
+          focusPulse: {
+            cycleMs: DAY_LIST_BOOKING_PULSE_CYCLE_MS,
+            cycles: DAY_LIST_BOOKING_PULSE_CYCLES,
+          },
+          extra: { cursor: "pointer" },
+        })
+      }
       filters={
         <Select
           label="Trạng thái"

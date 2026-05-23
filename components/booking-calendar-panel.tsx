@@ -73,6 +73,7 @@ const bookingStatusSelectData = (
 
 export type BookingCalendarPanelHandle = {
   openDayListModal: () => void;
+  openDayListModalForBooking: (booking: Booking) => void;
 };
 
 export const BookingCalendarPanel = forwardRef<
@@ -121,6 +122,8 @@ export const BookingCalendarPanel = forwardRef<
   const selectedDate = selectedDateProp ?? internalSelectedDate;
 
   const [dayTableModalOpened, setDayTableModalOpened] = useState(false);
+
+  const [dayListFocusBookingId, setDayListFocusBookingId] = useState<string | null>(null);
 
   const [dayTableStatusFilter, setDayTableStatusFilter] = useState<DayTableStatusFilter>(null);
 
@@ -477,11 +480,31 @@ export const BookingCalendarPanel = forwardRef<
   );
 
   const openDayTableModal = useCallback(() => {
+    setDayListFocusBookingId(null);
     setDayTableStatusFilter(null);
     setDayTableModalOpened(true);
   }, []);
 
-  useImperativeHandle(ref, () => ({ openDayListModal: openDayTableModal }), [openDayTableModal]);
+  const openDayListModalForBooking = useCallback(
+    (booking: Booking) => {
+      const date = dayjs(booking.bookingAt);
+      setActiveMonth(date.startOf("month"));
+      setSelectedDate(date);
+      setDayTableStatusFilter(null);
+      setDayListFocusBookingId(booking.id);
+      setDayTableModalOpened(true);
+    },
+    [setSelectedDate]
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      openDayListModal: openDayTableModal,
+      openDayListModalForBooking,
+    }),
+    [openDayListModalForBooking, openDayTableModal]
+  );
 
 
 
@@ -771,7 +794,10 @@ export const BookingCalendarPanel = forwardRef<
 
         opened={dayTableModalOpened}
 
-        onClose={() => setDayTableModalOpened(false)}
+        onClose={() => {
+          setDayTableModalOpened(false);
+          setDayListFocusBookingId(null);
+        }}
 
         title={`Danh sách booking ngày ${selectedDate.format("DD/MM/YYYY")}`}
 
@@ -788,6 +814,7 @@ export const BookingCalendarPanel = forwardRef<
           sortRecords={sortDayBookings}
           getRecordSearchValue={getDayBookingSearchValue}
           onRowClick={handleDayBookingRowClick}
+          focusBookingId={dayListFocusBookingId}
         />
 
       </Modal>

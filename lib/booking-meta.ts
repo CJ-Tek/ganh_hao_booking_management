@@ -369,6 +369,55 @@ export function findAssignableSlotConflictsAtTable(
   });
 }
 
+export type PendingTableAssignPickResult = {
+  assignable: Booking[];
+  skippedSelectionOverlap: Booking[];
+  skippedTableConflict: Booking[];
+  skippedOverCapacity: Booking[];
+};
+
+/** Pick pending bookings that can share one table without overlapping each other or existing reservations. */
+export function pickNonOverlappingBookingsForTable(
+  candidates: readonly Booking[],
+  tableId: string,
+  allBookings: readonly Booking[],
+  options?: { maxSeats?: number }
+): PendingTableAssignPickResult {
+  const skippedSelectionOverlap: Booking[] = [];
+  const skippedTableConflict: Booking[] = [];
+  const skippedOverCapacity: Booking[] = [];
+  const assignable: Booking[] = [];
+
+  const sorted = [...candidates].sort((left, right) => {
+    const leftStart = normalizeBookingSlotMs(left).startMs;
+    const rightStart = normalizeBookingSlotMs(right).startMs;
+    return leftStart - rightStart;
+  });
+
+  for (const booking of sorted) {
+    if (
+      options?.maxSeats !== undefined &&
+      options.maxSeats > 0 &&
+      booking.guestCount > options.maxSeats
+    ) {
+      skippedOverCapacity.push(booking);
+      continue;
+    }
+    if (assignable.some((picked) => bookingsTimeSlotsOverlap(picked, booking))) {
+      skippedSelectionOverlap.push(booking);
+      continue;
+    }
+    const candidateOnTable: Booking = { ...booking, tableId };
+    if (hasAssignableSlotConflictAtTable(candidateOnTable, tableId, allBookings)) {
+      skippedTableConflict.push(booking);
+      continue;
+    }
+    assignable.push(booking);
+  }
+
+  return { assignable, skippedSelectionOverlap, skippedTableConflict, skippedOverCapacity };
+}
+
 export function formatTableSlotConflictMessage(
   conflicts: readonly Pick<Booking, "bookingAt" | "guestCount">[],
   options?: { tableName?: string; customerName?: string }
