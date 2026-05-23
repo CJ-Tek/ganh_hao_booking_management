@@ -45,7 +45,10 @@ import {
   X,
 } from "lucide-react";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
-import { BookingCalendarPanel } from "@/components/booking-calendar-panel";
+import {
+  BookingCalendarPanel,
+  type BookingCalendarPanelHandle,
+} from "@/components/booking-calendar-panel";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
 import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import {
@@ -80,6 +83,7 @@ import {
   formatTableSlotConflictMessage,
   getAssignableCandidateTables,
   inferGuestTypeLabel,
+  deriveTableStatusFromDayBookings,
   pickPrimaryBookingOnTable,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
@@ -88,6 +92,7 @@ import {
   confirmWaitlistOfferInSupabase,
   getTableBlockStateInSupabase,
   listTableMergeGroupsInSupabase,
+  type TableMergeGroupSummary,
 } from "@/lib/supabase-store";
 import {
   type Booking,
@@ -357,17 +362,12 @@ export default function FloorMapPage() {
   const [registerPendingBookingId, setRegisterPendingBookingId] = useState<string | null>(null);
   const [registerModalTab, setRegisterModalTab] = useState<"book" | "assign">("book");
   const [registerSaving, setRegisterSaving] = useState(false);
-  const [quickAssignBookingId, setQuickAssignBookingId] = useState<string | null>(null);
-  const [quickAssignTableId, setQuickAssignTableId] = useState<string | null>(null);
-  const [quickAssignSaving, setQuickAssignSaving] = useState(false);
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
   const [mergeName, setMergeName] = useState("");
   const [mergePrimaryTableId, setMergePrimaryTableId] = useState<string | null>(null);
   const [mergeSecondaryTableId, setMergeSecondaryTableId] = useState<string | null>(null);
   const [mergeSaving, setMergeSaving] = useState(false);
-  const [mergeGroupsSummary, setMergeGroupsSummary] = useState<
-    Array<{ id: string; mergedName: string; totalCapacity: number; tableIds: string[] }>
-  >([]);
+  const [mergeGroupsSummary, setMergeGroupsSummary] = useState<TableMergeGroupSummary[]>([]);
   const [detailTable, setDetailTable] = useState<DiningTable | null>(null);
   const [detailTableBlockState, setDetailTableBlockState] = useState<TableBlockState | null>(
     null
@@ -377,12 +377,14 @@ export default function FloorMapPage() {
   const [detailBookingActionLoading, setDetailBookingActionLoading] = useState(false);
   /** Status menu uses portal — block canvas interaction while open */
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [floorMapSelectedDate, setFloorMapSelectedDate] = useState(() => dayjs());
 
   const blockCanvasForOverlay = Boolean(registerTable || detailTable) || statusMenuOpen;
   const isEditMode = mode === "edit";
   const editBlockedByOther = Boolean(layoutLockHolderName);
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const calendarPanelRef = useRef<BookingCalendarPanelHandle | null>(null);
   const panStateRef = useRef<PanState | null>(null);
   const placementTapRef = useRef<{
     pointerId: number;
@@ -451,12 +453,24 @@ export default function FloorMapPage() {
     return state.bookings.filter((b) => b.areaId === areaId).length;
   }, [areaId, state.bookings]);
 
+  const floorMapDayBookings = useMemo(
+    () =>
+      state.bookings.filter(
+        (booking) =>
+          filteredBranchIds.includes(booking.branchId) &&
+          dayjs(booking.bookingAt).isSame(floorMapSelectedDate, "day")
+      ),
+    [filteredBranchIds, floorMapSelectedDate, state.bookings]
+  );
+
+  const bookingsForFloorTableDisplay = isEmployee ? state.bookings : floorMapDayBookings;
+
   const activeBookingForDetailTable = useMemo((): Booking | null => {
     if (!detailTable) {
       return null;
     }
-    return pickPrimaryBookingOnTable(detailTable.id, state.bookings);
-  }, [detailTable, state.bookings]);
+    return pickPrimaryBookingOnTable(detailTable.id, bookingsForFloorTableDisplay);
+  }, [bookingsForFloorTableDisplay, detailTable]);
 
   const activeBookingCustomerName = useMemo(() => {
     if (!activeBookingForDetailTable) {
@@ -583,67 +597,6 @@ export default function FloorMapPage() {
         .sort((a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf()),
     [filteredBranchIds, state.bookings]
   );
-  const selectedQuickAssignBooking = useMemo(
-    () => pendingBookings.find((booking) => booking.id === quickAssignBookingId) ?? null,
-    [pendingBookings, quickAssignBookingId]
-  );
-  const quickAssignBookingOptions = useMemo(
-    () =>
-      pendingBookings.map((booking) => {
-        const customer =
-          state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "Khách vãng lai";
-        return {
-          value: booking.id,
-          label: `${dayjs(booking.bookingAt).format("HH:mm DD/MM")} · ${customer} · ${booking.guestCount} khách`,
-        };
-      }),
-    [pendingBookings, state.customers]
-  );
-  const quickAssignTableOptions = useMemo(() => {
-    if (!selectedQuickAssignBooking) {
-      return [];
-    }
-    const requiredSeats = Math.max(1, selectedQuickAssignBooking.guestCount ?? 1);
-    const branchTables = state.tables.filter((table) =>
-      filteredBranchIds.includes(table.branchId)
-    );
-    return getAssignableCandidateTables(
-      selectedQuickAssignBooking,
-      branchTables,
-      state.bookings,
-      requiredSeats
-    )
-      .sort((a, b) => a.name.localeCompare(b.name, "vi"))
-      .map((table) => {
-        const area = state.areas.find((item) => item.id === table.areaId)?.name ?? "—";
-        const branch = state.branches.find((item) => item.id === table.branchId)?.name ?? "—";
-        return {
-          value: table.id,
-          label: `${table.name} · ${area} · ${branch} · ${table.seats} ghế`,
-        };
-      });
-  }, [
-    filteredBranchIds,
-    selectedQuickAssignBooking,
-    state.areas,
-    state.bookings,
-    state.branches,
-    state.tables,
-  ]);
-  useEffect(() => {
-    if (!quickAssignBookingId) {
-      setQuickAssignTableId(null);
-      return;
-    }
-    if (
-      quickAssignTableId &&
-      quickAssignTableOptions.some((option) => option.value === quickAssignTableId)
-    ) {
-      return;
-    }
-    setQuickAssignTableId(quickAssignTableOptions[0]?.value ?? null);
-  }, [quickAssignBookingId, quickAssignTableId, quickAssignTableOptions]);
-
   const mergeCandidateTables = useMemo(() => {
     if (!areaId) {
       return [];
@@ -694,7 +647,10 @@ export default function FloorMapPage() {
       return;
     }
 
-    const primaryBooking = pickPrimaryBookingOnTable(detailTable.id, state.bookings);
+    const primaryBooking = pickPrimaryBookingOnTable(
+      detailTable.id,
+      bookingsForFloorTableDisplay
+    );
     const slotStart =
       primaryBooking?.startTime ?? primaryBooking?.bookingAt ?? dayjs().toISOString();
     const slotEnd = primaryBooking?.endTime;
@@ -731,7 +687,7 @@ export default function FloorMapPage() {
     return () => {
       cancelled = true;
     };
-  }, [detailTable, hasSupabase, state.bookings]);
+  }, [bookingsForFloorTableDisplay, detailTable, hasSupabase]);
 
   const handleConfirmWaitlistOffer = async (entryId: string) => {
     if (!hasSupabase || isEmployee) {
@@ -1052,6 +1008,18 @@ export default function FloorMapPage() {
     });
   }, [isEditMode, editLayout, tablesInArea]);
 
+  const floorMapDisplayTables = useMemo(
+    () =>
+      layoutTablesInArea.map((table) => ({
+        ...table,
+        status: deriveTableStatusFromDayBookings(table, floorMapDayBookings),
+      })),
+    [floorMapDayBookings, layoutTablesInArea]
+  );
+
+  const tablesForFloorView =
+    isEditMode || isEmployee ? layoutTablesInArea : floorMapDisplayTables;
+
   const effectiveGridColumns =
     isEditMode && editLayout ? editLayout.gridColumns : gridColumns;
   const effectiveGridRows = isEditMode && editLayout ? editLayout.gridRows : gridRows;
@@ -1084,8 +1052,8 @@ export default function FloorMapPage() {
 
   const visibleTables = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    return layoutTablesInArea.filter((table) => {
-      const displayBooking = pickPrimaryBookingOnTable(table.id, state.bookings);
+    return tablesForFloorView.filter((table) => {
+      const displayBooking = pickPrimaryBookingOnTable(table.id, bookingsForFloorTableDisplay);
       const customer = displayBooking
         ? state.customers.find((item) => item.id === displayBooking.customerId)
         : undefined;
@@ -1116,7 +1084,13 @@ export default function FloorMapPage() {
       const hitStatus = statusFilter === "all" || table.status === statusFilter;
       return hitKeyword && hitStatus;
     });
-  }, [search, statusFilter, layoutTablesInArea, state.bookings, state.customers]);
+  }, [
+    bookingsForFloorTableDisplay,
+    search,
+    statusFilter,
+    state.customers,
+    tablesForFloorView,
+  ]);
 
   const tableMap = useMemo(
     () => Object.fromEntries(visibleTables.map((table) => [table.id, table])),
@@ -1516,47 +1490,6 @@ export default function FloorMapPage() {
       });
     } finally {
       setRegisterSaving(false);
-    }
-  };
-
-  const handleQuickAssignPendingBooking = async () => {
-    if (!quickAssignBookingId || !quickAssignTableId) {
-      notifications.show({
-        color: "red",
-        message: "Vui lòng chọn booking chờ và bàn để gán.",
-      });
-      return;
-    }
-    const selectedTable = state.tables.find((table) => table.id === quickAssignTableId);
-    if (!selectedTable) {
-      notifications.show({
-        color: "red",
-        message: "Không tìm thấy bàn được chọn.",
-      });
-      return;
-    }
-    setQuickAssignSaving(true);
-    try {
-      const result = await assignBookingToTable({
-        bookingId: quickAssignBookingId,
-        areaId: selectedTable.areaId,
-        tableId: selectedTable.id,
-      });
-      notifications.show({
-        color: result.ok ? "green" : "red",
-        message: result.message,
-      });
-      if (result.ok) {
-        setQuickAssignBookingId(null);
-        setQuickAssignTableId(null);
-      }
-    } catch (error) {
-      notifications.show({
-        color: "red",
-        message: error instanceof Error ? error.message : "Không thể gán booking chờ.",
-      });
-    } finally {
-      setQuickAssignSaving(false);
     }
   };
 
@@ -2202,6 +2135,15 @@ export default function FloorMapPage() {
               </Badge>
             ) : null}
           </Group>
+        ) : !isEmployee ? (
+          <Button
+            size={isCompact ? "sm" : "compact-sm"}
+            variant="light"
+            onClick={() => setMergeModalOpen(true)}
+            disabled={!activeAreaBranchId}
+          >
+            Gộp bàn
+          </Button>
         ) : null}
       </Group>
 
@@ -2218,138 +2160,16 @@ export default function FloorMapPage() {
       ) : null}
 
       {!isEmployee ? (
-        <PortalSectionCard>
-          <Stack gap="sm">
-            <Group justify="space-between" align="center" wrap="wrap">
-              <Text fw={600}>Booking chờ xếp bàn</Text>
-              <Group gap="xs">
-                <Badge variant="light" color={pendingBookings.length > 0 ? "orange" : "gray"}>
-                  {pendingBookings.length}
-                </Badge>
-                <Button
-                  size="compact-sm"
-                  variant="light"
-                  onClick={() => setMergeModalOpen(true)}
-                  disabled={!activeAreaBranchId}
-                >
-                  Gộp bàn
-                </Button>
-              </Group>
-            </Group>
-            {mergeGroupsSummary.length > 0 ? (
-              <Group gap="xs" wrap="wrap">
-                {mergeGroupsSummary.slice(0, 6).map((group) => (
-                  <Badge key={group.id} variant="light" color="grape">
-                    {group.mergedName} · {group.totalCapacity} ghế
-                  </Badge>
-                ))}
-              </Group>
-            ) : null}
-            {isCompact ? (
-              <Stack gap="xs">
-                <Text size="xs" c="dimmed">
-                  Chọn booking rồi chạm bàn phù hợp. Ưu tiên thao tác thủ công trên sơ đồ.
-                </Text>
-                <Group gap="xs" wrap="wrap">
-                  {quickAssignBookingOptions.length === 0 ? (
-                    <Text size="sm" c="dimmed">
-                      Không còn booking chờ.
-                    </Text>
-                  ) : (
-                    quickAssignBookingOptions.slice(0, 8).map((bookingOption) => (
-                      <Button
-                        key={bookingOption.value}
-                        size="sm"
-                        radius="xl"
-                        variant={quickAssignBookingId === bookingOption.value ? "filled" : "light"}
-                        onClick={() => setQuickAssignBookingId(bookingOption.value)}
-                      >
-                        {bookingOption.label}
-                      </Button>
-                    ))
-                  )}
-                </Group>
-                <Divider />
-                <Group gap="xs" wrap="wrap">
-                  {quickAssignTableOptions.length === 0 ? (
-                    <Text size="sm" c="dimmed">
-                      Chưa có bàn phù hợp với booking đã chọn.
-                    </Text>
-                  ) : (
-                    quickAssignTableOptions.slice(0, 10).map((tableOption) => (
-                      <Button
-                        key={tableOption.value}
-                        size="sm"
-                        radius="xl"
-                        variant={quickAssignTableId === tableOption.value ? "filled" : "default"}
-                        onClick={() => setQuickAssignTableId(tableOption.value)}
-                      >
-                        {tableOption.label}
-                      </Button>
-                    ))
-                  )}
-                </Group>
-                <Button
-                  fullWidth
-                  loading={quickAssignSaving}
-                  disabled={!hasSupabase || isLoading || !quickAssignBookingId || !quickAssignTableId}
-                  onClick={() => void handleQuickAssignPendingBooking()}
-                >
-                  Gán booking đã chọn
-                </Button>
-              </Stack>
-            ) : (
-              <Flex
-                direction={{ base: "column", sm: "row" }}
-                gap="sm"
-                align={{ base: "stretch", sm: "flex-end" }}
-                wrap="nowrap"
-              >
-                <Select
-                  style={{ flex: "1 1 0", minWidth: 0 }}
-                  label="Booking chờ"
-                  placeholder="Chọn booking cần gán"
-                  value={quickAssignBookingId}
-                  onChange={setQuickAssignBookingId}
-                  data={quickAssignBookingOptions}
-                  searchable
-                  clearable
-                />
-                <Select
-                  style={{ flex: "1 1 0", minWidth: 0 }}
-                  label="Bàn gán"
-                  placeholder={
-                    selectedQuickAssignBooking
-                      ? "Chọn bàn (theo khung giờ booking)"
-                      : "Chọn booking trước"
-                  }
-                  value={quickAssignTableId}
-                  onChange={setQuickAssignTableId}
-                  data={quickAssignTableOptions}
-                  searchable
-                  clearable
-                  disabled={!selectedQuickAssignBooking}
-                />
-                <Button
-                  w={{ base: "100%", sm: "auto" }}
-                  miw={{ sm: 120 }}
-                  loading={quickAssignSaving}
-                  disabled={!hasSupabase || isLoading || !quickAssignBookingId || !quickAssignTableId}
-                  onClick={() => void handleQuickAssignPendingBooking()}
-                >
-                  Gán nhanh
-                </Button>
-              </Flex>
-            )}
-            <Text size="xs" c="dimmed">
-              Booking tạo ở mục Đặt bàn sẽ xuất hiện tại đây với trạng thái Chờ xếp bàn. Bàn đang Giữ chỗ vẫn có thể chọn nếu khung giờ không trùng với booking đã gán trên bàn đó.
-            </Text>
-          </Stack>
-        </PortalSectionCard>
-      ) : null}
-
-      {!isEmployee ? (
-        <BookingCalendarPanel title="Lịch booking theo sơ đồ" compactTitle="Lịch booking" showHeader={false} />
+        <BookingCalendarPanel
+          ref={calendarPanelRef}
+          title="Lịch booking theo sơ đồ"
+          compactTitle="Lịch booking"
+          showHeader={false}
+          interaction="select-day-only"
+          showDayListButton={false}
+          selectedDate={floorMapSelectedDate}
+          onSelectedDateChange={setFloorMapSelectedDate}
+        />
       ) : null}
 
       <PortalSectionCard>
@@ -2480,7 +2300,7 @@ export default function FloorMapPage() {
                           </Badge>
                           <TableBlockBookingPeek
                             tableId={table.id}
-                            bookings={state.bookings}
+                            bookings={bookingsForFloorTableDisplay}
                             customers={state.customers}
                           />
                         </div>
@@ -2763,6 +2583,16 @@ export default function FloorMapPage() {
                     className={classes.toolbarAreaSelect}
                   />
                   {!isEmployee ? (
+                    <Button
+                      size={isCompact ? "sm" : "compact-sm"}
+                      variant="light"
+                      className={classes.toolbarDayListBtn}
+                      onClick={() => calendarPanelRef.current?.openDayListModal()}
+                    >
+                      Danh sách booking
+                    </Button>
+                  ) : null}
+                  {!isEmployee ? (
                   <Group gap={4} className={classes.toolbarAreaActions} wrap="nowrap">
                     <ActionIcon
                       variant="light"
@@ -2896,7 +2726,7 @@ export default function FloorMapPage() {
                               <TableBlockBookingPeek
                                 compact
                                 tableId={table.id}
-                                bookings={state.bookings}
+                                bookings={bookingsForFloorTableDisplay}
                                 customers={state.customers}
                               />
                             </Stack>

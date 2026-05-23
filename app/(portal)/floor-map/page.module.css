@@ -198,6 +198,11 @@
   flex: 1;
 }
 
+.toolbarDayListBtn {
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+
 .canvasPopoverPanel {
   width: min(320px, calc(100vw - 40px));
   pointer-events: none;

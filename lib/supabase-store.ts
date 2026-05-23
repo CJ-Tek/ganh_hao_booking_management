@@ -127,8 +127,18 @@ export async function createTableMergeGroupInSupabase(
   return callStore("createTableMergeGroup", input);
 }
 
-export async function listTableMergeGroupsInSupabase(branchId: string) {
-  return callStore("listTableMergeGroups", branchId);
+export type TableMergeGroupSummary = {
+  id: string;
+  areaId: string;
+  mergedName: string;
+  totalCapacity: number;
+  tableIds: string[];
+};
+
+export async function listTableMergeGroupsInSupabase(
+  branchId: string
+): Promise<TableMergeGroupSummary[]> {
+  return callStore<TableMergeGroupSummary[]>("listTableMergeGroups", branchId);
 }
 
 export async function runBookingMaintenanceInSupabase(): Promise<Result> {

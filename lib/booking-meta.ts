@@ -267,6 +267,30 @@ export function pickPrimaryBookingOnTable(
   return sorted[0] ?? null;
 }
 
+/** Floor-map calendar preview: derive block color from bookings on the selected day. */
+export function deriveTableStatusFromDayBookings(
+  table: Pick<DiningTable, "id" | "status">,
+  dayBookings: readonly Booking[]
+): DiningTable["status"] {
+  if (table.status === "locked") {
+    return "locked";
+  }
+  const onTable = dayBookings.filter(
+    (booking) =>
+      booking.tableId === table.id &&
+      booking.status !== "cancelled" &&
+      booking.status !== "completed" &&
+      booking.status !== "no_show"
+  );
+  if (onTable.length === 0) {
+    return "available";
+  }
+  const hasSeated = onTable.some(
+    (booking) => booking.status === "seated" || booking.status === "checked_in"
+  );
+  return hasSeated ? "occupied" : "hold";
+}
+
 /** Keep in sync with `DEFAULT_BOOKING_RUNTIME_SETTINGS.standardTurnaroundMinutes` in `supabase-store`. */
 const FALLBACK_STANDARD_TURNAROUND_MINUTES = 90;
 
