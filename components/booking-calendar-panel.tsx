@@ -30,6 +30,7 @@ import { useMediaQuery } from "@mantine/hooks";
 
 import { type DataTableSortStatus } from "mantine-datatable";
 
+import { useRouter } from "next/navigation";
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useState } from "react";
 
 import { BookingDayBookingsTable } from "@/components/booking-management/booking-day-bookings-table";
@@ -86,6 +87,8 @@ export const BookingCalendarPanel = forwardRef<
     onSelectedDateChange?: (date: dayjs.Dayjs) => void;
     /** When false, parent renders "Danh sách booking" (e.g. floor-map toolbar). Default true for select-day-only. */
     showDayListButton?: boolean;
+    /** Row click in day-list modal; default navigates to /bookings?tab=list&focusBooking=… */
+    onDayBookingRowClick?: (booking: Booking) => void;
   }
 >(function BookingCalendarPanel(props, ref) {
   const {
@@ -96,7 +99,10 @@ export const BookingCalendarPanel = forwardRef<
     selectedDate: selectedDateProp,
     onSelectedDateChange,
     showDayListButton = true,
+    onDayBookingRowClick,
   } = props;
+
+  const router = useRouter();
 
   const { state, filteredBranchIds } = useAppContext();
 
@@ -454,6 +460,22 @@ export const BookingCalendarPanel = forwardRef<
 
 
 
+  const handleDayBookingRowClick = useCallback(
+    (booking: Booking) => {
+      setDayTableModalOpened(false);
+      if (onDayBookingRowClick) {
+        onDayBookingRowClick(booking);
+        return;
+      }
+      const params = new URLSearchParams({
+        tab: "list",
+        focusBooking: booking.id,
+      });
+      router.push(`/bookings?${params.toString()}`);
+    },
+    [onDayBookingRowClick, router]
+  );
+
   const openDayTableModal = useCallback(() => {
     setDayTableStatusFilter(null);
     setDayTableModalOpened(true);
@@ -487,7 +509,7 @@ export const BookingCalendarPanel = forwardRef<
 
             radius="xl"
 
-            variant={statusFilter === item.value ? "filled" : "light"}
+            variant={statusFilter === item.value ? "filled" : "outline"}
 
             onClick={() => setStatusFilter(item.value)}
 
@@ -553,7 +575,7 @@ export const BookingCalendarPanel = forwardRef<
 
         <Button
 
-          variant="light"
+          variant="default"
 
           size={isCompact || isNarrowCalendar ? "xs" : "compact-sm"}
 
@@ -765,6 +787,7 @@ export const BookingCalendarPanel = forwardRef<
           onStatusFilterChange={setDayTableStatusFilter}
           sortRecords={sortDayBookings}
           getRecordSearchValue={getDayBookingSearchValue}
+          onRowClick={handleDayBookingRowClick}
         />
 
       </Modal>

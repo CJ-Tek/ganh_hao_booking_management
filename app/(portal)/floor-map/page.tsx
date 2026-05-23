@@ -2636,7 +2636,7 @@ export default function FloorMapPage() {
                   {!isEmployee ? (
                     <Button
                       size={isCompact ? "sm" : "compact-sm"}
-                      variant="light"
+                      variant="filled"
                       className={classes.toolbarDayListBtn}
                       onClick={() => calendarPanelRef.current?.openDayListModal()}
                     >

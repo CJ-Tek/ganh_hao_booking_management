@@ -55,7 +55,7 @@ export default function NotificationsPage() {
         </Stack>
         {unreadCount > 0 ? (
           <Button
-            variant="light"
+            variant="filled"
             color="brand"
             size="sm"
             loading={isMarkingAll}
@@ -143,7 +143,7 @@ export default function NotificationsPage() {
                   </Group>
                 </Stack>
                 <Button
-                  variant="light"
+                  variant="default"
                   size="compact-sm"
                   disabled={item.isRead || isNotificationBusy(item.id)}
                   loading={isNotificationBusy(item.id)}

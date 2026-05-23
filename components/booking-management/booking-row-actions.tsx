@@ -9,6 +9,8 @@ export function BookingRowActions(props: {
   booking: Booking;
   busy?: boolean;
   size?: "compact-xs" | "sm";
+  /** When false, hides the edit control (e.g. Booking hôm nay — edit lives in Danh sách booking). */
+  showEdit?: boolean;
   onEdit: (booking: Booking) => void;
   onAssign: (booking: Booking) => void;
   onCheckIn: (bookingId: string) => void;
@@ -19,6 +21,7 @@ export function BookingRowActions(props: {
     booking,
     busy = false,
     size = "compact-xs",
+    showEdit = true,
     onEdit,
     onAssign,
     onCheckIn,
@@ -36,10 +39,10 @@ export function BookingRowActions(props: {
 
   return (
     <Group gap={6} wrap="wrap">
-      {canEditBookingOrder(booking) ? (
+      {showEdit && canEditBookingOrder(booking) ? (
         <Button
           size={size}
-          variant="outline"
+          variant="default"
           disabled={busy}
           onClick={() => onEdit(booking)}
         >
@@ -49,7 +52,7 @@ export function BookingRowActions(props: {
       {booking.status === "pending" ? (
         <Button
           size={size}
-          variant="outline"
+          variant="filled"
           color="blue"
           disabled={busy}
           onClick={() => onAssign(booking)}
@@ -76,7 +79,7 @@ export function BookingRowActions(props: {
       ) : (
         <Button
           size={size}
-          variant="outline"
+          variant="default"
           color="red"
           disabled={busy}
           onClick={() => onCancel(booking)}

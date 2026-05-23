@@ -24,7 +24,8 @@ import { DateTimePicker } from "@mantine/dates";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { type DataTableSortStatus } from "mantine-datatable";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
 import {
   PortalPageTitle,
@@ -33,7 +34,6 @@ import {
 } from "@/components/portal-page";
 import { BookingCalendarPanel } from "@/components/booking-calendar-panel";
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
-import { canEditBookingOrder } from "@/components/booking-management/shared";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
@@ -878,29 +878,6 @@ function BookingsPageContent() {
     });
   };
 
-  const renderListBookingActions = useCallback(
-    (booking: Booking, size: "compact-xs" | "sm" = "compact-xs") => (
-      <BookingRowActions
-        booking={booking}
-        size={size}
-        busy={isBookingRowBusy(booking.id)}
-        onEdit={openEditBookingModal}
-        onAssign={openAssignOptions}
-        onCheckIn={(id) => void runCheckIn(id)}
-        onComplete={openCompleteBookingConfirm}
-        onCancel={openCancelBookingConfirm}
-      />
-    ),
-    [
-      isBookingRowBusy,
-      openAssignOptions,
-      openCancelBookingConfirm,
-      openCompleteBookingConfirm,
-      openEditBookingModal,
-      runCheckIn,
-    ]
-  );
-
   const getListBookingRowStyle = useCallback(
     (booking: Booking) =>
       bookingListRowStyle(booking.id, {
@@ -910,8 +887,9 @@ function BookingsPageContent() {
           cycleMs: LIST_BOOKING_PULSE_CYCLE_MS,
           cycles: LIST_BOOKING_PULSE_CYCLES,
         },
+        extra: { cursor: isBookingRowBusy(booking.id) ? undefined : "pointer" },
       }),
-    [busyBookingId, listFocusBookingId]
+    [busyBookingId, isBookingRowBusy, listFocusBookingId]
   );
 
   const searchedBookings = useMemo(() => {
@@ -1301,6 +1279,10 @@ function BookingsPageContent() {
     [listPageSize, page, sortedBookings, totalListPages]
   );
 
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const consumedFocusFromUrlRef = useRef<string | null>(null);
+
   const openBookingInList = useCallback(
     (booking: Booking) => {
       const customer = state.customers.find((item) => item.id === booking.customerId);
@@ -1319,6 +1301,21 @@ function BookingsPageContent() {
     },
     [state.customers]
   );
+
+  const focusBookingIdFromUrl = searchParams.get("focusBooking");
+
+  useEffect(() => {
+    if (!focusBookingIdFromUrl || consumedFocusFromUrlRef.current === focusBookingIdFromUrl) {
+      return;
+    }
+    const booking = state.bookings.find((item) => item.id === focusBookingIdFromUrl);
+    if (!booking) {
+      return;
+    }
+    consumedFocusFromUrlRef.current = focusBookingIdFromUrl;
+    openBookingInList(booking);
+    router.replace("/bookings", { scroll: false });
+  }, [focusBookingIdFromUrl, openBookingInList, router, state.bookings]);
 
   const openMobileBookingDetail = useCallback((booking: Booking, source: "list" | "today") => {
     setMobileDetailBooking(booking);
@@ -1683,6 +1680,12 @@ function BookingsPageContent() {
           </>
         }
         minHeight={260}
+        onRowClick={({ record }) => {
+          if (isBookingRowBusy(record.id)) {
+            return;
+          }
+          openMobileBookingDetail(record, "list");
+        }}
         rowStyle={getListBookingRowStyle}
         noRecordsText="Chưa có booking nào cho bộ lọc hiện tại."
         columns={[
@@ -1800,11 +1803,6 @@ function BookingsPageContent() {
                 {bookingStatusLabel[booking.status]}
               </Badge>
             ),
-          },
-          {
-            accessor: "actions",
-            title: "Thao tác",
-            render: (booking) => renderListBookingActions(booking),
           },
         ]}
       />
@@ -1961,9 +1959,6 @@ function BookingsPageContent() {
                     {stripUnknownGuestTag(booking.note)}
                   </Text>
                 ) : null}
-                <Group grow gap="xs" onClick={(event) => event.stopPropagation()}>
-                  {renderListBookingActions(booking, "sm")}
-                </Group>
               </Stack>
             </Card>
           );
@@ -2141,18 +2136,6 @@ function BookingsPageContent() {
                   <Text size="xs" c="dimmed" lineClamp={3}>
                     {note}
                   </Text>
-                ) : null}
-                {canEditBookingOrder(booking) ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openEditBookingModal(booking);
-                    }}
-                  >
-                    Sửa giờ / số khách
-                  </Button>
                 ) : null}
               </Stack>
             </Card>
@@ -2430,24 +2413,6 @@ function BookingsPageContent() {
                 </Text>
               ),
           },
-          {
-            accessor: "actions",
-            title: "Thao tác",
-            render: (booking) => (
-              <div onClick={(event) => event.stopPropagation()}>
-                {canEditBookingOrder(booking) ? (
-                  <Button
-                    size="compact-xs"
-                    variant="outline"
-                    disabled={isBookingRowBusy(booking.id)}
-                    onClick={() => openEditBookingModal(booking)}
-                  >
-                    Sửa
-                  </Button>
-                ) : null}
-              </div>
-            ),
-          },
         ]}
       />
     </PortalSectionCard>
@@ -2610,6 +2575,154 @@ function BookingsPageContent() {
       : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất: ${maxSeatsInScope} ghế).`;
   }, [editAreaId, editAssignCandidate, editGuestCount, state.bookings, state.tables]);
 
+  const bookingDetailTitle = mobileDetailBookingLive
+    ? (state.customers.find((item) => item.id === mobileDetailBookingLive.customerId)?.fullName ??
+      "Chi tiết booking")
+    : "Chi tiết booking";
+
+  const bookingDetailPanel = mobileDetailBookingLive ? (
+    (() => {
+      const booking = mobileDetailBookingLive;
+      const customer = state.customers.find((item) => item.id === booking.customerId);
+      const area = state.areas.find((item) => item.id === booking.areaId)?.name;
+      const table = state.tables.find((item) => item.id === booking.tableId)?.name;
+      const locationLine =
+        booking.areaId && booking.tableId
+          ? `${area ?? "—"} · Bàn ${table ?? "—"}`
+          : "Chờ xếp bàn";
+      const creator =
+        state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "Không rõ";
+      const note = stripUnknownGuestTag(booking.note);
+      const receptionStatus = getReceptionBookingStatus(booking, receptionThresholds);
+      const statusBadge =
+        mobileDetailSource === "today" ? (
+          <Badge color={receptionStatus.color} variant="light" size="lg">
+            {receptionStatus.label}
+          </Badge>
+        ) : (
+          <Badge color={bookingStatusColor[booking.status]} variant="light" size="lg">
+            {bookingStatusLabel[booking.status]}
+          </Badge>
+        );
+
+      return (
+        <Stack gap="md">
+          <Group justify="flex-end">{statusBadge}</Group>
+          <Stack gap="sm">
+            <BookingDetailField
+              label="Giờ đặt"
+              value={
+                <Text size="sm" fw={500}>
+                  {dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}
+                </Text>
+              }
+            />
+            {mobileDetailSource === "list" ? (
+              <BookingDetailField
+                label="Giờ check-in"
+                value={
+                  booking.checkedInAt ? (
+                    <Text size="sm">{dayjs(booking.checkedInAt).format("HH:mm · DD/MM/YYYY")}</Text>
+                  ) : (
+                    <Text size="sm" c="dimmed">
+                      —
+                    </Text>
+                  )
+                }
+              />
+            ) : null}
+            <BookingDetailField
+              label="Số điện thoại"
+              value={<Text size="sm">{displayCustomerPhone(customer?.phone)}</Text>}
+            />
+            <BookingDetailField
+              label="Khu vực / Bàn"
+              value={
+                <Text size="sm">
+                  {mobileDetailSource === "today"
+                    ? formatTodayBookingAreaTable(booking, area, table)
+                    : locationLine}
+                </Text>
+              }
+            />
+            <BookingDetailField
+              label="Số khách"
+              value={
+                <Text size="sm">
+                  {isGuestCountSpecified(booking) ? `${booking.guestCount} khách` : "Chưa rõ"}
+                </Text>
+              }
+            />
+            {mobileDetailSource === "today" ? (
+              <BookingDetailField
+                label="Loại khách"
+                value={<Text size="sm">{getTodayGuestTypeLabel(booking)}</Text>}
+              />
+            ) : null}
+            <BookingDetailField
+              label={mobileDetailSource === "today" ? "Người nhận" : "Người tạo"}
+              value={<Text size="sm">{creator}</Text>}
+            />
+            <BookingDetailField
+              label="Người sửa"
+              value={<Text size="sm">{bookingLastEditorName(booking, state.users)}</Text>}
+            />
+            <BookingDetailField
+              label="Lúc sửa"
+              value={
+                booking.lastEditedAt ? (
+                  <Text size="sm">{dayjs(booking.lastEditedAt).format("HH:mm · DD/MM/YYYY")}</Text>
+                ) : (
+                  <Text size="sm" c="dimmed">
+                    —
+                  </Text>
+                )
+              }
+            />
+            <BookingDetailField
+              label="Ghi chú"
+              value={
+                note ? (
+                  <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
+                    {note}
+                  </Text>
+                ) : (
+                  <Text size="sm" c="dimmed">
+                    —
+                  </Text>
+                )
+              }
+            />
+          </Stack>
+          {booking.status === "cancelled" ||
+          booking.status === "completed" ||
+          booking.status === "no_show" ? null : (
+            <>
+              <Divider />
+              <BookingRowActions
+                booking={booking}
+                size="sm"
+                showEdit={mobileDetailSource === "list"}
+                busy={isBookingRowBusy(booking.id)}
+                onEdit={(b) => {
+                  closeMobileBookingDetail();
+                  openEditBookingModal(b);
+                }}
+                onAssign={(b) => {
+                  closeMobileBookingDetail();
+                  openAssignOptions(b);
+                }}
+                onCheckIn={(id) => void runCheckIn(id)}
+                onComplete={openCompleteBookingConfirm}
+                onCancel={openCancelBookingConfirm}
+              />
+            </>
+          )}
+        </Stack>
+      );
+    })()
+  ) : null;
+
   return (
     <Stack gap="md">
       <Group justify="space-between" align="center" wrap="wrap" gap="md">
@@ -2670,173 +2783,36 @@ function BookingsPageContent() {
             title="Lịch booking"
             compactTitle="Lịch booking"
             showHeader={false}
+            onDayBookingRowClick={openBookingInList}
           />
         </Tabs.Panel>
       </Tabs>
-      <Drawer
-        opened={mobileDetailBookingLive != null}
-        onClose={closeMobileBookingDetail}
-        title={
-          mobileDetailBookingLive
-            ? (state.customers.find((item) => item.id === mobileDetailBookingLive.customerId)
-                ?.fullName ?? "Chi tiết booking")
-            : "Chi tiết booking"
-        }
-        position="bottom"
-        size="92%"
-        transitionProps={{ transition: "slide-up" }}
-        styles={{
-          content: { height: "92dvh", maxHeight: "92dvh" },
-          body: { paddingTop: 4 },
-        }}
-      >
-        {mobileDetailBookingLive ? (
-          (() => {
-            const booking = mobileDetailBookingLive;
-            const customer = state.customers.find((item) => item.id === booking.customerId);
-            const area = state.areas.find((item) => item.id === booking.areaId)?.name;
-            const table = state.tables.find((item) => item.id === booking.tableId)?.name;
-            const locationLine =
-              booking.areaId && booking.tableId
-                ? `${area ?? "—"} · Bàn ${table ?? "—"}`
-                : "Chờ xếp bàn";
-            const creator =
-              state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
-              "Không rõ";
-            const note = stripUnknownGuestTag(booking.note);
-            const receptionStatus = getReceptionBookingStatus(booking, receptionThresholds);
-            const statusBadge =
-              mobileDetailSource === "today" ? (
-                <Badge color={receptionStatus.color} variant="light" size="lg">
-                  {receptionStatus.label}
-                </Badge>
-              ) : (
-                <Badge color={bookingStatusColor[booking.status]} variant="light" size="lg">
-                  {bookingStatusLabel[booking.status]}
-                </Badge>
-              );
-
-            return (
-              <Stack gap="md">
-                <Group justify="flex-end">{statusBadge}</Group>
-                <Stack gap="sm">
-                  <BookingDetailField
-                    label="Giờ đặt"
-                    value={
-                      <Text size="sm" fw={500}>
-                        {dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}
-                      </Text>
-                    }
-                  />
-                  {mobileDetailSource === "list" ? (
-                    <BookingDetailField
-                      label="Giờ check-in"
-                      value={
-                        booking.checkedInAt ? (
-                          <Text size="sm">{dayjs(booking.checkedInAt).format("HH:mm · DD/MM/YYYY")}</Text>
-                        ) : (
-                          <Text size="sm" c="dimmed">
-                            —
-                          </Text>
-                        )
-                      }
-                    />
-                  ) : null}
-                  <BookingDetailField
-                    label="Số điện thoại"
-                    value={<Text size="sm">{displayCustomerPhone(customer?.phone)}</Text>}
-                  />
-                  <BookingDetailField
-                    label="Khu vực / Bàn"
-                    value={
-                      <Text size="sm">
-                        {mobileDetailSource === "today"
-                          ? formatTodayBookingAreaTable(booking, area, table)
-                          : locationLine}
-                      </Text>
-                    }
-                  />
-                  <BookingDetailField
-                    label="Số khách"
-                    value={
-                      <Text size="sm">
-                        {isGuestCountSpecified(booking)
-                          ? `${booking.guestCount} khách`
-                          : "Chưa rõ"}
-                      </Text>
-                    }
-                  />
-                  {mobileDetailSource === "today" ? (
-                    <BookingDetailField
-                      label="Loại khách"
-                      value={<Text size="sm">{getTodayGuestTypeLabel(booking)}</Text>}
-                    />
-                  ) : null}
-                  <BookingDetailField
-                    label={mobileDetailSource === "today" ? "Người nhận" : "Người tạo"}
-                    value={<Text size="sm">{creator}</Text>}
-                  />
-                  <BookingDetailField
-                    label="Người sửa"
-                    value={<Text size="sm">{bookingLastEditorName(booking, state.users)}</Text>}
-                  />
-                  <BookingDetailField
-                    label="Lúc sửa"
-                    value={
-                      booking.lastEditedAt ? (
-                        <Text size="sm">{dayjs(booking.lastEditedAt).format("HH:mm · DD/MM/YYYY")}</Text>
-                      ) : (
-                        <Text size="sm" c="dimmed">
-                          —
-                        </Text>
-                      )
-                    }
-                  />
-                  <BookingDetailField
-                    label="Ghi chú"
-                    value={
-                      note ? (
-                        <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-                          {note}
-                        </Text>
-                      ) : (
-                        <Text size="sm" c="dimmed">
-                          —
-                        </Text>
-                      )
-                    }
-                  />
-                </Stack>
-                {booking.status === "cancelled" ||
-                booking.status === "completed" ||
-                booking.status === "no_show" ? null : (
-                  <>
-                    <Divider />
-                    <Group grow gap="xs">
-                      <BookingRowActions
-                        booking={booking}
-                        size="sm"
-                        busy={isBookingRowBusy(booking.id)}
-                        onEdit={(b) => {
-                          closeMobileBookingDetail();
-                          openEditBookingModal(b);
-                        }}
-                        onAssign={(b) => {
-                          closeMobileBookingDetail();
-                          openAssignOptions(b);
-                        }}
-                        onCheckIn={(id) => void runCheckIn(id)}
-                        onComplete={openCompleteBookingConfirm}
-                        onCancel={openCancelBookingConfirm}
-                      />
-                    </Group>
-                  </>
-                )}
-              </Stack>
-            );
-          })()
-        ) : null}
-      </Drawer>
+      {isCompact ? (
+        <Drawer
+          opened={mobileDetailBookingLive != null}
+          onClose={closeMobileBookingDetail}
+          title={bookingDetailTitle}
+          position="bottom"
+          size="92%"
+          transitionProps={{ transition: "slide-up" }}
+          styles={{
+            content: { height: "92dvh", maxHeight: "92dvh" },
+            body: { paddingTop: 4 },
+          }}
+        >
+          {bookingDetailPanel}
+        </Drawer>
+      ) : (
+        <Modal
+          opened={mobileDetailBookingLive != null}
+          onClose={closeMobileBookingDetail}
+          title={bookingDetailTitle}
+          size="lg"
+          centered
+        >
+          {bookingDetailPanel}
+        </Modal>
+      )}
       <Modal
         opened={createModalOpened}
         onClose={() => {

@@ -292,7 +292,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                       </Text>
                     </Stack>
                     <Button
-                      variant="light"
+                      variant="filled"
                       size="compact-xs"
                       onClick={() => router.push("/notifications")}
                     >

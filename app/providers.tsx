@@ -4,6 +4,7 @@ import "@mantine/core/styles.css";
 import "@mantine/dates/styles.css";
 import "@mantine/notifications/styles.css";
 import {
+  Badge,
   Button,
   Modal,
   createTheme,
@@ -43,25 +44,54 @@ const theme = createTheme({
         overlayProps: modalOverlayBlur,
       },
     }),
-    Button: Button.extend({
+    Badge: Badge.extend({
       styles: {
         root: {
-          height: "auto",
-          minHeight: "var(--button-height)",
-          maxWidth: "100%",
+          fontWeight: 500,
+          textTransform: "none",
+          boxShadow: "none",
         },
-        inner: {
-          minWidth: 0,
-          maxWidth: "100%",
-        },
-        label: {
-          minWidth: 0,
-          whiteSpace: "normal",
-          overflowWrap: "break-word",
-          wordBreak: "break-word",
-          textAlign: "center",
-          lineHeight: 1.35,
-        },
+      },
+    }),
+    Button: Button.extend({
+      styles: (theme, props) => {
+        const variant = props.variant ?? "filled";
+        const emphasized =
+          variant === "filled" ||
+          variant === "default" ||
+          variant === "outline" ||
+          variant === "light";
+
+        return {
+          root: {
+            height: "auto",
+            minHeight: "var(--button-height)",
+            maxWidth: "100%",
+            fontWeight: 600,
+            ...(emphasized && {
+              boxShadow: "0 1px 2px rgba(0, 0, 0, 0.08)",
+            }),
+            ...(variant === "outline" && {
+              borderWidth: 2,
+              backgroundColor: theme.white,
+            }),
+            ...(variant === "light" && {
+              border: `1px solid ${theme.colors.gray[3]}`,
+            }),
+          },
+          inner: {
+            minWidth: 0,
+            maxWidth: "100%",
+          },
+          label: {
+            minWidth: 0,
+            whiteSpace: "normal",
+            overflowWrap: "break-word",
+            wordBreak: "break-word",
+            textAlign: "center",
+            lineHeight: 1.35,
+          },
+        };
       },
     }),
   },
