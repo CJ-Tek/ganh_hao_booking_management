@@ -2806,7 +2806,13 @@ export default function FloorMapPage() {
 
       <Modal
         opened={Boolean(registerTable)}
-        onClose={closeRegistrationPanel}
+        onClose={() => {
+          if (!registerSaving) {
+            closeRegistrationPanel();
+          }
+        }}
+        closeOnClickOutside={!registerSaving}
+        closeOnEscape={!registerSaving}
         title={registerTable ? `Đăng ký - ${registerTable.name}` : "Đăng ký"}
         size="md"
         centered
@@ -2918,6 +2924,7 @@ export default function FloorMapPage() {
                   <Radio.Group
                     label="Đặt bàn"
                     value={registerArrivalMode}
+                    disabled={registerSaving}
                     onChange={(value) =>
                       setRegisterArrivalMode(value === "hold" ? "hold" : "immediate")
                     }
@@ -2953,6 +2960,7 @@ export default function FloorMapPage() {
                         value={registerBookingDate}
                         onChange={setRegisterBookingDate}
                         valueFormat="YYYY-MM-DD"
+                        disabled={registerSaving}
                       />
                       <TimeInput
                         style={{ flex: "1 1 0", minWidth: 0 }}
@@ -2960,6 +2968,7 @@ export default function FloorMapPage() {
                         value={registerBookingTime}
                         onChange={(event) => setRegisterBookingTime(event.currentTarget.value)}
                         withSeconds={false}
+                        disabled={registerSaving}
                       />
                     </Flex>
                   ) : null}
@@ -2968,6 +2977,7 @@ export default function FloorMapPage() {
                     placeholder="Họ và tên"
                     value={registerCustomerName}
                     onChange={(event) => setRegisterCustomerName(event.currentTarget.value)}
+                    disabled={registerSaving}
                   />
                   <TextInput
                     label="Số điện thoại"
@@ -2975,6 +2985,7 @@ export default function FloorMapPage() {
                     inputMode="tel"
                     value={registerCustomerPhone}
                     onChange={(event) => setRegisterCustomerPhone(event.currentTarget.value)}
+                    disabled={registerSaving}
                   />
                   <NumberInput
                     label="Số khách"
@@ -2982,6 +2993,7 @@ export default function FloorMapPage() {
                     onChange={(value) => setRegisterGuestCount(Number(value || 1))}
                     min={1}
                     max={registerTable.seats || undefined}
+                    disabled={registerSaving}
                   />
                   <Select
                     label="Loại khách"
@@ -2990,6 +3002,7 @@ export default function FloorMapPage() {
                     value={registerGuestType}
                     onChange={setRegisterGuestType}
                     allowDeselect={false}
+                    disabled={registerSaving}
                   />
                   <Textarea
                     label="Ghi chú"
@@ -2998,14 +3011,16 @@ export default function FloorMapPage() {
                     onChange={(event) => setRegisterNote(event.currentTarget.value)}
                     autosize
                     minRows={2}
+                    disabled={registerSaving}
                   />
                   <Group justify="flex-end" gap={8}>
-                    <Button variant="default" onClick={closeRegistrationPanel}>
+                    <Button variant="default" disabled={registerSaving} onClick={closeRegistrationPanel}>
                       Hủy
                     </Button>
                     <Button
                       loading={registerSaving}
                       disabled={
+                        registerSaving ||
                         !hasSupabase ||
                         isLoading ||
                         registerImmediateBlocked ||
@@ -3026,6 +3041,7 @@ export default function FloorMapPage() {
                     placeholder="Chọn booking đang chờ xếp bàn"
                     value={registerPendingBookingId}
                     onChange={setRegisterPendingBookingId}
+                    disabled={registerSaving}
                     data={pendingBookings.map((booking) => {
                       const customer =
                         state.customers.find((item) => item.id === booking.customerId)?.fullName ??
@@ -3044,13 +3060,13 @@ export default function FloorMapPage() {
                     </Text>
                   ) : null}
                   <Group justify="flex-end" gap={8}>
-                    <Button variant="default" onClick={closeRegistrationPanel}>
+                    <Button variant="default" disabled={registerSaving} onClick={closeRegistrationPanel}>
                       Hủy
                     </Button>
                     <Button
                       variant="light"
                       loading={registerSaving}
-                      disabled={!hasSupabase || isLoading || !registerPendingBookingId}
+                      disabled={registerSaving || !hasSupabase || isLoading || !registerPendingBookingId}
                       onClick={() => void handleAssignPendingBooking()}
                     >
                       Gán booking chờ

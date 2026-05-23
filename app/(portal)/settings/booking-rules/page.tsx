@@ -81,6 +81,7 @@ export default function BookingRulesSettingsPage() {
               min={1}
               allowDecimal={false}
               clampBehavior="strict"
+              disabled={saving}
               value={draft.groupPartyGuestThreshold}
               onChange={(value) =>
                 setDraft((prev) => ({
@@ -98,6 +99,7 @@ export default function BookingRulesSettingsPage() {
               min={1}
               allowDecimal={false}
               clampBehavior="strict"
+              disabled={saving}
               value={draft.repeatCustomerMinCompleted}
               onChange={(value) =>
                 setDraft((prev) => ({
@@ -115,6 +117,7 @@ export default function BookingRulesSettingsPage() {
               min={1}
               allowDecimal={false}
               clampBehavior="strict"
+              disabled={saving}
               value={draft.receptionArrivalGraceMinutes}
               onChange={(value) =>
                 setDraft((prev) => ({
@@ -126,7 +129,7 @@ export default function BookingRulesSettingsPage() {
                 }))
               }
             />
-            <Button loading={saving} onClick={() => void handleSave()}>
+            <Button loading={saving} disabled={saving} onClick={() => void handleSave()}>
               Lưu cấu hình
             </Button>
           </Stack>

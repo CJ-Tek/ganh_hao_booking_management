@@ -238,6 +238,7 @@ function AssignGuestSpecifiedOptionsBody(props: {
         </Button>
       </Group>
       <Button
+        disabled={persistingGuest}
         onClick={() => {
           modals.close(modalId);
           window.setTimeout(() => {

@@ -27,6 +27,7 @@ import {
 } from "@/components/portal-page";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
+import { bookingCardBusyProps, bookingRowBusyStyle } from "@/lib/busy-row-style";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 
 type AreaRow = {
@@ -183,6 +184,9 @@ export default function AreasTablesSettingsPage() {
     }
   };
 
+  const isAreaRowBusy = (areaId: string) =>
+    (editSaving && editingArea?.id === areaId) || (deleteLoading && deleteTarget?.id === areaId);
+
   const handleConfirmDelete = async () => {
     if (!deleteTarget) {
       return;
@@ -222,6 +226,7 @@ export default function AreasTablesSettingsPage() {
             placeholder="VD: Tầng 1"
             value={name}
             onChange={(event) => setName(event.currentTarget.value)}
+            disabled={isAddAreaSaving}
             size={isCompact ? "md" : "sm"}
           />
           <NumberInput
@@ -229,6 +234,7 @@ export default function AreasTablesSettingsPage() {
             value={capacity}
             onChange={(value) => setCapacity(Number(value || 1))}
             min={1}
+            disabled={isAddAreaSaving}
             size={isCompact ? "md" : "sm"}
           />
           <PortalStickyAction>
@@ -268,8 +274,17 @@ export default function AreasTablesSettingsPage() {
                 Không có khu vực phù hợp.
               </Text>
             ) : (
-              pagedMobileAreas.map((area) => (
-                <Card key={area.id} withBorder radius="md" padding="md">
+              pagedMobileAreas.map((area) => {
+                const cardBusy = bookingCardBusyProps(isAreaRowBusy(area.id));
+                return (
+                <Card
+                  key={area.id}
+                  withBorder
+                  radius="md"
+                  padding="md"
+                  className={cardBusy.className}
+                  style={cardBusy.style}
+                >
                   <Stack gap="sm">
                     <Group justify="space-between" align="flex-start" wrap="nowrap">
                       <div style={{ minWidth: 0 }}>
@@ -282,7 +297,7 @@ export default function AreasTablesSettingsPage() {
                         <ActionIcon
                           variant="light"
                           aria-label="Sửa khu vực"
-                          disabled={!hasSupabase}
+                          disabled={!hasSupabase || isAreaRowBusy(area.id)}
                           onClick={() => openEdit(area)}
                         >
                           <Pencil size={16} />
@@ -291,7 +306,7 @@ export default function AreasTablesSettingsPage() {
                           variant="light"
                           color="red"
                           aria-label="Xóa khu vực"
-                          disabled={!hasSupabase}
+                          disabled={!hasSupabase || isAreaRowBusy(area.id)}
                           onClick={() => setDeleteTarget(area)}
                         >
                           <Trash2 size={16} />
@@ -305,7 +320,8 @@ export default function AreasTablesSettingsPage() {
                     </Group>
                   </Stack>
                 </Card>
-              ))
+              );
+              })
             )}
             {mobileFilteredAreas.length > mobilePageSize ? (
               <Group justify="center" gap="xs" mt="xs">
@@ -341,6 +357,7 @@ export default function AreasTablesSettingsPage() {
             searchPlaceholder="Tên hoặc chi nhánh"
             minHeight={240}
             noRecordsText="Không có khu vực phù hợp."
+            rowStyle={(area) => bookingRowBusyStyle(isAreaRowBusy(area.id))}
             columns={[
               {
                 accessor: "branchName",
@@ -367,7 +384,7 @@ export default function AreasTablesSettingsPage() {
                     <ActionIcon
                       variant="subtle"
                       aria-label="Sửa khu vực"
-                      disabled={!hasSupabase}
+                      disabled={!hasSupabase || isAreaRowBusy(area.id)}
                       onClick={() => openEdit(area)}
                     >
                       <Pencil size={16} />
@@ -376,7 +393,7 @@ export default function AreasTablesSettingsPage() {
                       variant="subtle"
                       color="red"
                       aria-label="Xóa khu vực"
-                      disabled={!hasSupabase}
+                      disabled={!hasSupabase || isAreaRowBusy(area.id)}
                       onClick={() => setDeleteTarget(area)}
                     >
                       <Trash2 size={16} />
@@ -392,9 +409,13 @@ export default function AreasTablesSettingsPage() {
       <Modal
         opened={editOpen}
         onClose={() => {
-          setEditOpen(false);
-          setEditingArea(null);
+          if (!editSaving) {
+            setEditOpen(false);
+            setEditingArea(null);
+          }
         }}
+        closeOnClickOutside={!editSaving}
+        closeOnEscape={!editSaving}
         title="Sửa khu vực"
         size="md"
       >
@@ -404,23 +425,26 @@ export default function AreasTablesSettingsPage() {
             value={editBranchId}
             onChange={(value) => setEditBranchId(value ?? "")}
             data={branchSelectData}
+            disabled={editSaving}
           />
           <TextInput
             label="Tên khu vực"
             value={editName}
             onChange={(event) => setEditName(event.currentTarget.value)}
+            disabled={editSaving}
           />
           <NumberInput
             label="Sức chứa"
             value={editCapacity}
             onChange={(value) => setEditCapacity(Number(value || 1))}
             min={1}
+            disabled={editSaving}
           />
           <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setEditOpen(false)}>
+            <Button variant="default" disabled={editSaving} onClick={() => setEditOpen(false)}>
               Hủy
             </Button>
-            <Button loading={editSaving} onClick={() => void handleSaveEdit()}>
+            <Button loading={editSaving} disabled={editSaving} onClick={() => void handleSaveEdit()}>
               Lưu
             </Button>
           </Group>
@@ -429,7 +453,13 @@ export default function AreasTablesSettingsPage() {
 
       <Modal
         opened={deleteTarget !== null}
-        onClose={() => setDeleteTarget(null)}
+        onClose={() => {
+          if (!deleteLoading) {
+            setDeleteTarget(null);
+          }
+        }}
+        closeOnClickOutside={!deleteLoading}
+        closeOnEscape={!deleteLoading}
         title="Xóa khu vực"
         size="sm"
       >
@@ -443,10 +473,15 @@ export default function AreasTablesSettingsPage() {
             {deleteTarget?.tableCount ?? 0} bàn, {deleteTarget?.bookingCount ?? 0} đặt bàn).
           </Text>
           <Group justify="flex-end">
-            <Button variant="default" onClick={() => setDeleteTarget(null)}>
+            <Button variant="default" disabled={deleteLoading} onClick={() => setDeleteTarget(null)}>
               Hủy
             </Button>
-            <Button color="red" loading={deleteLoading} onClick={() => void handleConfirmDelete()}>
+            <Button
+              color="red"
+              loading={deleteLoading}
+              disabled={deleteLoading}
+              onClick={() => void handleConfirmDelete()}
+            >
               Xóa
             </Button>
           </Group>

@@ -439,6 +439,7 @@ export function VoiceBookingAssistant(props: {
             onChange={(e) => setTranscript(e.currentTarget.value)}
             autosize
             minRows={3}
+            disabled={isSubmitting}
             placeholder="Ví dụ: đặt bàn VIP 4 người lúc 19:30 tối nay, khu A, bàn 3, tên Huy, số 0912..."
           />
 
@@ -461,12 +462,14 @@ export function VoiceBookingAssistant(props: {
               value={customerName}
               onChange={(e) => setCustomerName(e.currentTarget.value)}
               onBlur={() => setCustomerName((v) => formatVietnamesePersonName(v))}
+              disabled={isSubmitting}
             />
             <TextInput
               label="Số điện thoại"
               placeholder="09… / +84…"
               value={customerPhone}
               onChange={(e) => setCustomerPhone(e.currentTarget.value)}
+              disabled={isSubmitting}
             />
           </Group>
 
@@ -477,6 +480,7 @@ export function VoiceBookingAssistant(props: {
             value={guestType}
             onChange={setGuestType}
             allowDeselect={false}
+            disabled={isSubmitting}
           />
 
           <Group grow align="flex-start">
@@ -488,6 +492,7 @@ export function VoiceBookingAssistant(props: {
               allowDecimal={false}
               clampBehavior="strict"
               placeholder="Tùy chọn"
+              disabled={isSubmitting}
             />
             <DateTimePicker
               label="Thời gian đến"
@@ -495,6 +500,7 @@ export function VoiceBookingAssistant(props: {
               onChange={(d) => setBookingAt(d ? dayjs(d).format("YYYY-MM-DDTHH:mm") : null)}
               valueFormat="DD/MM/YYYY HH:mm"
               clearable={false}
+              disabled={isSubmitting}
             />
           </Group>
 
@@ -509,6 +515,7 @@ export function VoiceBookingAssistant(props: {
               }}
               searchable
               clearable
+              disabled={isSubmitting}
             />
             <Select
               label="Bàn"
@@ -517,6 +524,7 @@ export function VoiceBookingAssistant(props: {
               onChange={setTableId}
               searchable
               clearable
+              disabled={isSubmitting}
             />
           </Group>
 
@@ -535,10 +543,11 @@ export function VoiceBookingAssistant(props: {
             onChange={(e) => setNote(e.currentTarget.value)}
             autosize
             minRows={2}
+            disabled={isSubmitting}
           />
 
           <Group justify="flex-end">
-            <Button variant="default" onClick={() => setOpened(false)}>
+            <Button variant="default" disabled={isSubmitting} onClick={() => setOpened(false)}>
               Đóng
             </Button>
             <Button

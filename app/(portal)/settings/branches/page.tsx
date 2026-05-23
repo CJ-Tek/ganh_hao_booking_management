@@ -34,15 +34,18 @@ function BranchEditor({
           label="Tên chi nhánh"
           value={name}
           onChange={(e) => setName(e.currentTarget.value)}
+          disabled={saving}
         />
         <TextInput
           label="Địa chỉ"
           value={address}
           onChange={(e) => setAddress(e.currentTarget.value)}
+          disabled={saving}
         />
         <Button
           fullWidth
           loading={saving}
+          disabled={saving}
           onClick={async () => {
             setSaving(true);
             try {

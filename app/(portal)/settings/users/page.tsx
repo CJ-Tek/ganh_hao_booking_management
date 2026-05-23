@@ -22,6 +22,7 @@ import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard, PortalStickyAction } from "@/components/portal-page";
 import { RouteGuard } from "@/components/route-guard";
 import { useAppContext } from "@/contexts/app-context";
+import { bookingRowBusyStyle } from "@/lib/busy-row-style";
 import { AppUser, Role } from "@/lib/types";
 
 const roleLabel: Record<Role, string> = {
@@ -131,6 +132,9 @@ export default function UserManagementPage() {
     setEditOpen(true);
   };
 
+  const isUserRowBusy = (userId: string) =>
+    (editSaving && editingUser?.id === userId) || (deleteLoading && deleteTarget?.id === userId);
+
   const handleCreateUser = async () => {
     setIsCreateSaving(true);
     try {
@@ -212,28 +216,33 @@ export default function UserManagementPage() {
               label="Tên đăng nhập"
               value={username}
               onChange={(event) => setUsername(event.currentTarget.value)}
+              disabled={isCreateSaving}
             />
             <PasswordInput
               label="Mật khẩu"
               value={password}
               onChange={(event) => setPassword(event.currentTarget.value)}
+              disabled={isCreateSaving}
             />
             <TextInput
               label="Họ tên"
               value={fullName}
               onChange={(event) => setFullName(event.currentTarget.value)}
+              disabled={isCreateSaving}
             />
             <Select
               label="Vai trò"
               value={role}
               onChange={(value) => setRole((value as Role) || "manager")}
               data={roleSelectDataScoped}
+              disabled={isCreateSaving}
             />
             <MultiSelect
               label="Chi nhánh quản lý"
               value={branchIds}
               onChange={setBranchIds}
               data={branchMultiData}
+              disabled={isCreateSaving}
             />
             <PortalStickyAction>
               <Button
@@ -258,6 +267,7 @@ export default function UserManagementPage() {
             searchLabel="Tìm tài khoản"
             searchPlaceholder="Tên đăng nhập, họ tên, vai trò..."
             minHeight={240}
+            rowStyle={(u) => bookingRowBusyStyle(isUserRowBusy(u.id))}
             columns={[
               { accessor: "username", title: "Tài khoản", sortable: true },
               { accessor: "fullName", title: "Họ tên", sortable: true },
@@ -285,7 +295,9 @@ export default function UserManagementPage() {
                     <ActionIcon
                       variant="subtle"
                       aria-label="Sửa"
-                      disabled={u.id === currentUser?.id || gmCannotManageUser(u)}
+                      disabled={
+                        u.id === currentUser?.id || gmCannotManageUser(u) || isUserRowBusy(u.id)
+                      }
                       onClick={() => openEdit(u)}
                     >
                       <Pencil size={16} />
@@ -294,7 +306,9 @@ export default function UserManagementPage() {
                       variant="subtle"
                       color="red"
                       aria-label="Xóa"
-                      disabled={u.id === currentUser?.id || gmCannotManageUser(u)}
+                      disabled={
+                        u.id === currentUser?.id || gmCannotManageUser(u) || isUserRowBusy(u.id)
+                      }
                       onClick={() => setDeleteTarget(u)}
                     >
                       <Trash2 size={16} />
@@ -309,9 +323,13 @@ export default function UserManagementPage() {
         <Modal
           opened={editOpen}
           onClose={() => {
-            setEditOpen(false);
-            setEditingUser(null);
+            if (!editSaving) {
+              setEditOpen(false);
+              setEditingUser(null);
+            }
           }}
+          closeOnClickOutside={!editSaving}
+          closeOnEscape={!editSaving}
           title="Sửa tài khoản"
           size="md"
         >
@@ -320,35 +338,40 @@ export default function UserManagementPage() {
               label="Tên đăng nhập"
               value={editUsername}
               onChange={(e) => setEditUsername(e.currentTarget.value)}
+              disabled={editSaving}
             />
             <PasswordInput
               label="Mật khẩu mới"
               placeholder="Để trống nếu không đổi mật khẩu"
               value={editPassword}
               onChange={(e) => setEditPassword(e.currentTarget.value)}
+              disabled={editSaving}
             />
             <TextInput
               label="Họ tên"
               value={editFullName}
               onChange={(e) => setEditFullName(e.currentTarget.value)}
+              disabled={editSaving}
             />
             <Select
               label="Vai trò"
               value={editRole}
               onChange={(value) => setEditRole((value as Role) || "manager")}
               data={roleSelectDataScoped}
+              disabled={editSaving}
             />
             <MultiSelect
               label="Chi nhánh quản lý"
               value={editBranchIds}
               onChange={setEditBranchIds}
               data={branchMultiData}
+              disabled={editSaving}
             />
             <Group justify="flex-end" mt="md">
-              <Button variant="default" onClick={() => setEditOpen(false)}>
+              <Button variant="default" disabled={editSaving} onClick={() => setEditOpen(false)}>
                 Hủy
               </Button>
-              <Button loading={editSaving} onClick={() => void handleSaveEdit()}>
+              <Button loading={editSaving} disabled={editSaving} onClick={() => void handleSaveEdit()}>
                 Lưu
               </Button>
             </Group>
@@ -357,7 +380,13 @@ export default function UserManagementPage() {
 
         <Modal
           opened={deleteTarget !== null}
-          onClose={() => setDeleteTarget(null)}
+          onClose={() => {
+            if (!deleteLoading) {
+              setDeleteTarget(null);
+            }
+          }}
+          closeOnClickOutside={!deleteLoading}
+          closeOnEscape={!deleteLoading}
           title="Xóa tài khoản"
           size="sm"
         >
@@ -371,10 +400,15 @@ export default function UserManagementPage() {
               thống có thể từ chối xóa.
             </Text>
             <Group justify="flex-end">
-              <Button variant="default" onClick={() => setDeleteTarget(null)}>
+              <Button variant="default" disabled={deleteLoading} onClick={() => setDeleteTarget(null)}>
                 Hủy
               </Button>
-              <Button color="red" loading={deleteLoading} onClick={() => void handleConfirmDelete()}>
+              <Button
+                color="red"
+                loading={deleteLoading}
+                disabled={deleteLoading}
+                onClick={() => void handleConfirmDelete()}
+              >
                 Xóa
               </Button>
             </Group>
