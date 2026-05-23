@@ -18,7 +18,6 @@ import {
   Text,
   TextInput,
   Textarea,
-  Tooltip,
 } from "@mantine/core";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { DateTimePicker } from "@mantine/dates";
@@ -33,6 +32,8 @@ import {
   PortalStickyAction,
 } from "@/components/portal-page";
 import { BookingCalendarPanel } from "@/components/booking-calendar-panel";
+import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
+import { canEditBookingOrder } from "@/components/booking-management/shared";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
@@ -59,6 +60,8 @@ import {
   isSyntheticPhoneValue,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
+import { bookingCardBusyProps, bookingListRowStyle } from "@/lib/busy-row-style";
+import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking, type BookingStatus } from "@/lib/types";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
@@ -82,37 +85,6 @@ const portalModalOverlayPopoverProps = {
   zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX,
   withinPortal: true,
 } as const;
-
-function BookingCheckInButton(props: {
-  size: "compact-xs" | "sm";
-  disabled: boolean;
-  onCheckIn: () => void;
-}) {
-  const { size, disabled, onCheckIn } = props;
-  const btn = (
-    <Button
-      size={size}
-      variant={disabled ? "default" : "filled"}
-      color={disabled ? undefined : "green"}
-      onClick={() => void onCheckIn()}
-      disabled={disabled}
-    >
-      Check-in
-    </Button>
-  );
-  if (!disabled) {
-    return btn;
-  }
-  return (
-    <Tooltip label="Chỉ check-in khi booking đã xác nhận." withArrow>
-      <span style={{ display: "inline-flex" }}>{btn}</span>
-    </Tooltip>
-  );
-}
-
-function canEditBookingOrder(booking: Pick<Booking, "status">): boolean {
-  return booking.status === "pending" || booking.status === "confirmed";
-}
 
 function bookingLastEditorName(
   booking: Pick<Booking, "lastEditedByUserId">,
@@ -300,6 +272,12 @@ function BookingsPageContent() {
   } = useAppContext();
 
   const isCompact = usePortalCompact();
+  const {
+    busyId: busyBookingId,
+    isBusy: isBookingRowBusy,
+    run: runBookingRowAction,
+  } = useBusyId();
+  const [isCreating, setIsCreating] = useState(false);
 
   const branchId = filteredBranchIds[0] ?? null;
   const branchName =
@@ -470,15 +448,17 @@ function BookingsPageContent() {
           notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
           return;
         }
-        try {
-          await updateBookingStatus(booking.id, "cancelled");
-          notifications.show({ color: "green", message: "Đã hủy booking." });
-        } catch (error) {
-          notifications.show({
-            color: "red",
-            message: error instanceof Error ? error.message : "Không hủy được booking.",
-          });
-        }
+        await runBookingRowAction(booking.id, async () => {
+          try {
+            await updateBookingStatus(booking.id, "cancelled");
+            notifications.show({ color: "green", message: "Đã hủy booking." });
+          } catch (error) {
+            notifications.show({
+              color: "red",
+              message: error instanceof Error ? error.message : "Không hủy được booking.",
+            });
+          }
+        });
       },
     });
   };
@@ -501,15 +481,18 @@ function BookingsPageContent() {
           notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
           return;
         }
-        try {
-          await updateBookingStatus(booking.id, "completed");
-          notifications.show({ color: "green", message: "Đã hoàn thành booking." });
-        } catch (error) {
-          notifications.show({
-            color: "red",
-            message: error instanceof Error ? error.message : "Không hoàn thành được booking.",
-          });
-        }
+        await runBookingRowAction(booking.id, async () => {
+          try {
+            await updateBookingStatus(booking.id, "completed");
+            notifications.show({ color: "green", message: "Đã hoàn thành booking." });
+          } catch (error) {
+            notifications.show({
+              color: "red",
+              message:
+                error instanceof Error ? error.message : "Không hoàn thành được booking.",
+            });
+          }
+        });
       },
     });
   };
@@ -519,15 +502,17 @@ function BookingsPageContent() {
       notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
       return;
     }
-    try {
-      await checkInBooking(bookingId);
-      notifications.show({ color: "green", message: "Đã check-in." });
-    } catch (error) {
-      notifications.show({
-        color: "red",
-        message: error instanceof Error ? error.message : "Check-in thất bại.",
-      });
-    }
+    await runBookingRowAction(bookingId, async () => {
+      try {
+        await checkInBooking(bookingId);
+        notifications.show({ color: "green", message: "Đã check-in." });
+      } catch (error) {
+        notifications.show({
+          color: "red",
+          message: error instanceof Error ? error.message : "Check-in thất bại.",
+        });
+      }
+    });
   };
 
   const createBranchName =
@@ -891,6 +876,42 @@ function BookingsPageContent() {
       ),
     });
   };
+
+  const renderListBookingActions = useCallback(
+    (booking: Booking, size: "compact-xs" | "sm" = "compact-xs") => (
+      <BookingRowActions
+        booking={booking}
+        size={size}
+        busy={isBookingRowBusy(booking.id)}
+        onEdit={openEditBookingModal}
+        onAssign={openAssignOptions}
+        onCheckIn={(id) => void runCheckIn(id)}
+        onComplete={openCompleteBookingConfirm}
+        onCancel={openCancelBookingConfirm}
+      />
+    ),
+    [
+      isBookingRowBusy,
+      openAssignOptions,
+      openCancelBookingConfirm,
+      openCompleteBookingConfirm,
+      openEditBookingModal,
+      runCheckIn,
+    ]
+  );
+
+  const getListBookingRowStyle = useCallback(
+    (booking: Booking) =>
+      bookingListRowStyle(booking.id, {
+        busyBookingId,
+        focusBookingId: listFocusBookingId,
+        focusPulse: {
+          cycleMs: LIST_BOOKING_PULSE_CYCLE_MS,
+          cycles: LIST_BOOKING_PULSE_CYCLES,
+        },
+      }),
+    [busyBookingId, listFocusBookingId]
+  );
 
   const searchedBookings = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -1349,7 +1370,10 @@ function BookingsPageContent() {
       });
       return;
     }
-    const result = await createBooking({
+    setIsCreating(true);
+    let result;
+    try {
+      result = await createBooking({
       customerName: formatVietnamesePersonName(customerName),
       customerPhone: normalizedCustomerPhone || undefined,
       branchId: createBranchId,
@@ -1359,6 +1383,9 @@ function BookingsPageContent() {
       guestType,
       allowDuplicate: options?.allowDuplicate,
     });
+    } finally {
+      setIsCreating(false);
+    }
     if (!result.ok && result.code === DUPLICATE_BOOKING_CODE && result.duplicates?.length) {
       notifications.show({ color: "orange", message: result.message });
       confirmDuplicateBookingSecond(
@@ -1421,6 +1448,8 @@ function BookingsPageContent() {
     );
   };
 
+  const createFormDisabled = isCreating;
+
   const createForm = (
     <PortalSectionCard>
       <Stack gap="sm">
@@ -1433,6 +1462,7 @@ function BookingsPageContent() {
           value={createBranchId}
           onChange={(value) => setCreateBranchId(value)}
           allowDeselect={false}
+          disabled={createFormDisabled}
           size={isCompact ? "md" : "sm"}
         />
         <Group justify="flex-start">
@@ -1455,6 +1485,7 @@ function BookingsPageContent() {
           value={customerName}
           onChange={(event) => setCustomerName(event.currentTarget.value)}
           onBlur={() => setCustomerName((v) => formatVietnamesePersonName(v))}
+          disabled={createFormDisabled}
           size={isCompact ? "md" : "sm"}
         />
         <TextInput
@@ -1463,6 +1494,7 @@ function BookingsPageContent() {
           inputMode="tel"
           value={customerPhone}
           onChange={(event) => setCustomerPhone(event.currentTarget.value)}
+          disabled={createFormDisabled}
           size={isCompact ? "md" : "sm"}
         />
         <Select
@@ -1472,6 +1504,7 @@ function BookingsPageContent() {
           value={guestType}
           onChange={setGuestType}
           allowDeselect={false}
+          disabled={createFormDisabled}
           size={isCompact ? "md" : "sm"}
         />
         {duplicateWarningMessage ? (
@@ -1490,6 +1523,7 @@ function BookingsPageContent() {
           onChange={setBookingAt}
           label="Thời gian đến"
           valueFormat="DD/MM/YYYY HH:mm"
+          disabled={createFormDisabled}
           size={isCompact ? "md" : "sm"}
           popoverProps={portalModalOverlayPopoverProps}
           timePickerProps={{ popoverProps: portalModalOverlayPopoverProps }}
@@ -1502,6 +1536,7 @@ function BookingsPageContent() {
           allowDecimal={false}
           clampBehavior="strict"
           placeholder="Để trống nếu chưa rõ"
+          disabled={createFormDisabled}
           size={isCompact ? "md" : "sm"}
         />
         <Textarea
@@ -1511,10 +1546,17 @@ function BookingsPageContent() {
           onChange={(event) => setNote(event.currentTarget.value)}
           autosize
           minRows={2}
+          disabled={createFormDisabled}
           size={isCompact ? "md" : "sm"}
         />
         <PortalStickyAction>
-          <Button fullWidth size={isCompact ? "md" : "sm"} onClick={() => void handleCreate()}>
+          <Button
+            fullWidth
+            size={isCompact ? "md" : "sm"}
+            loading={isCreating}
+            disabled={isCreating}
+            onClick={() => void handleCreate()}
+          >
             Tạo booking
           </Button>
         </PortalStickyAction>
@@ -1640,13 +1682,7 @@ function BookingsPageContent() {
           </>
         }
         minHeight={260}
-        rowStyle={(booking) =>
-          booking.id === listFocusBookingId
-            ? {
-                animation: `booking-list-row-pulse ${LIST_BOOKING_PULSE_CYCLE_MS}ms ease-in-out ${LIST_BOOKING_PULSE_CYCLES} forwards`,
-              }
-            : undefined
-        }
+        rowStyle={getListBookingRowStyle}
         noRecordsText="Chưa có booking nào cho bộ lọc hiện tại."
         columns={[
           {
@@ -1767,55 +1803,7 @@ function BookingsPageContent() {
           {
             accessor: "actions",
             title: "Thao tác",
-            render: (booking) => (
-              booking.status === "cancelled" || booking.status === "completed" || booking.status === "no_show" ? null : (
-                <Group gap={6} wrap="wrap">
-                  {canEditBookingOrder(booking) ? (
-                    <Button
-                      size="compact-xs"
-                      variant="outline"
-                      onClick={() => openEditBookingModal(booking)}
-                    >
-                      Sửa
-                    </Button>
-                  ) : null}
-                  {booking.status === "pending" ? (
-                    <Button
-                      size="compact-xs"
-                      variant="outline"
-                      color="blue"
-                      onClick={() => openAssignOptions(booking)}
-                    >
-                      Gán vào bàn
-                    </Button>
-                  ) : null}
-                  <BookingCheckInButton
-                    size="compact-xs"
-                    disabled={booking.status !== "confirmed"}
-                    onCheckIn={() => runCheckIn(booking.id)}
-                  />
-                  {booking.status === "checked_in" || booking.status === "seated" ? (
-                    <Button
-                      size="compact-xs"
-                      variant="filled"
-                      color="green"
-                      onClick={() => openCompleteBookingConfirm(booking)}
-                    >
-                      Hoàn thành
-                    </Button>
-                  ) : (
-                    <Button
-                      size="compact-xs"
-                      variant="outline"
-                      color="red"
-                      onClick={() => openCancelBookingConfirm(booking)}
-                    >
-                      Hủy
-                    </Button>
-                  )}
-                </Group>
-              )
-            ),
+            render: (booking) => renderListBookingActions(booking),
           },
         ]}
       />
@@ -1911,17 +1899,26 @@ function BookingsPageContent() {
             "Không rõ";
           const locationLine =
             booking.areaId && booking.tableId ? `${area} · Bàn ${table}` : "Chờ xếp bàn";
+          const cardBusy = bookingCardBusyProps(isBookingRowBusy(booking.id));
           return (
             <Card
               key={booking.id}
               withBorder
               radius="md"
               padding="md"
-              style={{ cursor: "pointer" }}
-              className={
-                booking.id === listFocusBookingId ? "booking-list-row-pulse" : undefined
-              }
-              onClick={() => openMobileBookingDetail(booking, "list")}
+              style={{ cursor: cardBusy.style ? undefined : "pointer", ...cardBusy.style }}
+              className={[
+                booking.id === listFocusBookingId ? "booking-list-row-pulse" : undefined,
+                cardBusy.className,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined}
+              onClick={() => {
+                if (isBookingRowBusy(booking.id)) {
+                  return;
+                }
+                openMobileBookingDetail(booking, "list");
+              }}
             >
               <Stack gap="sm">
                 <Group justify="space-between" align="flex-start" wrap="nowrap" gap="xs">
@@ -1964,53 +1961,7 @@ function BookingsPageContent() {
                   </Text>
                 ) : null}
                 <Group grow gap="xs" onClick={(event) => event.stopPropagation()}>
-                  {booking.status === "cancelled" || booking.status === "completed" || booking.status === "no_show" ? null : (
-                    <>
-                      {canEditBookingOrder(booking) ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => openEditBookingModal(booking)}
-                        >
-                          Sửa
-                        </Button>
-                      ) : null}
-                      {booking.status === "pending" ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          color="blue"
-                          onClick={() => openAssignOptions(booking)}
-                        >
-                          Gán vào bàn
-                        </Button>
-                      ) : null}
-                      <BookingCheckInButton
-                        size="sm"
-                        disabled={booking.status !== "confirmed"}
-                        onCheckIn={() => runCheckIn(booking.id)}
-                      />
-                      {booking.status === "checked_in" || booking.status === "seated" ? (
-                        <Button
-                          size="sm"
-                          variant="filled"
-                          color="green"
-                          onClick={() => openCompleteBookingConfirm(booking)}
-                        >
-                          Hoàn thành
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          color="red"
-                          onClick={() => openCancelBookingConfirm(booking)}
-                        >
-                          Hủy
-                        </Button>
-                      )}
-                    </>
-                  )}
+                  {renderListBookingActions(booking, "sm")}
                 </Group>
               </Stack>
             </Card>
@@ -2382,8 +2333,18 @@ function BookingsPageContent() {
           </>
         }
         minHeight={260}
-        onRowClick={({ record }) => openBookingInList(record)}
-        rowStyle={() => ({ cursor: "pointer" })}
+        onRowClick={({ record }) => {
+          if (isBookingRowBusy(record.id)) {
+            return;
+          }
+          openBookingInList(record);
+        }}
+        rowStyle={(booking) =>
+          bookingListRowStyle(booking.id, {
+            busyBookingId,
+            extra: { cursor: "pointer" },
+          })
+        }
         noRecordsText={
           todayBookings.length === 0
             ? "Chưa có booking nào cho hôm nay."
@@ -2471,19 +2432,20 @@ function BookingsPageContent() {
           {
             accessor: "actions",
             title: "Thao tác",
-            render: (booking) =>
-              canEditBookingOrder(booking) ? (
-                <Button
-                  size="compact-xs"
-                  variant="outline"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openEditBookingModal(booking);
-                  }}
-                >
-                  Sửa
-                </Button>
-              ) : null,
+            render: (booking) => (
+              <div onClick={(event) => event.stopPropagation()}>
+                {canEditBookingOrder(booking) ? (
+                  <Button
+                    size="compact-xs"
+                    variant="outline"
+                    disabled={isBookingRowBusy(booking.id)}
+                    onClick={() => openEditBookingModal(booking)}
+                  >
+                    Sửa
+                  </Button>
+                ) : null}
+              </div>
+            ),
           },
         ]}
       />
@@ -2850,55 +2812,22 @@ function BookingsPageContent() {
                   <>
                     <Divider />
                     <Group grow gap="xs">
-                      {canEditBookingOrder(booking) ? (
-                        <Button
-                          size="md"
-                          variant="outline"
-                          onClick={() => {
-                            closeMobileBookingDetail();
-                            openEditBookingModal(booking);
-                          }}
-                        >
-                          Sửa
-                        </Button>
-                      ) : null}
-                      {booking.status === "pending" ? (
-                        <Button
-                          size="md"
-                          variant="outline"
-                          color="blue"
-                          onClick={() => {
-                            closeMobileBookingDetail();
-                            openAssignOptions(booking);
-                          }}
-                        >
-                          Gán vào bàn
-                        </Button>
-                      ) : null}
-                      <BookingCheckInButton
-                        size="compact-xs"
-                        disabled={booking.status !== "confirmed"}
-                        onCheckIn={() => void runCheckIn(booking.id)}
+                      <BookingRowActions
+                        booking={booking}
+                        size="sm"
+                        busy={isBookingRowBusy(booking.id)}
+                        onEdit={(b) => {
+                          closeMobileBookingDetail();
+                          openEditBookingModal(b);
+                        }}
+                        onAssign={(b) => {
+                          closeMobileBookingDetail();
+                          openAssignOptions(b);
+                        }}
+                        onCheckIn={(id) => void runCheckIn(id)}
+                        onComplete={openCompleteBookingConfirm}
+                        onCancel={openCancelBookingConfirm}
                       />
-                      {booking.status === "checked_in" || booking.status === "seated" ? (
-                        <Button
-                          size="md"
-                          variant="filled"
-                          color="green"
-                          onClick={() => openCompleteBookingConfirm(booking)}
-                        >
-                          Hoàn thành
-                        </Button>
-                      ) : (
-                        <Button
-                          size="md"
-                          variant="outline"
-                          color="red"
-                          onClick={() => openCancelBookingConfirm(booking)}
-                        >
-                          Hủy
-                        </Button>
-                      )}
                     </Group>
                   </>
                 )}
@@ -2909,7 +2838,13 @@ function BookingsPageContent() {
       </Drawer>
       <Modal
         opened={createModalOpened}
-        onClose={() => setCreateModalOpened(false)}
+        onClose={() => {
+          if (!isCreating) {
+            setCreateModalOpened(false);
+          }
+        }}
+        closeOnClickOutside={!isCreating}
+        closeOnEscape={!isCreating}
         title="Tạo mới"
         size="lg"
         centered

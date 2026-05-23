@@ -82,3 +82,8 @@ body {
 .booking-list-row-pulse {
   animation: booking-list-row-pulse 1.15s ease-in-out 3 forwards;
 }
+
+.booking-row-busy {
+  opacity: 0.65;
+  pointer-events: none;
+}

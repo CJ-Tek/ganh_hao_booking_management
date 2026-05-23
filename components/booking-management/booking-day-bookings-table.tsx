@@ -31,7 +31,8 @@ export function BookingDayBookingsTable(props: {
 }) {
   const { records, statusFilter, onStatusFilterChange, sortRecords, getRecordSearchValue } = props;
   const { state } = useAppContext();
-  const { renderBookingActions, bookingManagementModals } = useBookingManagement();
+  const { renderBookingActions, bookingManagementModals, getBookingRowStyle } =
+    useBookingManagement();
 
   const renderActions = useCallback(
     (booking: Booking) => renderBookingActions(booking),
@@ -48,6 +49,7 @@ export function BookingDayBookingsTable(props: {
         searchPlaceholder="Khách, bàn, trạng thái, ghi chú..."
         noRecordsText="Không có booking trong ngày đã chọn."
         minHeight={260}
+        rowStyle={(booking) => getBookingRowStyle(booking.id)}
         filters={
           <Select
             label="Trạng thái"

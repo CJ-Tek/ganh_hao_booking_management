@@ -5,16 +5,18 @@ import { Button, Tooltip } from "@mantine/core";
 export function BookingCheckInButton(props: {
   size: "compact-xs" | "sm";
   disabled: boolean;
+  loading?: boolean;
   onCheckIn: () => void;
 }) {
-  const { size, disabled, onCheckIn } = props;
+  const { size, disabled, loading = false, onCheckIn } = props;
   const btn = (
     <Button
       size={size}
       variant={disabled ? "default" : "filled"}
       color={disabled ? undefined : "green"}
       onClick={() => void onCheckIn()}
-      disabled={disabled}
+      disabled={disabled || loading}
+      loading={loading}
     >
       Check-in
     </Button>

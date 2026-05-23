@@ -61,6 +61,7 @@ export default function AreasTablesSettingsPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<AreaRow | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [isAddAreaSaving, setIsAddAreaSaving] = useState(false);
 
   const branchSelectData = useMemo(
     () =>
@@ -138,10 +139,15 @@ export default function AreasTablesSettingsPage() {
       notifications.show({ color: "red", message: "Vui lòng nhập đầy đủ thông tin." });
       return;
     }
-    await addArea(branchId, name, capacity);
-    setName("");
-    setCapacity(30);
-    notifications.show({ color: "green", message: "Đã tạo khu vực mới." });
+    setIsAddAreaSaving(true);
+    try {
+      await addArea(branchId, name, capacity);
+      setName("");
+      setCapacity(30);
+      notifications.show({ color: "green", message: "Đã tạo khu vực mới." });
+    } finally {
+      setIsAddAreaSaving(false);
+    }
   };
 
   const openEdit = (area: AreaRow) => {
@@ -229,6 +235,8 @@ export default function AreasTablesSettingsPage() {
             <Button
               fullWidth
               size={isCompact ? "md" : "sm"}
+              loading={isAddAreaSaving}
+              disabled={isAddAreaSaving}
               onClick={() => void handleAddArea()}
               mt={{ base: 0, lg: 26 }}
             >

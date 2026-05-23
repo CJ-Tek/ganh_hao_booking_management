@@ -13,6 +13,7 @@ import { BellOff } from "lucide-react";
 import { PortalPageTitle } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { formatNotificationTime } from "@/lib/format-notification-time";
+import { useBusyId } from "@/lib/use-busy-id";
 
 type FilterMode = "all" | "unread";
 
@@ -20,6 +21,8 @@ export default function NotificationsPage() {
   const { state, filteredBranchIds, markNotificationRead, markAllScopedNotificationsRead } =
     useAppContext();
   const [filter, setFilter] = useState<FilterMode>("all");
+  const { isBusy: isNotificationBusy, run: runNotificationAction } = useBusyId();
+  const [isMarkingAll, setIsMarkingAll] = useState(false);
 
   const notifications = useMemo(
     () =>
@@ -51,7 +54,17 @@ export default function NotificationsPage() {
           </Text>
         </Stack>
         {unreadCount > 0 ? (
-          <Button variant="light" color="brand" size="sm" onClick={() => void markAllScopedNotificationsRead()}>
+          <Button
+            variant="light"
+            color="brand"
+            size="sm"
+            loading={isMarkingAll}
+            disabled={isMarkingAll}
+            onClick={() => {
+              setIsMarkingAll(true);
+              void markAllScopedNotificationsRead().finally(() => setIsMarkingAll(false));
+            }}
+          >
             Đánh dấu tất cả đã đọc ({unreadCount})
           </Button>
         ) : null}
@@ -132,9 +145,12 @@ export default function NotificationsPage() {
                 <Button
                   variant="light"
                   size="compact-sm"
-                  disabled={item.isRead}
+                  disabled={item.isRead || isNotificationBusy(item.id)}
+                  loading={isNotificationBusy(item.id)}
                   style={{ flexShrink: 0 }}
-                  onClick={() => void markNotificationRead(item.id)}
+                  onClick={() =>
+                    void runNotificationAction(item.id, () => markNotificationRead(item.id))
+                  }
                 >
                   Đã đọc
                 </Button>

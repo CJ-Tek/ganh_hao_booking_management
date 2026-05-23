@@ -23,6 +23,7 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
+import { useBusyId } from "@/lib/use-busy-id";
 import {
   Bell,
   CalendarDays,
@@ -41,7 +42,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useAppContext } from "@/contexts/app-context";
 import { formatNotificationTime } from "@/lib/format-notification-time";
 import { usePortalCompact } from "@/lib/use-portal-compact";
@@ -124,6 +125,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     () => scopedNotifications.filter((item) => !item.isRead),
     [scopedNotifications]
   );
+  const { isBusy: isNotificationBusy, run: runNotificationAction } = useBusyId();
+  const [isMarkingAllNotifications, setIsMarkingAllNotifications] = useState(false);
 
   const popoverPreviewCount = 8;
   const previewNotifications = useMemo(
@@ -314,13 +317,30 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                             key={item.id}
                             p="sm"
                             className={`${classes.notificationItem}${item.isRead ? "" : ` ${classes.notificationItemUnread}`}`}
-                            onClick={() => void markNotificationRead(item.id)}
+                            style={
+                              isNotificationBusy(item.id)
+                                ? { opacity: 0.65, pointerEvents: "none" }
+                                : undefined
+                            }
+                            onClick={() => {
+                              if (item.isRead || isNotificationBusy(item.id)) {
+                                return;
+                              }
+                              void runNotificationAction(item.id, () =>
+                                markNotificationRead(item.id)
+                              );
+                            }}
                             role="button"
-                            tabIndex={0}
+                            tabIndex={item.isRead || isNotificationBusy(item.id) ? -1 : 0}
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") {
                                 e.preventDefault();
-                                void markNotificationRead(item.id);
+                                if (item.isRead || isNotificationBusy(item.id)) {
+                                  return;
+                                }
+                                void runNotificationAction(item.id, () =>
+                                  markNotificationRead(item.id)
+                                );
                               }
                             }}
                           >
@@ -367,7 +387,14 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                       variant="subtle"
                       size="compact-sm"
                       fullWidth
-                      onClick={() => void markAllScopedNotificationsRead()}
+                      loading={isMarkingAllNotifications}
+                      disabled={isMarkingAllNotifications}
+                      onClick={() => {
+                        setIsMarkingAllNotifications(true);
+                        void markAllScopedNotificationsRead().finally(() =>
+                          setIsMarkingAllNotifications(false)
+                        );
+                      }}
                     >
                       Đánh dấu tất cả đã đọc
                     </Button>

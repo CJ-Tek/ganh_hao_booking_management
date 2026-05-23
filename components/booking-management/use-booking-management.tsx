@@ -20,7 +20,7 @@ import {
   AssignGuestCountPromptBody,
   AssignGuestSpecifiedOptionsBody,
 } from "@/components/booking-management/assign-guest-bodies";
-import { BookingCheckInButton } from "@/components/booking-management/booking-check-in-button";
+import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
 import {
   canEditBookingOrder,
   MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS,
@@ -46,6 +46,8 @@ import {
   isGuestCountSpecified,
   isSyntheticPhoneValue,
 } from "@/lib/booking-meta";
+import { bookingRowBusyStyle } from "@/lib/busy-row-style";
+import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
 
@@ -61,6 +63,11 @@ export function useBookingManagement() {
     hasSupabase,
   } = useAppContext();
   const isCompact = usePortalCompact();
+  const {
+    busyId: busyBookingId,
+    isBusy: isBookingRowBusy,
+    run: runBookingRowAction,
+  } = useBusyId();
 
   const [editBooking, setEditBooking] = useState<Booking | null>(null);
   const [editBookingAt, setEditBookingAt] = useState<string | null>(null);
@@ -106,19 +113,21 @@ export function useBookingManagement() {
             notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
             return;
           }
-          try {
-            await updateBookingStatus(booking.id, "cancelled");
-            notifications.show({ color: "green", message: "Đã hủy booking." });
-          } catch (error) {
-            notifications.show({
-              color: "red",
-              message: error instanceof Error ? error.message : "Không hủy được booking.",
-            });
-          }
+          await runBookingRowAction(booking.id, async () => {
+            try {
+              await updateBookingStatus(booking.id, "cancelled");
+              notifications.show({ color: "green", message: "Đã hủy booking." });
+            } catch (error) {
+              notifications.show({
+                color: "red",
+                message: error instanceof Error ? error.message : "Không hủy được booking.",
+              });
+            }
+          });
         },
       });
     },
-    [hasSupabase, state.customers, updateBookingStatus]
+    [hasSupabase, runBookingRowAction, state.customers, updateBookingStatus]
   );
 
   const openCompleteBookingConfirm = useCallback(
@@ -140,19 +149,22 @@ export function useBookingManagement() {
             notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
             return;
           }
-          try {
-            await updateBookingStatus(booking.id, "completed");
-            notifications.show({ color: "green", message: "Đã hoàn thành booking." });
-          } catch (error) {
-            notifications.show({
-              color: "red",
-              message: error instanceof Error ? error.message : "Không hoàn thành được booking.",
-            });
-          }
+          await runBookingRowAction(booking.id, async () => {
+            try {
+              await updateBookingStatus(booking.id, "completed");
+              notifications.show({ color: "green", message: "Đã hoàn thành booking." });
+            } catch (error) {
+              notifications.show({
+                color: "red",
+                message:
+                  error instanceof Error ? error.message : "Không hoàn thành được booking.",
+              });
+            }
+          });
         },
       });
     },
-    [hasSupabase, state.customers, updateBookingStatus]
+    [hasSupabase, runBookingRowAction, state.customers, updateBookingStatus]
   );
 
   const runCheckIn = useCallback(
@@ -161,17 +173,19 @@ export function useBookingManagement() {
         notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
         return;
       }
-      try {
-        await checkInBooking(bookingId);
-        notifications.show({ color: "green", message: "Đã check-in." });
-      } catch (error) {
-        notifications.show({
-          color: "red",
-          message: error instanceof Error ? error.message : "Check-in thất bại.",
-        });
-      }
+      await runBookingRowAction(bookingId, async () => {
+        try {
+          await checkInBooking(bookingId);
+          notifications.show({ color: "green", message: "Đã check-in." });
+        } catch (error) {
+          notifications.show({
+            color: "red",
+            message: error instanceof Error ? error.message : "Check-in thất bại.",
+          });
+        }
+      });
     },
-    [checkInBooking, hasSupabase]
+    [checkInBooking, hasSupabase, runBookingRowAction]
   );
 
   const runAssign = useCallback(
@@ -494,69 +508,30 @@ export function useBookingManagement() {
   );
 
   const renderBookingActions = useCallback(
-    (booking: Booking) => {
-      if (
-        booking.status === "cancelled" ||
-        booking.status === "completed" ||
-        booking.status === "no_show"
-      ) {
-        return null;
-      }
-      return (
-        <Group gap={6} wrap="wrap">
-          {canEditBookingOrder(booking) ? (
-            <Button
-              size="compact-xs"
-              variant="outline"
-              onClick={() => openEditBookingModal(booking)}
-            >
-              Sửa
-            </Button>
-          ) : null}
-          {booking.status === "pending" ? (
-            <Button
-              size="compact-xs"
-              variant="outline"
-              color="blue"
-              onClick={() => openAssignOptions(booking)}
-            >
-              Gán vào bàn
-            </Button>
-          ) : null}
-          <BookingCheckInButton
-            size="compact-xs"
-            disabled={booking.status !== "confirmed"}
-            onCheckIn={() => void runCheckIn(booking.id)}
-          />
-          {booking.status === "checked_in" || booking.status === "seated" ? (
-            <Button
-              size="compact-xs"
-              variant="filled"
-              color="green"
-              onClick={() => openCompleteBookingConfirm(booking)}
-            >
-              Hoàn thành
-            </Button>
-          ) : (
-            <Button
-              size="compact-xs"
-              variant="outline"
-              color="red"
-              onClick={() => openCancelBookingConfirm(booking)}
-            >
-              Hủy
-            </Button>
-          )}
-        </Group>
-      );
-    },
+    (booking: Booking) => (
+      <BookingRowActions
+        booking={booking}
+        busy={isBookingRowBusy(booking.id)}
+        onEdit={openEditBookingModal}
+        onAssign={openAssignOptions}
+        onCheckIn={(bookingId) => void runCheckIn(bookingId)}
+        onComplete={openCompleteBookingConfirm}
+        onCancel={openCancelBookingConfirm}
+      />
+    ),
     [
+      isBookingRowBusy,
       openAssignOptions,
       openCancelBookingConfirm,
       openCompleteBookingConfirm,
       openEditBookingModal,
       runCheckIn,
     ]
+  );
+
+  const getBookingRowStyle = useCallback(
+    (bookingId: string) => bookingRowBusyStyle(isBookingRowBusy(bookingId)),
+    [isBookingRowBusy]
   );
 
   const editModalAreaOptions = useMemo(() => {
@@ -919,5 +894,8 @@ export function useBookingManagement() {
   return {
     renderBookingActions,
     bookingManagementModals,
+    busyBookingId,
+    isBookingRowBusy,
+    getBookingRowStyle,
   };
 }

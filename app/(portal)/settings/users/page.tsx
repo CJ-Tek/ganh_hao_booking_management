@@ -56,6 +56,7 @@ export default function UserManagementPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [isCreateSaving, setIsCreateSaving] = useState(false);
 
   const visibleUsers = useMemo(
     () =>
@@ -131,17 +132,22 @@ export default function UserManagementPage() {
   };
 
   const handleCreateUser = async () => {
-    const result = await addUser({ username, password, fullName, role, branchIds });
-    notifications.show({
-      color: result.ok ? "green" : "red",
-      message: result.message,
-    });
-    if (result.ok) {
-      setUsername("");
-      setPassword("");
-      setFullName("");
-      setRole("manager");
-      setBranchIds([]);
+    setIsCreateSaving(true);
+    try {
+      const result = await addUser({ username, password, fullName, role, branchIds });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        setUsername("");
+        setPassword("");
+        setFullName("");
+        setRole("manager");
+        setBranchIds([]);
+      }
+    } finally {
+      setIsCreateSaving(false);
     }
   };
 
@@ -230,7 +236,13 @@ export default function UserManagementPage() {
               data={branchMultiData}
             />
             <PortalStickyAction>
-              <Button fullWidth onClick={() => void handleCreateUser()} mt={{ base: 0, sm: 25 }}>
+              <Button
+                fullWidth
+                loading={isCreateSaving}
+                disabled={isCreateSaving}
+                onClick={() => void handleCreateUser()}
+                mt={{ base: 0, sm: 25 }}
+              >
                 Tạo tài khoản
               </Button>
             </PortalStickyAction>

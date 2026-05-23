@@ -127,6 +127,7 @@ export function VoiceBookingAssistant(props: {
   const [isWarmingMic, setIsWarmingMic] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [isParsing, setIsParsing] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const transcriptRef = useRef(transcript);
@@ -371,7 +372,12 @@ export function VoiceBookingAssistant(props: {
       }
     };
 
-    await runCreate();
+    setIsSubmitting(true);
+    try {
+      await runCreate();
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -535,7 +541,11 @@ export function VoiceBookingAssistant(props: {
             <Button variant="default" onClick={() => setOpened(false)}>
               Đóng
             </Button>
-            <Button onClick={() => void submit()} disabled={!branch || isListening || isParsing}>
+            <Button
+              onClick={() => void submit()}
+              loading={isSubmitting}
+              disabled={!branch || isListening || isParsing || isSubmitting}
+            >
               Xác nhận & tạo booking
             </Button>
           </Group>

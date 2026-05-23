@@ -29,6 +29,8 @@ import { useAppContext } from "@/contexts/app-context";
 import { getAreaSeatBudget } from "@/lib/area-capacity";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { FLOOR_TABLE_PALETTE_SENTINEL } from "@/lib/floor-map-layout";
+import { bookingCardBusyProps, bookingRowBusyStyle } from "@/lib/busy-row-style";
+import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type DiningTable, TableStatus } from "@/lib/types";
 
@@ -54,6 +56,11 @@ function TablesPageContent() {
   } = useAppContext();
 
   const isCompact = usePortalCompact();
+  const { isBusy: isTableRowBusy, run: runTableRowAction } = useBusyId();
+  const [isAddingSingle, setIsAddingSingle] = useState(false);
+  const [isBatchAdding, setIsBatchAdding] = useState(false);
+  const [isBatchRemoving, setIsBatchRemoving] = useState(false);
+  const [isRemovingSelected, setIsRemovingSelected] = useState(false);
   const [batchToolsOpen, setBatchToolsOpen] = useState(false);
   const [stickyStatsOpen, setStickyStatsOpen] = useState(true);
 
@@ -222,18 +229,23 @@ function TablesPageContent() {
       });
       return;
     }
-    await upsertTable({
-      branchId,
-      areaId,
-      name: singleName.trim(),
-      seats,
-      status: "available",
-      positionX: FLOOR_TABLE_PALETTE_SENTINEL,
-      positionY: FLOOR_TABLE_PALETTE_SENTINEL,
-    });
-    setSingleName("");
-    setSingleSeats(4);
-    notifications.show({ color: "green", message: "Đã thêm bàn mới." });
+    setIsAddingSingle(true);
+    try {
+      await upsertTable({
+        branchId,
+        areaId,
+        name: singleName.trim(),
+        seats,
+        status: "available",
+        positionX: FLOOR_TABLE_PALETTE_SENTINEL,
+        positionY: FLOOR_TABLE_PALETTE_SENTINEL,
+      });
+      setSingleName("");
+      setSingleSeats(4);
+      notifications.show({ color: "green", message: "Đã thêm bàn mới." });
+    } finally {
+      setIsAddingSingle(false);
+    }
   };
 
   const handleBatchAdd = async () => {
@@ -281,8 +293,13 @@ function TablesPageContent() {
         nextNum++;
       }
     }
-    await upsertTablesBatch(payload);
-    notifications.show({ color: "green", message: `Đã thêm ${tableCount} bàn mới.` });
+    setIsBatchAdding(true);
+    try {
+      await upsertTablesBatch(payload);
+      notifications.show({ color: "green", message: `Đã thêm ${tableCount} bàn mới.` });
+    } finally {
+      setIsBatchAdding(false);
+    }
   };
 
   const handlePickRemovalsByRule = () => {
@@ -304,9 +321,14 @@ function TablesPageContent() {
       notifications.show({ color: "red", message: "Vui lòng chọn ít nhất một bàn cần xóa." });
       return;
     }
-    await deleteTables(removeIds);
-    notifications.show({ color: "green", message: `Đã xóa ${removeIds.length} bàn.` });
-    setRemoveIds([]);
+    setIsBatchRemoving(true);
+    try {
+      await deleteTables(removeIds);
+      notifications.show({ color: "green", message: `Đã xóa ${removeIds.length} bàn.` });
+      setRemoveIds([]);
+    } finally {
+      setIsBatchRemoving(false);
+    }
   };
 
   const handleRemoveSelectedFromTable = async () => {
@@ -315,10 +337,28 @@ function TablesPageContent() {
       return;
     }
     const selectedIds = selectedRows.map((item) => item.id);
-    await deleteTables(selectedIds);
-    notifications.show({ color: "green", message: `Đã xóa ${selectedIds.length} bàn đã chọn từ bảng.` });
-    setSelectedRows([]);
-    setRemoveIds((prev) => prev.filter((id) => !selectedIds.includes(id)));
+    setIsRemovingSelected(true);
+    try {
+      await deleteTables(selectedIds);
+      notifications.show({ color: "green", message: `Đã xóa ${selectedIds.length} bàn đã chọn từ bảng.` });
+      setSelectedRows([]);
+      setRemoveIds((prev) => prev.filter((id) => !selectedIds.includes(id)));
+    } finally {
+      setIsRemovingSelected(false);
+    }
+  };
+
+  const handleTableStatusChange = async (tableId: string, status: TableStatus) => {
+    await runTableRowAction(tableId, async () => {
+      try {
+        await updateTableStatus(tableId, status);
+      } catch (error) {
+        notifications.show({
+          color: "red",
+          message: error instanceof Error ? error.message : "Không thể cập nhật trạng thái.",
+        });
+      }
+    });
   };
 
   const tableCards = (
@@ -328,8 +368,17 @@ function TablesPageContent() {
           Không có bàn phù hợp.
         </Text>
       ) : (
-        pagedRecords.map((row) => (
-          <Card key={row.id} withBorder radius="md" padding="md">
+        pagedRecords.map((row) => {
+          const cardBusy = bookingCardBusyProps(isTableRowBusy(row.id));
+          return (
+          <Card
+            key={row.id}
+            withBorder
+            radius="md"
+            padding="md"
+            className={cardBusy.className}
+            style={cardBusy.style}
+          >
             <Stack gap="sm">
               <Group justify="space-between" align="flex-start" wrap="nowrap">
                 <div style={{ minWidth: 0 }}>
@@ -353,7 +402,9 @@ function TablesPageContent() {
                     key={status}
                     size="compact-sm"
                     variant={row.status === status ? "filled" : "light"}
-                    onClick={() => void updateTableStatus(row.id, status)}
+                    disabled={isTableRowBusy(row.id) || row.status === status}
+                    loading={isTableRowBusy(row.id)}
+                    onClick={() => void handleTableStatusChange(row.id, status)}
                   >
                     {tableStatusLabel[status]}
                   </Button>
@@ -361,7 +412,8 @@ function TablesPageContent() {
               </SimpleGrid>
             </Stack>
           </Card>
-        ))
+        );
+        })
       )}
       {sortedRecords.length > pageSize ? (
         <Group justify="center" gap="xs" mt="xs">
@@ -417,7 +469,8 @@ function TablesPageContent() {
           <div />
           <Button
             mt={{ base: 0, lg: 26 }}
-            disabled={Boolean(areaSeatBudget && areaSeatBudget.remaining <= 0)}
+            disabled={Boolean(areaSeatBudget && areaSeatBudget.remaining <= 0) || isAddingSingle}
+            loading={isAddingSingle}
             onClick={() => void handleAddSingleTable()}
           >
             Thêm bàn
@@ -527,7 +580,8 @@ function TablesPageContent() {
                 (areaSeatBudget.remaining <= 0 ||
                   batchPlan.tableCount === 0 ||
                   batchPlan.seatTotal > areaSeatBudget.remaining)
-            )}
+            ) || isBatchAdding}
+            loading={isBatchAdding}
             size={isCompact ? "md" : "sm"}
             onClick={() => void handleBatchAdd()}
           >
@@ -577,7 +631,13 @@ function TablesPageContent() {
               style={{ minWidth: 200 }}
               size={isCompact ? "md" : "sm"}
             />
-            <Button color="red" variant="light" onClick={() => void handleBatchRemove()}>
+            <Button
+              color="red"
+              variant="light"
+              loading={isBatchRemoving}
+              disabled={isBatchRemoving}
+              onClick={() => void handleBatchRemove()}
+            >
               Xóa đã chọn
             </Button>
           </Group>
@@ -764,8 +824,9 @@ function TablesPageContent() {
               <Button
                 color="red"
                 variant="light"
+                loading={isRemovingSelected}
                 onClick={() => void handleRemoveSelectedFromTable()}
-                disabled={selectedRows.length === 0}
+                disabled={selectedRows.length === 0 || isRemovingSelected}
               >
                 Xóa bàn đã chọn trong bảng
               </Button>
@@ -786,6 +847,7 @@ function TablesPageContent() {
               recordsPerPage={pageSize}
               minHeight={260}
               idAccessor="id"
+              rowStyle={(row) => bookingRowBusyStyle(isTableRowBusy(row.id))}
               selectedRecords={selectedRows}
               onSelectedRecordsChange={setSelectedRows}
               noRecordsText="Không có bàn phù hợp với bộ lọc hiện tại."
@@ -824,7 +886,9 @@ function TablesPageContent() {
                           key={status}
                           size="compact-xs"
                           variant={row.status === status ? "filled" : "light"}
-                          onClick={() => void updateTableStatus(row.id, status)}
+                          disabled={isTableRowBusy(row.id) || row.status === status}
+                          loading={isTableRowBusy(row.id)}
+                          onClick={() => void handleTableStatusChange(row.id, status)}
                         >
                           {tableStatusLabel[status]}
                         </Button>

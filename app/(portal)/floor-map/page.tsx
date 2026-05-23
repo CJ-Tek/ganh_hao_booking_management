@@ -63,6 +63,8 @@ import {
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
+import { bookingRowBusyStyle } from "@/lib/busy-row-style";
+import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import {
   clampFloorNodeSpacing,
@@ -363,6 +365,7 @@ export default function FloorMapPage() {
   const [registerPendingBookingId, setRegisterPendingBookingId] = useState<string | null>(null);
   const [registerModalTab, setRegisterModalTab] = useState<"book" | "assign">("book");
   const [registerSaving, setRegisterSaving] = useState(false);
+  const { isBusy: isTableStatusBusy, run: runTableStatusAction } = useBusyId();
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
   const [mergeName, setMergeName] = useState("");
   const [mergePrimaryTableId, setMergePrimaryTableId] = useState<string | null>(null);
@@ -745,6 +748,7 @@ export default function FloorMapPage() {
           notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
           return;
         }
+        setDetailBookingActionLoading(true);
         try {
           await updateBookingStatus(b.id, "cancelled");
           notifications.show({ color: "green", message: "Đã hủy booking." });
@@ -754,6 +758,8 @@ export default function FloorMapPage() {
             color: "red",
             message: error instanceof Error ? error.message : "Không hủy được booking.",
           });
+        } finally {
+          setDetailBookingActionLoading(false);
         }
       },
     });
@@ -1282,21 +1288,23 @@ export default function FloorMapPage() {
   };
 
   const handleStatusChange = async (table: DiningTable, next: TableStatus) => {
-    if (table.status === next) {
+    if (table.status === next || isTableStatusBusy(table.id)) {
       return;
     }
-    try {
-      await updateTableStatus(table.id, next);
-      notifications.show({
-        color: "green",
-        message: `Đã đổi trạng thái ${table.name} thành ${tableStatusLabel[next]}.`,
-      });
-    } catch (error) {
-      notifications.show({
-        color: "red",
-        message: error instanceof Error ? error.message : "Không thể cập nhật trạng thái.",
-      });
-    }
+    await runTableStatusAction(table.id, async () => {
+      try {
+        await updateTableStatus(table.id, next);
+        notifications.show({
+          color: "green",
+          message: `Đã đổi trạng thái ${table.name} thành ${tableStatusLabel[next]}.`,
+        });
+      } catch (error) {
+        notifications.show({
+          color: "red",
+          message: error instanceof Error ? error.message : "Không thể cập nhật trạng thái.",
+        });
+      }
+    });
   };
 
   const closeRegistrationPanel = useCallback(() => {
@@ -1371,7 +1379,7 @@ export default function FloorMapPage() {
       openDetailForTable(table);
       return;
     }
-    if (table.status === "occupied") {
+    if (table.status === "occupied" || table.status === "hold") {
       if (detailTable?.id === table.id) {
         closeDetailModal();
         return;
@@ -1379,14 +1387,12 @@ export default function FloorMapPage() {
       openDetailForTable(table);
       return;
     }
-    if (table.status === "available" || table.status === "hold") {
+    if (table.status === "available") {
       if (registerTable?.id === table.id) {
         closeRegistrationPanel();
         return;
       }
-      openRegistrationForTable(table, {
-        preferHoldAfterOccupied: table.status === "hold",
-      });
+      openRegistrationForTable(table);
       return;
     }
     openDetailForTable(table);
@@ -2274,8 +2280,12 @@ export default function FloorMapPage() {
                           data-table-status={table.status}
                           className={`${classes.tableBlock} ${classes.tableBlockView} ${TABLE_STATUS_SURFACE_CLASS[table.status]} ${dragState?.tableId === table.id ? classes.tableBlockDragging : ""
                             }`}
+                          style={bookingRowBusyStyle(isTableStatusBusy(table.id))}
                           onClick={(event) => {
                             event.stopPropagation();
+                            if (isTableStatusBusy(table.id)) {
+                              return;
+                            }
                             handleViewOrRegisterForTable(table);
                           }}
                         >
@@ -2309,14 +2319,16 @@ export default function FloorMapPage() {
                               <Menu.Item
                                 onClick={() => openDetailForTable(table)}
                               >
-                                Lịch & booking hiện tại
+                                Lịch sử booking & hàng chờ
                               </Menu.Item>
                               <Menu.Divider />
                               {(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
                                 (nextStatus) => (
                                   <Menu.Item
                                     key={nextStatus}
-                                    disabled={table.status === nextStatus}
+                                    disabled={
+                                      table.status === nextStatus || isTableStatusBusy(table.id)
+                                    }
                                     onClick={() => void handleStatusChange(table, nextStatus)}
                                   >
                                     {tableStatusLabel[nextStatus]}
@@ -2812,7 +2824,7 @@ export default function FloorMapPage() {
                   size="compact-xs"
                   onClick={() => openDetailForTable(registerTable)}
                 >
-                  Lịch & booking hiện tại
+                  Lịch sử booking & hàng chờ
                 </Button>
               ) : null}
             </Group>
@@ -3054,7 +3066,11 @@ export default function FloorMapPage() {
       <Modal
         opened={Boolean(detailTable)}
         onClose={closeDetailModal}
-        title={detailTable ? `Bàn ${detailTable.name} · lịch & hàng chờ` : "Thông tin bàn"}
+        title={
+          detailTable
+            ? `Bàn ${detailTable.name} · Lịch sử booking & hàng chờ`
+            : "Thông tin bàn"
+        }
         size="xl"
         centered
         overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
