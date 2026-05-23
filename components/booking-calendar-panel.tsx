@@ -90,6 +90,8 @@ export const BookingCalendarPanel = forwardRef<
     showDayListButton?: boolean;
     /** Row click in day-list modal; default navigates to /bookings?tab=list&focusBooking=… */
     onDayBookingRowClick?: (booking: Booking) => void;
+    /** Omit section card + intro copy when parent wraps the panel (e.g. floor-map accordion). */
+    embedded?: boolean;
   }
 >(function BookingCalendarPanel(props, ref) {
   const {
@@ -101,6 +103,7 @@ export const BookingCalendarPanel = forwardRef<
     onSelectedDateChange,
     showDayListButton = true,
     onDayBookingRowClick,
+    embedded = false,
   } = props;
 
   const router = useRouter();
@@ -774,21 +777,20 @@ export const BookingCalendarPanel = forwardRef<
 
       ) : null}
 
-      <PortalSectionCard>
-
-        <Text c="dimmed" mb="sm" size={isCompact ? "xs" : "sm"}>
-
-          {selectDayOnly
-            ? showDayListButton
-              ? "Chọn ngày để cập nhật trạng thái bàn trên sơ đồ. Dùng nút Danh sách booking để xem chi tiết."
-              : "Chọn ngày để cập nhật trạng thái bàn trên sơ đồ. Dùng Danh sách booking trên thanh công cụ sơ đồ để xem chi tiết."
-            : "Lịch tháng hiển thị tổng quan booking từng ngày. Chọn một ngày để xem bảng chi tiết."}
-
-        </Text>
-
-        {calendarLayout}
-
-      </PortalSectionCard>
+      {embedded ? (
+        calendarLayout
+      ) : (
+        <PortalSectionCard>
+          <Text c="dimmed" mb="sm" size={isCompact ? "xs" : "sm"}>
+            {selectDayOnly
+              ? showDayListButton
+                ? "Chọn ngày để cập nhật trạng thái bàn trên sơ đồ. Dùng nút Danh sách booking để xem chi tiết."
+                : "Chọn ngày để cập nhật trạng thái bàn trên sơ đồ. Dùng Danh sách booking trên thanh công cụ sơ đồ để xem chi tiết."
+              : "Lịch tháng hiển thị tổng quan booking từng ngày. Chọn một ngày để xem bảng chi tiết."}
+          </Text>
+          {calendarLayout}
+        </PortalSectionCard>
+      )}
 
       <Modal
 

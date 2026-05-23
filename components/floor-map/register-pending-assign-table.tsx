@@ -247,7 +247,7 @@ export function RegisterPendingAssignTable(props: {
                       }
                     }}
                   >
-                    Mở Danh sách booking
+                    Xem chi tiết
                   </Text>
                 ) : null}
               </Stack>

@@ -2,6 +2,10 @@
   min-height: calc(100dvh - 88px - var(--manager-dock-reserve, 0px));
 }
 
+.floorMapCalendarAccordion :global([data-accordion-panel]) {
+  padding-top: 4px;
+}
+
 .canvasFrame {
   position: relative;
   height: calc(100dvh - 210px - var(--manager-dock-reserve, 0px));
@@ -189,7 +193,18 @@
   min-width: 0;
 }
 
+.toolbarAreaSecondary {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .toolbarAreaActions {
+  flex-shrink: 0;
+}
+
+.toolbarAreaActionBtn {
   flex-shrink: 0;
 }
 
@@ -201,6 +216,7 @@
 .toolbarDayListBtn {
   flex-shrink: 0;
   align-self: flex-end;
+  white-space: nowrap;
 }
 
 .canvasPopoverPanel {
@@ -320,12 +336,53 @@
   }
 
   .canvasTopToolbar {
-    width: min(100%, 860px);
+    width: 100%;
+    max-width: 100%;
     padding: 10px;
+    gap: 10px;
+  }
+
+  .toolbarAreaRow {
+    flex: 1 1 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
   }
 
   .toolbarAreaSelect {
-    min-width: 260px;
+    min-width: 0;
+    width: 100%;
+    flex: none;
+  }
+
+  .toolbarAreaSecondary {
+    width: 100%;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .toolbarDayListBtn {
+    flex: 1;
+    min-width: 0;
+    align-self: stretch;
+    min-height: 42px;
+  }
+
+  .toolbarAreaActions {
+    flex-shrink: 0;
+  }
+
+  .toolbarAreaActionBtn {
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+    min-height: 42px;
+  }
+
+  .toolbarModeControl {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .canvasZoomDockRaised {
@@ -352,24 +409,37 @@
   }
 
   .canvasTopToolbar {
-    padding: 10px;
-    gap: 6px;
+    padding: 12px;
+    gap: 10px;
     flex-wrap: wrap;
     align-items: stretch;
   }
 
   .toolbarAreaRow {
     flex: 1 1 100%;
+    gap: 10px;
   }
 
   .toolbarModeControl {
+    flex: 1 1 100%;
     min-width: 0;
-    flex: 1 1 180px;
+    max-width: 100%;
   }
 
-  .toolbarAreaSelect {
-    min-width: 0;
-    flex: 1 1 100%;
+  .toolbarAreaSecondary {
+    gap: 10px;
+  }
+
+  .toolbarDayListBtn {
+    min-height: 44px;
+    font-size: 0.875rem;
+  }
+
+  .toolbarAreaActionBtn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
   }
 
   .canvasPopoverPanel {

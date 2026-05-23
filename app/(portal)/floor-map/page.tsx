@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Accordion,
   ActionIcon,
   Alert,
   Badge,
@@ -8,7 +9,6 @@ import {
   Flex,
   Group,
   Menu,
-  Divider,
   Loader,
   Modal,
   NumberInput,
@@ -20,7 +20,6 @@ import {
   Text,
   TextInput,
   Textarea,
-  Tooltip,
 } from "@mantine/core";
 import { DatePickerInput, TimeInput } from "@mantine/dates";
 import { modals } from "@mantine/modals";
@@ -48,8 +47,7 @@ import {
   type BookingCalendarPanelHandle,
 } from "@/components/booking-calendar-panel";
 import { RegisterPendingAssignTable } from "@/components/floor-map/register-pending-assign-table";
-import { TableBlockConfirmedScheduleTable } from "@/components/floor-map/table-block-confirmed-schedule-table";
-import { TableBlockWaitlistTable } from "@/components/floor-map/table-block-waitlist-table";
+import { TableBlockDetailModal } from "@/components/floor-map/table-block-detail-modal";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
 import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import {
@@ -79,7 +77,7 @@ import {
 } from "@/lib/floor-map-layout";
 import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
-import { bookingStatusColor, bookingStatusLabel, tableStatusColor, tableStatusLabel } from "@/lib/display";
+import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import {
   BOOKING_GUEST_TYPE_OPTIONS,
   displayCustomerPhone,
@@ -87,10 +85,8 @@ import {
   formatTableSlotConflictMessage,
   getAssignableCandidateTables,
   pickNonOverlappingBookingsForTable,
-  inferGuestTypeLabel,
   deriveTableStatusFromDayBookings,
   pickPrimaryBookingOnTable,
-  stripUnknownGuestTag,
 } from "@/lib/booking-meta";
 import {
   createTableMergeGroupInSupabase,
@@ -2280,16 +2276,37 @@ export default function FloorMapPage() {
       ) : null}
 
       {!isEmployee ? (
-        <BookingCalendarPanel
-          ref={calendarPanelRef}
-          title="Lịch booking theo sơ đồ"
-          compactTitle="Lịch booking"
-          showHeader={false}
-          interaction="select-day-only"
-          showDayListButton={false}
-          selectedDate={floorMapSelectedDate}
-          onSelectedDateChange={setFloorMapSelectedDate}
-        />
+        <Accordion
+          variant="separated"
+          defaultValue="floor-map-calendar"
+          className={classes.floorMapCalendarAccordion}
+        >
+          <Accordion.Item value="floor-map-calendar">
+            <Accordion.Control>
+              <Group justify="space-between" wrap="nowrap" gap="sm" pr="xs" style={{ width: "100%" }}>
+                <Text fw={600} size={isCompact ? "sm" : "md"}>
+                  {isCompact ? "Lịch booking" : "Lịch booking theo sơ đồ"}
+                </Text>
+                <Text size={isCompact ? "xs" : "sm"} c="dimmed" style={{ flexShrink: 0 }}>
+                  {floorMapSelectedDate.format("DD/MM/YYYY")}
+                </Text>
+              </Group>
+            </Accordion.Control>
+            <Accordion.Panel>
+              <BookingCalendarPanel
+                ref={calendarPanelRef}
+                title="Lịch booking theo sơ đồ"
+                compactTitle="Lịch booking"
+                showHeader={false}
+                embedded
+                interaction="select-day-only"
+                showDayListButton={false}
+                selectedDate={floorMapSelectedDate}
+                onSelectedDateChange={setFloorMapSelectedDate}
+              />
+            </Accordion.Panel>
+          </Accordion.Item>
+        </Accordion>
       ) : null}
 
       <PortalSectionCard>
@@ -2707,39 +2724,47 @@ export default function FloorMapPage() {
                     }))}
                     searchable
                     className={classes.toolbarAreaSelect}
+                    comboboxProps={{ withinPortal: true }}
                   />
                   {!isEmployee ? (
-                    <Button
-                      size={isCompact ? "sm" : "compact-sm"}
-                      variant="filled"
-                      className={classes.toolbarDayListBtn}
-                      onClick={() => calendarPanelRef.current?.openDayListModal()}
-                    >
-                      Danh sách booking
-                    </Button>
-                  ) : null}
-                  {!isEmployee ? (
-                  <Group gap={4} className={classes.toolbarAreaActions} wrap="nowrap">
-                    <ActionIcon
-                      variant="light"
-                      size="lg"
-                      aria-label="Sửa khu vực"
-                      disabled={!areaId || !hasSupabase}
-                      onClick={openAreaMetadataEdit}
-                    >
-                      <Pencil size={16} />
-                    </ActionIcon>
-                    <ActionIcon
-                      variant="light"
-                      color="red"
-                      size="lg"
-                      aria-label="Xóa khu vực"
-                      disabled={!areaId || !hasSupabase}
-                      onClick={() => setAreaDeleteOpen(true)}
-                    >
-                      <Trash2 size={16} />
-                    </ActionIcon>
-                  </Group>
+                    <div className={classes.toolbarAreaSecondary}>
+                      <Button
+                        size={isCompact ? "sm" : "compact-sm"}
+                        variant="filled"
+                        fullWidth={isCompact}
+                        className={classes.toolbarDayListBtn}
+                        onClick={() => calendarPanelRef.current?.openDayListModal()}
+                      >
+                        Danh sách booking
+                      </Button>
+                      <Group
+                        gap={isCompact ? 8 : 4}
+                        className={classes.toolbarAreaActions}
+                        wrap="nowrap"
+                      >
+                        <ActionIcon
+                          variant="light"
+                          size={isCompact ? "input-md" : "lg"}
+                          className={classes.toolbarAreaActionBtn}
+                          aria-label="Sửa khu vực"
+                          disabled={!areaId || !hasSupabase}
+                          onClick={openAreaMetadataEdit}
+                        >
+                          <Pencil size={16} />
+                        </ActionIcon>
+                        <ActionIcon
+                          variant="light"
+                          color="red"
+                          size={isCompact ? "input-md" : "lg"}
+                          className={classes.toolbarAreaActionBtn}
+                          aria-label="Xóa khu vực"
+                          disabled={!areaId || !hasSupabase}
+                          onClick={() => setAreaDeleteOpen(true)}
+                        >
+                          <Trash2 size={16} />
+                        </ActionIcon>
+                      </Group>
+                    </div>
                   ) : null}
                 </div>
                 <ActionIcon
@@ -3147,211 +3172,24 @@ export default function FloorMapPage() {
         ) : null}
       </Modal>
 
-      <Modal
+      <TableBlockDetailModal
         opened={Boolean(detailTable)}
         onClose={closeDetailModal}
-        title={
-          detailTable
-            ? `Bàn ${detailTable.name} · Lịch sử booking & hàng chờ`
-            : "Thông tin bàn"
-        }
-        size="xl"
-        centered
-        overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
-      >
-        {detailTable ? (
-          <Stack gap="md">
-            <Group justify="space-between" align="flex-start" wrap="wrap" gap="xs">
-              <Text size="sm" c="dimmed">
-                {detailTable.seats} ghế · {tableStatusLabel[detailTable.status]}
-              </Text>
-              {detailTableBlockLoading ? (
-                <Group gap={6}>
-                  <Loader size="xs" />
-                  <Text size="xs" c="dimmed">
-                    Đang tải lịch...
-                  </Text>
-                </Group>
-              ) : null}
-            </Group>
-
-            {!isEmployee ? (
-              <Group gap="xs">
-                {detailTable.status === "occupied" || detailTable.status === "hold" ? (
-                  <Button
-                    variant="filled"
-                    color="brand"
-                    size="compact-sm"
-                    onClick={() => openNewBookingForTable(detailTable)}
-                  >
-                    Đặt bàn mới
-                  </Button>
-                ) : null}
-                {detailTable.status === "hold" ? (
-                  <Button
-                    variant="filled"
-                    color="blue"
-                    size="compact-sm"
-                    onClick={() => openAssignPendingForTable(detailTable)}
-                  >
-                    Gán booking chờ vào bàn này
-                  </Button>
-                ) : null}
-              </Group>
-            ) : null}
-
-            {activeBookingForDetailTable ? (
-              <Stack gap="xs">
-                <Text fw={600} size="sm">
-                  Booking hiện tại · {activeBookingCustomerName || "—"}
-                </Text>
-                <Group gap="lg" wrap="wrap">
-                  <Text size="sm">
-                    Giờ đến:{" "}
-                    {dayjs(activeBookingForDetailTable.startTime ?? activeBookingForDetailTable.bookingAt).format(
-                      "HH:mm DD/MM/YYYY"
-                    )}
-                  </Text>
-                  <Text size="sm">
-                    Kết thúc:{" "}
-                    {dayjs(activeBookingForDetailTable.endTime).format("HH:mm DD/MM/YYYY")}
-                  </Text>
-                  <Text size="sm">Số khách: {activeBookingForDetailTable.guestCount}</Text>
-                  <Text size="sm">
-                    Loại khách: {inferGuestTypeLabel(activeBookingForDetailTable)}
-                  </Text>
-                </Group>
-                {activeBookingForDetailTable.checkedInAt ? (
-                  <Text size="sm" c="dimmed">
-                    Check-in:{" "}
-                    {dayjs(activeBookingForDetailTable.checkedInAt).format("HH:mm DD/MM/YYYY")}
-                  </Text>
-                ) : null}
-                <Text size="sm" c="dimmed">
-                  Ghi chú: {stripUnknownGuestTag(activeBookingForDetailTable.note) ?? "—"}
-                </Text>
-                <Badge
-                  color={bookingStatusColor[activeBookingForDetailTable.status]}
-                  variant="light"
-                  w="fit-content"
-                >
-                  {bookingStatusLabel[activeBookingForDetailTable.status]}
-                </Badge>
-                <Group justify="flex-end" gap="xs">
-                  {isEmployee ? (
-                    (activeBookingForDetailTable.status === "checked_in" ||
-                      activeBookingForDetailTable.status === "seated") &&
-                    detailTable.status === "occupied" ? (
-                      <Button
-                        size="xs"
-                        variant="filled"
-                        color="green"
-                        loading={detailBookingActionLoading}
-                        onClick={() => void handleDetailComplete()}
-                      >
-                        Hoàn thành
-                      </Button>
-                    ) : null
-                  ) : (
-                    <>
-                      {detailTable.status !== "occupied" ? (() => {
-                        const checkInDisabled = activeBookingForDetailTable.status !== "confirmed";
-                        const checkInBtn = (
-                          <Button
-                            size="xs"
-                            variant="filled"
-                            color="green"
-                            disabled={checkInDisabled}
-                            loading={detailBookingActionLoading}
-                            onClick={() => void handleDetailCheckIn()}
-                          >
-                            Check-in
-                          </Button>
-                        );
-                        return checkInDisabled ? (
-                          <Tooltip label="Chỉ check-in khi booking đã xác nhận." withArrow>
-                            <span style={{ display: "inline-flex" }}>{checkInBtn}</span>
-                          </Tooltip>
-                        ) : (
-                          checkInBtn
-                        );
-                      })() : null}
-                      <Button
-                        size="xs"
-                        variant="filled"
-                        color={
-                          activeBookingForDetailTable.status === "checked_in" ||
-                          activeBookingForDetailTable.status === "seated"
-                            ? "green"
-                            : "red"
-                        }
-                        disabled={
-                          activeBookingForDetailTable.status === "cancelled" ||
-                          activeBookingForDetailTable.status === "completed" ||
-                          activeBookingForDetailTable.status === "no_show"
-                        }
-                        loading={detailBookingActionLoading}
-                        onClick={() => {
-                          if (
-                            activeBookingForDetailTable.status === "checked_in" ||
-                            activeBookingForDetailTable.status === "seated"
-                          ) {
-                            void handleDetailComplete();
-                          } else if (
-                            activeBookingForDetailTable.status !== "cancelled" &&
-                            activeBookingForDetailTable.status !== "completed" &&
-                            activeBookingForDetailTable.status !== "no_show"
-                          ) {
-                            openDetailCancelBookingConfirm();
-                          }
-                        }}
-                      >
-                        {activeBookingForDetailTable.status === "checked_in" ||
-                        activeBookingForDetailTable.status === "seated"
-                          ? "Hoàn thành"
-                          : "Hủy booking"}
-                      </Button>
-                    </>
-                  )}
-                </Group>
-              </Stack>
-            ) : (
-              <Text size="sm" c="dimmed">
-                Không có booking đang hoạt động trên bàn này.
-              </Text>
-            )}
-
-            <Divider />
-
-            <Stack gap="xs">
-              <Text fw={600} size="sm">
-                Lịch đặt bàn sắp tới
-              </Text>
-              <Text size="xs" c="dimmed">
-                Các booking đã gán bàn từ hôm nay trở đi (đã xác nhận / đang phục vụ).
-              </Text>
-              <TableBlockConfirmedScheduleTable
-                records={detailTableBlockState?.confirmedSchedule ?? []}
-              />
-            </Stack>
-
-            <Stack gap="xs">
-              <Text fw={600} size="sm">
-                Hàng chờ ({detailTableBlockState?.waitlistQueue.length ?? 0})
-              </Text>
-              <Text size="xs" c="dimmed">
-                Khách xếp hàng khi khung giờ đã kín (khác với booking đã xác nhận ở trên).
-              </Text>
-              <TableBlockWaitlistTable
-                records={detailTableBlockState?.waitlistQueue ?? []}
-                isEmployee={isEmployee}
-                confirmLoadingId={detailWaitlistActionId}
-                onConfirmOffer={(entryId) => void handleConfirmWaitlistOffer(entryId)}
-              />
-            </Stack>
-          </Stack>
-        ) : null}
-      </Modal>
+        table={detailTable}
+        blockState={detailTableBlockState}
+        blockLoading={detailTableBlockLoading}
+        activeBooking={activeBookingForDetailTable}
+        activeBookingCustomerName={activeBookingCustomerName}
+        isEmployee={isEmployee}
+        bookingActionLoading={detailBookingActionLoading}
+        waitlistConfirmLoadingId={detailWaitlistActionId}
+        onNewBooking={() => detailTable && openNewBookingForTable(detailTable)}
+        onAssignPending={() => detailTable && openAssignPendingForTable(detailTable)}
+        onCheckIn={() => void handleDetailCheckIn()}
+        onComplete={() => void handleDetailComplete()}
+        onCancelBooking={openDetailCancelBookingConfirm}
+        onConfirmWaitlistOffer={(entryId: string) => void handleConfirmWaitlistOffer(entryId)}
+      />
 
       <Modal
         opened={mergeModalOpen}
