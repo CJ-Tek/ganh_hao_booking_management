@@ -1,5 +1,6 @@
 "use client";
 
+import dayjs from "dayjs";
 import {
   createContext,
   useCallback,
@@ -61,12 +62,18 @@ import {
   updateBookingOrderInSupabase,
   updateBookingRuntimeSettingsInSupabase,
 } from "@/lib/supabase-store";
+import { getSupabaseBrowserClient, isSupabaseRealtimeConfigured } from "@/lib/supabase";
 import {
   AppStateSnapshot,
+  Branch,
+  Area,
   AppUser,
+  Booking,
   BookingRuntimeSettings,
   BookingStatus,
+  Customer,
   DiningTable,
+  InternalNotification,
   Role,
   TableStatus,
 } from "@/lib/types";
@@ -247,6 +254,11 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   });
 
   const hasSupabase = isSupabaseEnabled();
+  const hasRealtime = isSupabaseRealtimeConfigured();
+  const filteredBranchIds = useMemo(
+    () => userScopeBranchIds(currentUser, state.activeBranchId),
+    [currentUser, state.activeBranchId]
+  );
 
   const reload = useCallback(async () => {
     const mergeActive = (
@@ -299,42 +311,599 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return;
     }
 
-    let eventSource: EventSource | null = null;
     let cancelled = false;
+    const realtime = getSupabaseBrowserClient();
+    const realtimeChannelName = `app-snapshot-sync:${currentUser?.id ?? "guest"}`;
     const runReload = () => {
       if (cancelled) return;
       if (reloadInFlightRef.current) return;
+      // Burst updates can emit multiple row changes; cap reload cadence to avoid thrash.
+      if (Date.now() - lastReloadAtRef.current < 700) return;
       reloadInFlightRef.current = true;
       lastReloadAtRef.current = Date.now();
-      Promise.resolve(reload()).finally(() => {
-        reloadInFlightRef.current = false;
-      });
+      Promise.resolve(reload())
+        .catch(() => {
+          // Keep running; fallback timer/realtime retries will pull the next snapshot.
+        })
+        .finally(() => {
+          reloadInFlightRef.current = false;
+        });
     };
 
-    try {
-      eventSource = new EventSource("/api/booking-events");
-      eventSource.onmessage = () => {
-        runReload();
+    type RealtimeRow = Record<string, unknown>;
+    type RealtimePayload = {
+      eventType?: "INSERT" | "UPDATE" | "DELETE";
+      new?: RealtimeRow;
+      old?: RealtimeRow;
+    };
+
+    const mapRealtimeRuntimeSettings = (row: RealtimeRow): BookingRuntimeSettings | null => {
+      const standardTurnaroundMinutes = row.standard_turnaround_minutes;
+      const noShowGraceMinutes = row.no_show_grace_minutes;
+      const waitlistOfferTtlMinutes = row.waitlist_offer_ttl_minutes;
+      const groupPartyGuestThreshold = row.group_party_guest_threshold;
+      const repeatCustomerMinCompleted = row.repeat_customer_min_completed;
+      const receptionArrivalGraceMinutes = row.reception_arrival_grace_minutes;
+      if (
+        typeof standardTurnaroundMinutes !== "number" ||
+        typeof noShowGraceMinutes !== "number" ||
+        typeof waitlistOfferTtlMinutes !== "number" ||
+        typeof groupPartyGuestThreshold !== "number" ||
+        typeof repeatCustomerMinCompleted !== "number" ||
+        typeof receptionArrivalGraceMinutes !== "number"
+      ) {
+        return null;
+      }
+      return {
+        standardTurnaroundMinutes,
+        noShowGraceMinutes,
+        waitlistOfferTtlMinutes,
+        groupPartyGuestThreshold,
+        repeatCustomerMinCompleted,
+        receptionArrivalGraceMinutes,
       };
-      eventSource.onerror = () => {
-        // Keep fallback poll active when SSE drops.
+    };
+
+    const mapRealtimeNotification = (row: RealtimeRow): InternalNotification | null => {
+      const id = row.id;
+      const title = row.title;
+      const message = row.message;
+      const createdAt = row.created_at;
+      const isRead = row.is_read;
+      const branchId = row.branch_id;
+      if (
+        typeof id !== "string" ||
+        typeof title !== "string" ||
+        typeof message !== "string" ||
+        typeof createdAt !== "string" ||
+        typeof isRead !== "boolean"
+      ) {
+        return null;
+      }
+      return {
+        id,
+        title,
+        message,
+        createdAt,
+        isRead,
+        branchId: typeof branchId === "string" ? branchId : undefined,
       };
-    } catch {
-      eventSource = null;
-    }
+    };
+
+    const bookingStatuses: BookingStatus[] = [
+      "pending",
+      "confirmed",
+      "seated",
+      "cancelled",
+      "no_show",
+      "checked_in",
+      "completed",
+    ];
+
+    const mapRealtimeBooking = (row: RealtimeRow): Booking | null => {
+      const id = row.id;
+      const customerId = row.customer_id;
+      const branchId = row.branch_id;
+      const areaId = row.area_id;
+      const tableId = row.table_id;
+      const guestCount = row.guest_count;
+      const bookingAt = row.booking_at;
+      const startTime = row.start_time;
+      const endTime = row.end_time;
+      const checkedInAt = row.checked_in_at;
+      const noShowMarkedAt = row.no_show_marked_at;
+      const note = row.note;
+      const createdByUserId = row.created_by_user_id;
+      const lastEditedAt = row.last_edited_at;
+      const lastEditedByUserId = row.last_edited_by_user_id;
+      const status = row.status;
+
+      if (
+        typeof id !== "string" ||
+        typeof customerId !== "string" ||
+        typeof branchId !== "string" ||
+        typeof guestCount !== "number" ||
+        typeof bookingAt !== "string" ||
+        typeof startTime !== "string" ||
+        typeof endTime !== "string" ||
+        typeof createdByUserId !== "string" ||
+        typeof status !== "string" ||
+        !bookingStatuses.includes(status as BookingStatus)
+      ) {
+        return null;
+      }
+      if (areaId !== null && typeof areaId !== "string") {
+        return null;
+      }
+      if (tableId !== null && typeof tableId !== "string") {
+        return null;
+      }
+      if (checkedInAt !== null && typeof checkedInAt !== "string") {
+        return null;
+      }
+      if (noShowMarkedAt !== null && typeof noShowMarkedAt !== "string") {
+        return null;
+      }
+      if (note !== null && typeof note !== "string") {
+        return null;
+      }
+      if (lastEditedAt !== null && typeof lastEditedAt !== "string") {
+        return null;
+      }
+      if (lastEditedByUserId !== null && typeof lastEditedByUserId !== "string") {
+        return null;
+      }
+
+      return {
+        id,
+        customerId,
+        branchId,
+        areaId,
+        tableId,
+        guestCount,
+        bookingAt,
+        startTime,
+        endTime,
+        checkedInAt: checkedInAt ?? undefined,
+        noShowMarkedAt: noShowMarkedAt ?? undefined,
+        note: note ?? undefined,
+        createdByUserId,
+        lastEditedAt: lastEditedAt ?? undefined,
+        lastEditedByUserId: lastEditedByUserId ?? undefined,
+        status: status as BookingStatus,
+      };
+    };
+
+    const mapRealtimeCustomer = (row: RealtimeRow): Customer | null => {
+      const id = row.id;
+      const fullName = row.full_name;
+      const phone = row.phone;
+      const note = row.note;
+      if (typeof id !== "string" || typeof fullName !== "string") {
+        return null;
+      }
+      if (phone !== null && typeof phone !== "string") {
+        return null;
+      }
+      if (note !== null && typeof note !== "string") {
+        return null;
+      }
+      return {
+        id,
+        fullName,
+        phone: phone ?? null,
+        note: note ?? undefined,
+      };
+    };
+
+    const tableStatuses: TableStatus[] = ["available", "hold", "occupied", "locked"];
+
+    const mapRealtimeTable = (row: RealtimeRow): DiningTable | null => {
+      const id = row.id;
+      const branchId = row.branch_id;
+      const areaId = row.area_id;
+      const name = row.name;
+      const seats = row.seats;
+      const status = row.status;
+      const positionX = row.position_x;
+      const positionY = row.position_y;
+      if (
+        typeof id !== "string" ||
+        typeof branchId !== "string" ||
+        typeof areaId !== "string" ||
+        typeof name !== "string" ||
+        typeof seats !== "number" ||
+        typeof status !== "string" ||
+        !tableStatuses.includes(status as TableStatus) ||
+        typeof positionX !== "number" ||
+        typeof positionY !== "number"
+      ) {
+        return null;
+      }
+      return {
+        id,
+        branchId,
+        areaId,
+        name,
+        seats,
+        status: status as TableStatus,
+        positionX,
+        positionY,
+      };
+    };
+
+    const mapRealtimeArea = (row: RealtimeRow): Area | null => {
+      const id = row.id;
+      const branchId = row.branch_id;
+      const name = row.name;
+      const capacity = row.capacity;
+      const floorGridColumns = row.floor_grid_columns;
+      const floorGridRows = row.floor_grid_rows;
+      const floorNodeSpacing = row.floor_node_spacing;
+      if (
+        typeof id !== "string" ||
+        typeof branchId !== "string" ||
+        typeof name !== "string" ||
+        typeof capacity !== "number"
+      ) {
+        return null;
+      }
+      if (floorGridColumns !== undefined && floorGridColumns !== null && typeof floorGridColumns !== "number") {
+        return null;
+      }
+      if (floorGridRows !== undefined && floorGridRows !== null && typeof floorGridRows !== "number") {
+        return null;
+      }
+      if (floorNodeSpacing !== undefined && floorNodeSpacing !== null && typeof floorNodeSpacing !== "number") {
+        return null;
+      }
+      return {
+        id,
+        branchId,
+        name,
+        capacity,
+        floorGridColumns:
+          typeof floorGridColumns === "number" ? floorGridColumns : undefined,
+        floorGridRows: typeof floorGridRows === "number" ? floorGridRows : undefined,
+        floorNodeSpacing:
+          typeof floorNodeSpacing === "number" ? floorNodeSpacing : undefined,
+      };
+    };
+
+    const mapRealtimeBranch = (row: RealtimeRow): Branch | null => {
+      const id = row.id;
+      const name = row.name;
+      const address = row.address;
+      if (typeof id !== "string" || typeof name !== "string" || typeof address !== "string") {
+        return null;
+      }
+      return { id, name, address };
+    };
+
+    const roles: Role[] = ["admin", "general_manager", "manager", "employee"];
+
+    const mapRealtimeUser = (row: RealtimeRow): AppUser | null => {
+      const id = row.id;
+      const username = row.username;
+      const fullName = row.full_name;
+      const role = row.role;
+      const branchIds = row.branch_ids;
+      if (
+        typeof id !== "string" ||
+        typeof username !== "string" ||
+        typeof fullName !== "string" ||
+        typeof role !== "string" ||
+        !roles.includes(role as Role)
+      ) {
+        return null;
+      }
+      if (
+        branchIds !== null &&
+        branchIds !== undefined &&
+        (!Array.isArray(branchIds) || !branchIds.every((item) => typeof item === "string"))
+      ) {
+        return null;
+      }
+      return {
+        id,
+        username,
+        password: "",
+        fullName,
+        role: role as Role,
+        branchIds: (branchIds ?? []) as string[],
+      };
+    };
+
+    const applyRealtimePatch = (table: string, payload: RealtimePayload): boolean => {
+      if (table === "booking_runtime_settings") {
+        if (payload.eventType === "DELETE" || !payload.new) {
+          return false;
+        }
+        if (payload.new.id !== true) {
+          return true;
+        }
+        const mapped = mapRealtimeRuntimeSettings(payload.new);
+        if (!mapped) {
+          return false;
+        }
+        setState((prev) => ({ ...prev, bookingRuntimeSettings: mapped }));
+        return true;
+      }
+      if (table === "internal_notifications") {
+        if (payload.eventType === "DELETE") {
+          const id = payload.old?.id;
+          if (typeof id !== "string") {
+            return false;
+          }
+          setState((prev) => ({
+            ...prev,
+            notifications: prev.notifications.filter((item) => item.id !== id),
+          }));
+          return true;
+        }
+        if (!payload.new) {
+          return false;
+        }
+        const mapped = mapRealtimeNotification(payload.new);
+        if (!mapped) {
+          return false;
+        }
+        setState((prev) => {
+          const next = [mapped, ...prev.notifications.filter((item) => item.id !== mapped.id)].sort(
+            (a, b) => dayjs(b.createdAt).valueOf() - dayjs(a.createdAt).valueOf()
+          );
+          return { ...prev, notifications: next };
+        });
+        return true;
+      }
+      if (table === "bookings") {
+        if (payload.eventType === "DELETE") {
+          const id = payload.old?.id;
+          if (typeof id !== "string") {
+            return false;
+          }
+          setState((prev) => ({
+            ...prev,
+            bookings: prev.bookings.filter((item) => item.id !== id),
+          }));
+          return true;
+        }
+        if (!payload.new) {
+          return false;
+        }
+        const mapped = mapRealtimeBooking(payload.new);
+        if (!mapped) {
+          return false;
+        }
+        setState((prev) => {
+          const next = [mapped, ...prev.bookings.filter((item) => item.id !== mapped.id)].sort(
+            (a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf()
+          );
+          return { ...prev, bookings: next };
+        });
+        return true;
+      }
+      if (table === "customers") {
+        if (payload.eventType === "DELETE") {
+          const id = payload.old?.id;
+          if (typeof id !== "string") {
+            return false;
+          }
+          setState((prev) => ({
+            ...prev,
+            customers: prev.customers.filter((item) => item.id !== id),
+          }));
+          return true;
+        }
+        if (!payload.new) {
+          return false;
+        }
+        const mapped = mapRealtimeCustomer(payload.new);
+        if (!mapped) {
+          return false;
+        }
+        setState((prev) => ({
+          ...prev,
+          customers: [mapped, ...prev.customers.filter((item) => item.id !== mapped.id)],
+        }));
+        return true;
+      }
+      if (table === "tables") {
+        if (payload.eventType === "DELETE") {
+          const id = payload.old?.id;
+          if (typeof id !== "string") {
+            return false;
+          }
+          setState((prev) => ({
+            ...prev,
+            tables: prev.tables.filter((item) => item.id !== id),
+          }));
+          return true;
+        }
+        if (!payload.new) {
+          return false;
+        }
+        const mapped = mapRealtimeTable(payload.new);
+        if (!mapped) {
+          return false;
+        }
+        setState((prev) => {
+          const existingIndex = prev.tables.findIndex((item) => item.id === mapped.id);
+          if (existingIndex === -1) {
+            return { ...prev, tables: [...prev.tables, mapped] };
+          }
+          const next = [...prev.tables];
+          next[existingIndex] = mapped;
+          return { ...prev, tables: next };
+        });
+        return true;
+      }
+      if (table === "areas") {
+        if (payload.eventType === "DELETE") {
+          const id = payload.old?.id;
+          if (typeof id !== "string") {
+            return false;
+          }
+          setState((prev) => ({
+            ...prev,
+            areas: prev.areas.filter((item) => item.id !== id),
+          }));
+          return true;
+        }
+        if (!payload.new) {
+          return false;
+        }
+        const mapped = mapRealtimeArea(payload.new);
+        if (!mapped) {
+          return false;
+        }
+        setState((prev) => {
+          const existingIndex = prev.areas.findIndex((item) => item.id === mapped.id);
+          if (existingIndex === -1) {
+            return { ...prev, areas: [...prev.areas, mapped] };
+          }
+          const next = [...prev.areas];
+          next[existingIndex] = mapped;
+          return { ...prev, areas: next };
+        });
+        return true;
+      }
+      if (table === "branches") {
+        if (payload.eventType === "DELETE") {
+          const id = payload.old?.id;
+          if (typeof id !== "string") {
+            return false;
+          }
+          setState((prev) => ({
+            ...prev,
+            branches: prev.branches.filter((item) => item.id !== id),
+          }));
+          return true;
+        }
+        if (!payload.new) {
+          return false;
+        }
+        const mapped = mapRealtimeBranch(payload.new);
+        if (!mapped) {
+          return false;
+        }
+        setState((prev) => {
+          const existingIndex = prev.branches.findIndex((item) => item.id === mapped.id);
+          if (existingIndex === -1) {
+            return { ...prev, branches: [...prev.branches, mapped] };
+          }
+          const next = [...prev.branches];
+          next[existingIndex] = mapped;
+          return { ...prev, branches: next };
+        });
+        return true;
+      }
+      if (table === "app_users") {
+        if (payload.eventType === "DELETE") {
+          const id = payload.old?.id;
+          if (typeof id !== "string") {
+            return false;
+          }
+          setState((prev) => ({
+            ...prev,
+            users: prev.users.filter((item) => item.id !== id),
+          }));
+          setCurrentUser((prev) => (prev?.id === id ? null : prev));
+          return true;
+        }
+        if (!payload.new) {
+          return false;
+        }
+        const mapped = mapRealtimeUser(payload.new);
+        if (!mapped) {
+          return false;
+        }
+        setState((prev) => {
+          const existingIndex = prev.users.findIndex((item) => item.id === mapped.id);
+          if (existingIndex === -1) {
+            return { ...prev, users: [...prev.users, mapped] };
+          }
+          const next = [...prev.users];
+          next[existingIndex] = mapped;
+          return { ...prev, users: next };
+        });
+        setCurrentUser((prev) => (prev?.id === mapped.id ? userForSession(mapped) : prev));
+        return true;
+      }
+      return false;
+    };
+
+    const globalRealtimeTables = ["app_users", "booking_runtime_settings", "branches"] as const;
+    const branchScopedRealtimeTables = ["areas", "tables", "customers", "bookings"] as const;
+    const scopedBranchIds = filteredBranchIds;
+    const bindTableChange = (
+      channel: ReturnType<NonNullable<typeof realtime>["channel"]>,
+      table: string,
+      filter?: string
+    ) =>
+      channel.on(
+        "postgres_changes",
+        filter ? { event: "*", schema: "public", table, filter } : { event: "*", schema: "public", table },
+        (payload) => {
+          if (applyRealtimePatch(table, payload as RealtimePayload)) {
+            return;
+          }
+          runReload();
+        }
+      );
+
+    const realtimeChannel =
+      hasRealtime && realtime
+        ? (() => {
+            let channel = globalRealtimeTables.reduce((ch, table) => bindTableChange(ch, table), realtime.channel(realtimeChannelName));
+
+            for (const table of branchScopedRealtimeTables) {
+              if (scopedBranchIds.length === 0) {
+                channel = bindTableChange(channel, table);
+                continue;
+              }
+              for (const branchId of scopedBranchIds) {
+                channel = bindTableChange(channel, table, `branch_id=eq.${branchId}`);
+              }
+            }
+
+            if (scopedBranchIds.length === 0) {
+              channel = bindTableChange(channel, "internal_notifications");
+            } else {
+              for (const branchId of scopedBranchIds) {
+                channel = bindTableChange(channel, "internal_notifications", `branch_id=eq.${branchId}`);
+              }
+              // Global notifications are not branch-bound and should still trigger a sync.
+              channel = bindTableChange(channel, "internal_notifications", "branch_id=is.null");
+            }
+
+            return channel;
+          })()
+            .subscribe((status) => {
+              if (
+                status === "SUBSCRIBED" ||
+                status === "CHANNEL_ERROR" ||
+                status === "TIMED_OUT" ||
+                status === "CLOSED"
+              ) {
+                // Keep fallback poll active and ensure eventual consistency even after reconnect races.
+                runReload();
+              }
+            })
+        : null;
 
     const fallbackInterval = setInterval(() => {
       runReload();
-    }, 120000);
+    }, 30_000);
 
     return () => {
       cancelled = true;
       clearInterval(fallbackInterval);
-      if (eventSource) {
-        eventSource.close();
+      if (realtimeChannel && realtime) {
+        void realtime.removeChannel(realtimeChannel);
       }
     };
-  }, [hasSupabase, reload]);
+  }, [filteredBranchIds, hasRealtime, hasSupabase, reload, currentUser?.id]);
 
   useEffect(() => {
     if (currentUser) {
@@ -343,11 +912,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       localStorage.removeItem(SESSION_KEY);
     }
   }, [currentUser]);
-
-  const filteredBranchIds = useMemo(
-    () => userScopeBranchIds(currentUser, state.activeBranchId),
-    [currentUser, state.activeBranchId]
-  );
 
   const login = async (username: string, password: string) => {
     let user: AppUser | null = null;
@@ -1133,7 +1697,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     [currentUser, hasSupabase, reload]
   );
 
-  // Realtime subscriptions removed in favor of silent polling refresh.
+  // Snapshot synchronization is driven by Supabase Realtime with fallback polling.
 
   const acquireFloorLayoutEditLock = useCallback(
     async (areaId: string) => {

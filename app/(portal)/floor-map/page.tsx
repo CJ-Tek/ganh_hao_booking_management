@@ -75,6 +75,7 @@ import {
   FLOOR_TABLE_STACK_OFFSET_PX,
 } from "@/lib/floor-map-layout";
 import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
+import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { bookingStatusColor, bookingStatusLabel, tableStatusColor, tableStatusLabel } from "@/lib/display";
 import {
   BOOKING_GUEST_TYPE_OPTIONS,
@@ -945,8 +946,18 @@ export default function FloorMapPage() {
       setLayoutLockHolderName(null);
       return;
     }
-    const poll = async () => {
-      const info = await getFloorLayoutEditLockInfo(areaId);
+    let cancelled = false;
+    const realtime = getSupabaseBrowserClient();
+    const syncLockInfo = async () => {
+      if (cancelled) {
+        return;
+      }
+      let info: Awaited<ReturnType<typeof getFloorLayoutEditLockInfo>>;
+      try {
+        info = await getFloorLayoutEditLockInfo(areaId);
+      } catch {
+        return;
+      }
       if (!info || !currentUser) {
         setLayoutLockHolderName(null);
         return;
@@ -967,9 +978,37 @@ export default function FloorMapPage() {
         setLayoutLockHolderName(null);
       }
     };
-    void poll();
-    const id = setInterval(() => void poll(), 4000);
-    return () => clearInterval(id);
+    void syncLockInfo();
+    const fallbackId = setInterval(() => void syncLockInfo(), 30_000);
+    const lockChannel = realtime
+      ?.channel(`floor-layout-locks:${areaId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "floor_layout_edit_locks",
+          filter: `area_id=eq.${areaId}`,
+        },
+        () => void syncLockInfo()
+      )
+      .subscribe((status) => {
+        if (
+          status === "SUBSCRIBED" ||
+          status === "CHANNEL_ERROR" ||
+          status === "TIMED_OUT" ||
+          status === "CLOSED"
+        ) {
+          void syncLockInfo();
+        }
+      });
+    return () => {
+      cancelled = true;
+      clearInterval(fallbackId);
+      if (realtime && lockChannel) {
+        void realtime.removeChannel(lockChannel);
+      }
+    };
   }, [areaId, hasSupabase, currentUser, getFloorLayoutEditLockInfo]);
 
   useEffect(() => {

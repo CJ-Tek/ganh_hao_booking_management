@@ -267,7 +267,7 @@ async function findBookingDuplicatesByPhoneSlotInSupabase(
   const { data, error } = await (client as any)
     .from("bookings")
     .select(
-      "id, booking_at, guest_count, table_id, created_by_user_id, customers(full_name, phone), app_users(full_name)"
+      "id, booking_at, guest_count, table_id, created_by_user_id, customers(full_name, phone), app_users!bookings_created_by_user_id_fkey(full_name)"
     )
     .eq("branch_id", input.branchId)
     .in("status", ["pending", "confirmed", "seated", "checked_in", "no_show", "completed"]);
