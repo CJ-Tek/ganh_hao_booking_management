@@ -89,19 +89,31 @@ const BOOKING_MAINTENANCE_INTERVAL_MS = 60_000;
 let lastBookingMaintenanceAt = 0;
 let bookingMaintenanceInFlight: Promise<void> | null = null;
 
-async function maybeRunBookingMaintenance(): Promise<void> {
-  const now = Date.now();
-  if (now - lastBookingMaintenanceAt < BOOKING_MAINTENANCE_INTERVAL_MS) {
+async function maybeRunBookingMaintenance(force = false): Promise<void> {
+  if (
+    !force &&
+    Date.now() - lastBookingMaintenanceAt < BOOKING_MAINTENANCE_INTERVAL_MS
+  ) {
     return;
   }
   if (bookingMaintenanceInFlight) {
     await bookingMaintenanceInFlight;
+    if (!force) {
+      return;
+    }
+  }
+  if (
+    !force &&
+    Date.now() - lastBookingMaintenanceAt < BOOKING_MAINTENANCE_INTERVAL_MS
+  ) {
     return;
   }
-  lastBookingMaintenanceAt = now;
   bookingMaintenanceInFlight = runBookingMaintenanceInSupabase()
-    .then(() => undefined)
-    .catch(() => undefined)
+    .then((result) => {
+      if (result.ok) {
+        lastBookingMaintenanceAt = Date.now();
+      }
+    })
     .finally(() => {
       bookingMaintenanceInFlight = null;
     });
@@ -445,12 +457,14 @@ export async function updateBranchInSupabase(
   return { ok: true, message: "Đã cập nhật chi nhánh." };
 }
 
-export async function fetchSnapshot(): Promise<AppStateSnapshot> {
+export async function fetchSnapshot(options?: {
+  forceMaintenance?: boolean;
+}): Promise<AppStateSnapshot> {
   if (!isSupabaseStoreServerConfigured()) {
     return initialState;
   }
 
-  await maybeRunBookingMaintenance();
+  await maybeRunBookingMaintenance(Boolean(options?.forceMaintenance));
 
   const client = ensureClient();
   const usersPromise = listAppUsersServer().then((users) => {

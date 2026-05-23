@@ -289,6 +289,7 @@ function BookingsPageContent() {
       groupPartyGuestThreshold: state.bookingRuntimeSettings.groupPartyGuestThreshold,
       repeatCustomerMinCompleted: state.bookingRuntimeSettings.repeatCustomerMinCompleted,
       receptionArrivalGraceMinutes: state.bookingRuntimeSettings.receptionArrivalGraceMinutes,
+      noShowGraceMinutes: state.bookingRuntimeSettings.noShowGraceMinutes,
     }),
     [state.bookingRuntimeSettings]
   );

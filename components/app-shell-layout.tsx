@@ -32,6 +32,7 @@ import {
   Map,
   MapPin,
   MoreHorizontal,
+  RefreshCw,
   Settings,
   SlidersHorizontal,
   SquareMenu,
@@ -99,6 +100,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     state,
     filteredBranchIds,
     setActiveBranchId,
+    reload,
     logout,
     markNotificationRead,
     markAllScopedNotificationsRead,
@@ -127,6 +129,19 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   );
   const { isBusy: isNotificationBusy, run: runNotificationAction } = useBusyId();
   const [isMarkingAllNotifications, setIsMarkingAllNotifications] = useState(false);
+  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+
+  const handleManualRefresh = async () => {
+    if (isManualRefreshing) {
+      return;
+    }
+    setIsManualRefreshing(true);
+    try {
+      await reload({ forceMaintenance: true });
+    } finally {
+      setIsManualRefreshing(false);
+    }
+  };
 
   const popoverPreviewCount = 8;
   const previewNotifications = useMemo(
@@ -252,6 +267,20 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                   }))}
                 />
               )}
+              <ActionIcon
+                variant="transparent"
+                color="white"
+                size="lg"
+                radius="md"
+                aria-label="Làm mới dữ liệu ngay"
+                title="Làm mới dữ liệu ngay"
+                loading={isManualRefreshing}
+                onClick={() => {
+                  void handleManualRefresh();
+                }}
+              >
+                <RefreshCw size={20} strokeWidth={1.75} />
+              </ActionIcon>
               {currentUser?.role !== "employee" ? (
               <Popover width={380} position="bottom-end" withArrow shadow="md">
                 <Popover.Target>

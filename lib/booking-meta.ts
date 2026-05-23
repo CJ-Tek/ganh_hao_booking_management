@@ -110,7 +110,10 @@ export function displayCustomerPhone(phone?: string | null): string {
 
 export type ReceptionThresholdSettings = Pick<
   BookingRuntimeSettings,
-  "groupPartyGuestThreshold" | "repeatCustomerMinCompleted" | "receptionArrivalGraceMinutes"
+  | "groupPartyGuestThreshold"
+  | "repeatCustomerMinCompleted"
+  | "receptionArrivalGraceMinutes"
+  | "noShowGraceMinutes"
 >;
 
 function resolveReceptionThresholds(
@@ -126,7 +129,29 @@ function resolveReceptionThresholds(
     receptionArrivalGraceMinutes:
       thresholds?.receptionArrivalGraceMinutes ??
       DEFAULT_BOOKING_RUNTIME_SETTINGS.receptionArrivalGraceMinutes,
+    noShowGraceMinutes:
+      thresholds?.noShowGraceMinutes ?? DEFAULT_BOOKING_RUNTIME_SETTINGS.noShowGraceMinutes,
   };
+}
+
+/** Slot start used for no-show rules (matches `run_booking_maintenance` in Postgres). */
+export function getBookingSlotStart(booking: Pick<Booking, "startTime" | "bookingAt">): dayjs.Dayjs {
+  return dayjs(booking.startTime ?? booking.bookingAt);
+}
+
+/** True when a confirmed/pending booking is past the no-show grace window without check-in. */
+export function isPastNoShowGrace(
+  booking: Pick<Booking, "status" | "checkedInAt" | "startTime" | "bookingAt">,
+  noShowGraceMinutes: number
+): boolean {
+  if (booking.checkedInAt) {
+    return false;
+  }
+  if (booking.status !== "confirmed" && booking.status !== "pending") {
+    return false;
+  }
+  const minutesPast = dayjs().diff(getBookingSlotStart(booking), "minute");
+  return minutesPast >= noShowGraceMinutes;
 }
 
 function bookingNoteNormalized(booking: Pick<Booking, "note">): string {
@@ -199,12 +224,22 @@ export function getReceptionBookingStatus(
     return { label: "Đã vào bàn", color: "green" };
   }
 
+  if (booking.status === "no_show") {
+    return { label: bookingStatusLabel.no_show, color: bookingStatusColor.no_show };
+  }
+
+  if (
+    isPastNoShowGrace(booking, thresholds.noShowGraceMinutes)
+  ) {
+    return { label: bookingStatusLabel.no_show, color: bookingStatusColor.no_show };
+  }
+
   if (booking.status === "confirmed") {
     if (hasDepositNote) {
       return { label: "Đã cọc", color: "yellow" };
     }
-    const bookingAt = dayjs(booking.bookingAt);
-    const minutesUntil = bookingAt.diff(dayjs(), "minute");
+    const slotStart = getBookingSlotStart(booking);
+    const minutesUntil = slotStart.diff(dayjs(), "minute");
     if (
       !booking.checkedInAt &&
       minutesUntil > -thresholds.receptionArrivalGraceMinutes

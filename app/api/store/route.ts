@@ -24,7 +24,10 @@ function notConfigured() {
 type StoreHandler = (payload: unknown) => Promise<unknown>;
 
 const handlers: Record<string, StoreHandler> = {
-  fetchSnapshot: () => store.fetchSnapshot(),
+  fetchSnapshot: (payload) =>
+    store.fetchSnapshot(
+      payload as { forceMaintenance?: boolean } | undefined
+    ),
   updateBookingRuntimeSettings: (payload) =>
     store.updateBookingRuntimeSettingsInSupabase(payload as Parameters<typeof store.updateBookingRuntimeSettingsInSupabase>[0]),
   updateBranch: (payload) => {

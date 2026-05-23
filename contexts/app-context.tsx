@@ -121,7 +121,7 @@ interface AppContextValue {
   hasSupabase: boolean;
   login: (username: string, password: string) => Promise<AppUser | null>;
   logout: () => void;
-  reload: () => Promise<void>;
+  reload: (options?: { forceMaintenance?: boolean }) => Promise<void>;
   setActiveBranchId: (branchId: string) => void;
   updateBranch: (
     branchId: string,
@@ -260,7 +260,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     [currentUser, state.activeBranchId]
   );
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (options?: { forceMaintenance?: boolean }) => {
     const mergeActive = (
       prev: AppStateSnapshot,
       fallback: AppStateSnapshot["activeBranchId"]
@@ -285,7 +285,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       }));
       return;
     }
-    const snapshot = await fetchSnapshot();
+    const snapshot = await fetchSnapshot({
+      forceMaintenance: options?.forceMaintenance,
+    });
     setState((prev) => ({
       ...snapshot,
       activeBranchId: mergeActive(prev, snapshot.activeBranchId),

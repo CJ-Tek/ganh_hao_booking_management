@@ -31,12 +31,14 @@ export async function updateBranchInSupabase(
   return callStore("updateBranch", { branchId, input });
 }
 
-export async function fetchSnapshot(): Promise<AppStateSnapshot> {
+export async function fetchSnapshot(options?: {
+  forceMaintenance?: boolean;
+}): Promise<AppStateSnapshot> {
   if (!isSupabaseEnabled()) {
     const { initialState } = await import("./initial-state");
     return initialState;
   }
-  return callStore<AppStateSnapshot>("fetchSnapshot");
+  return callStore<AppStateSnapshot>("fetchSnapshot", options);
 }
 
 export async function loginWithSupabase(
