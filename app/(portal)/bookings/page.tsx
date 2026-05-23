@@ -31,6 +31,7 @@ import {
   PortalSectionCard,
   PortalStickyAction,
 } from "@/components/portal-page";
+import { BookingCalendarPanel } from "@/components/booking-calendar-panel";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
@@ -146,9 +147,8 @@ function parseGuestCountFromNumberInput(value: number | string | undefined): num
 function AssignGuestCountPromptBody(props: {
   onBack?: () => void;
   onManual: (guestCount: number) => void;
-  onAuto: (guestCount: number) => void;
 }) {
-  const { onBack, onManual, onAuto } = props;
+  const { onBack, onManual } = props;
   const [guestCount, setGuestCount] = useState<number | undefined>(undefined);
   return (
     <Stack gap="sm">
@@ -165,37 +165,20 @@ function AssignGuestCountPromptBody(props: {
         value={guestCount}
         onChange={(value) => setGuestCount(parseGuestCountFromNumberInput(value))}
       />
-      <Group grow>
-        <Button
-          variant="default"
-          onClick={() => {
-            if (typeof guestCount !== "number" || guestCount < 1) {
-              notifications.show({
-                color: "red",
-                message: "Vui lòng nhập số khách hợp lệ.",
-              });
-              return;
-            }
-            onManual(guestCount);
-          }}
-        >
-          Chọn thủ công
-        </Button>
-        <Button
-          onClick={() => {
-            if (typeof guestCount !== "number" || guestCount < 1) {
-              notifications.show({
-                color: "red",
-                message: "Vui lòng nhập số khách hợp lệ.",
-              });
-              return;
-            }
-            onAuto(guestCount);
-          }}
-        >
-          Tự động theo số khách
-        </Button>
-      </Group>
+      <Button
+        onClick={() => {
+          if (typeof guestCount !== "number" || guestCount < 1) {
+            notifications.show({
+              color: "red",
+              message: "Vui lòng nhập số khách hợp lệ.",
+            });
+            return;
+          }
+          onManual(guestCount);
+        }}
+      >
+        Chọn bàn thủ công
+      </Button>
     </Stack>
   );
 }
@@ -206,9 +189,8 @@ function AssignGuestSpecifiedOptionsBody(props: {
   modalId: string;
   persistGuestCount: (bookingId: string, guestCount: number) => Promise<{ ok: boolean; message: string }>;
   onManual: (guestCount: number) => void;
-  onAuto: (guestCount: number) => void;
 }) {
-  const { booking, modalId, persistGuestCount, onManual, onAuto } = props;
+  const { booking, modalId, persistGuestCount, onManual } = props;
   const [editingGuest, setEditingGuest] = useState(false);
   const [guestDraft, setGuestDraft] = useState(() => Math.max(1, booking.guestCount));
   const [committedGuest, setCommittedGuest] = useState(() => Math.max(1, booking.guestCount));
@@ -283,27 +265,16 @@ function AssignGuestSpecifiedOptionsBody(props: {
           {editingGuest ? "Xong" : "Sửa"}
         </Button>
       </Group>
-      <Group grow>
-        <Button
-          variant="default"
-          onClick={() => {
-            modals.close(modalId);
-            window.setTimeout(() => {
-              onManual(resolvedGuest);
-            }, MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS);
-          }}
-        >
-          Chọn thủ công
-        </Button>
-        <Button
-          onClick={() => {
-            modals.close(modalId);
-            onAuto(resolvedGuest);
-          }}
-        >
-          Tự động gán theo số khách
-        </Button>
-      </Group>
+      <Button
+        onClick={() => {
+          modals.close(modalId);
+          window.setTimeout(() => {
+            onManual(resolvedGuest);
+          }, MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS);
+        }}
+      >
+        Chọn bàn thủ công
+      </Button>
     </Stack>
   );
 }
@@ -316,6 +287,7 @@ export default function BookingsPage() {
 function BookingsPageContent() {
   const {
     state,
+    currentUser,
     filteredBranchIds,
     createBooking,
     assignBookingToTable,
@@ -323,6 +295,7 @@ function BookingsPageContent() {
     updateBookingOrder,
     updateBookingStatus,
     checkInBooking,
+    setActiveBranchId,
     hasSupabase,
   } = useAppContext();
 
@@ -343,6 +316,7 @@ function BookingsPageContent() {
 
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [createBranchId, setCreateBranchId] = useState<string | null>(branchId);
   const [guestCount, setGuestCount] = useState<number | undefined>(undefined);
   const [bookingAt, setBookingAt] = useState<string | null>(
     dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm")
@@ -389,6 +363,12 @@ function BookingsPageContent() {
   const [todayStatusFilter, setTodayStatusFilter] = useState<BookingStatus | null>(null);
   const [todayReceptionStatusFilter, setTodayReceptionStatusFilter] = useState<string | null>(null);
   const [todayGuestTypeFilter, setTodayGuestTypeFilter] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!createModalOpened) {
+      setCreateBranchId(branchId);
+    }
+  }, [branchId, createModalOpened]);
   const [todayTableAssignFilter, setTodayTableAssignFilter] = useState<
     "all" | "assigned" | "unassigned"
   >("all");
@@ -550,10 +530,19 @@ function BookingsPageContent() {
     }
   };
 
-  const filteredAreas = state.areas.filter((area) => area.branchId === branchId);
-  const branchTables = useMemo(
-    () => state.tables.filter((table) => table.branchId === branchId),
-    [branchId, state.tables]
+  const createBranchName =
+    createBranchId ? state.branches.find((b) => b.id === createBranchId)?.name ?? "—" : "—";
+  const createBranchOptions = useMemo(
+    () => state.branches.map((branch) => ({ value: branch.id, label: branch.name })),
+    [state.branches]
+  );
+  const createBranchAreas = useMemo(
+    () => state.areas.filter((area) => area.branchId === createBranchId),
+    [createBranchId, state.areas]
+  );
+  const createBranchTables = useMemo(
+    () => state.tables.filter((table) => table.branchId === createBranchId),
+    [createBranchId, state.tables]
   );
 
   const branchBookings = useMemo(
@@ -669,7 +658,7 @@ function BookingsPageContent() {
 
   const bookingStatusFilterOptions = useMemo(
     () =>
-      (["pending", "confirmed", "seated", "checked_in", "no_show", "completed", "cancelled"] as const).map((s) => ({
+      (["pending", "confirmed", "seated", "checked_in", "no_show", "cancelled"] as const).map((s) => ({
         value: s,
         label: bookingStatusLabel[s],
       })),
@@ -687,6 +676,9 @@ function BookingsPageContent() {
 
   const pipelineFilteredBookings = useMemo(() => {
     return branchBookings.filter((booking) => {
+      if (booking.status === "completed") {
+        return false;
+      }
       if (listStatusFilter && booking.status !== listStatusFilter) {
         return false;
       }
@@ -740,29 +732,6 @@ function BookingsPageContent() {
     setAssignManualGuestCount(initialGuestCount);
     setAssignAreaId(null);
     setAssignTableId(null);
-  };
-
-  const runAutoAssign = async (booking: Booking, guestForAssign?: number) => {
-    const candidates = getCandidateTables(booking, guestForAssign);
-    if (candidates.length === 0) {
-      notifications.show({
-        color: "red",
-        message:
-          typeof guestForAssign === "number"
-            ? "Không còn bàn trống phù hợp với số khách."
-            : "Không còn bàn trống để gán tự động.",
-      });
-      return;
-    }
-    const picked =
-      typeof guestForAssign === "number"
-        ? [...candidates].sort((a, b) => a.seats - b.seats || a.name.localeCompare(b.name, "vi"))[0]
-        : candidates[Math.floor(Math.random() * candidates.length)];
-    await runAssign(booking, {
-      areaId: picked.areaId,
-      tableId: picked.id,
-      guestCount: guestForAssign,
-    });
   };
 
   const openEditBookingModal = (booking: Booking) => {
@@ -834,9 +803,18 @@ function BookingsPageContent() {
       });
       if (!result.ok && result.code === DUPLICATE_BOOKING_CODE && result.duplicates?.length) {
         notifications.show({ color: "orange", message: result.message });
-        confirmDuplicateBookingSecond(result.duplicates, () => {
-          void submitEditBooking({ allowDuplicate: true });
-        });
+        confirmDuplicateBookingSecond(
+          result.duplicates,
+          () => {
+            void submitEditBooking({ allowDuplicate: true });
+          },
+          (bookingId) => {
+            const target = state.bookings.find((item) => item.id === bookingId);
+            if (target) {
+              openBookingInList(target);
+            }
+          }
+        );
         return;
       }
       notifications.show({
@@ -875,54 +853,38 @@ function BookingsPageContent() {
               modalId={modalId}
               persistGuestCount={(id, n) => updateBookingGuestCount(id, n)}
               onManual={(guestCount) => openManualAssignModal(booking, guestCount)}
-              onAuto={(guestCount) => void runAutoAssign(booking, guestCount)}
             />
           ) : (
             <>
               <Text size="sm" c="dimmed">
                 Booking này chưa có số khách.
               </Text>
-              <Group grow>
-                <Button
-                  variant="default"
-                  onClick={() => {
-                    const nestedModalId = modals.open({
-                      title: "Nhập số khách rồi chọn cách gán",
-                      children: <></>,
-                    });
-                    modals.updateModal({
-                      modalId: nestedModalId,
-                      children: (
-                        <AssignGuestCountPromptBody
-                          onBack={() => modals.close(nestedModalId)}
-                          onManual={(guest) => {
-                            modals.close(nestedModalId);
-                            modals.close(modalId);
-                            window.setTimeout(() => {
-                              openManualAssignModal(booking, guest);
-                            }, MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS);
-                          }}
-                          onAuto={(guest) => {
-                            modals.close(nestedModalId);
-                            modals.close(modalId);
-                            void runAutoAssign(booking, guest);
-                          }}
-                        />
-                      ),
-                    });
-                  }}
-                >
-                  Nhập số khách
-                </Button>
-                <Button
-                  onClick={() => {
-                    modals.close(modalId);
-                    void runAutoAssign(booking);
-                  }}
-                >
-                  Tự động ngẫu nhiên bàn trống
-                </Button>
-              </Group>
+              <Button
+                variant="default"
+                onClick={() => {
+                  const nestedModalId = modals.open({
+                    title: "Nhập số khách rồi chọn bàn",
+                    children: <></>,
+                  });
+                  modals.updateModal({
+                    modalId: nestedModalId,
+                    children: (
+                      <AssignGuestCountPromptBody
+                        onBack={() => modals.close(nestedModalId)}
+                        onManual={(guest) => {
+                          modals.close(nestedModalId);
+                          modals.close(modalId);
+                          window.setTimeout(() => {
+                            openManualAssignModal(booking, guest);
+                          }, MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS);
+                        }}
+                      />
+                    ),
+                  });
+                }}
+              >
+                Nhập số khách để chọn bàn thủ công
+              </Button>
             </>
           )}
         </Stack>
@@ -1012,6 +974,14 @@ function BookingsPageContent() {
     state.tables,
     state.users,
   ]);
+
+  const completedBookings = useMemo(
+    () =>
+      [...branchBookings]
+        .filter((booking) => booking.status === "completed")
+        .sort((a, b) => dayjs(b.bookingAt).valueOf() - dayjs(a.bookingAt).valueOf()),
+    [branchBookings]
+  );
 
   const completedBookingsByCustomer = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1297,7 +1267,7 @@ function BookingsPageContent() {
   }, [listFocusBookingId]);
 
   const submitCreateBooking = async (options?: { allowDuplicate?: boolean }) => {
-    if (!customerName || !branchId || !bookingAt) {
+    if (!customerName || !createBranchId || !bookingAt) {
       notifications.show({ color: "red", message: "Cần ít nhất tên khách và thời gian đến." });
       return;
     }
@@ -1312,7 +1282,7 @@ function BookingsPageContent() {
     const result = await createBooking({
       customerName: formatVietnamesePersonName(customerName),
       customerPhone: normalizedCustomerPhone || undefined,
-      branchId,
+      branchId: createBranchId,
       guestCount: typeof guestCount === "number" && Number.isFinite(guestCount) ? Math.max(1, guestCount) : undefined,
       bookingAt: dayjs(bookingAt).toISOString(),
       note,
@@ -1321,9 +1291,18 @@ function BookingsPageContent() {
     });
     if (!result.ok && result.code === DUPLICATE_BOOKING_CODE && result.duplicates?.length) {
       notifications.show({ color: "orange", message: result.message });
-      confirmDuplicateBookingSecond(result.duplicates, () => {
-        void submitCreateBooking({ allowDuplicate: true });
-      });
+      confirmDuplicateBookingSecond(
+        result.duplicates,
+        () => {
+          void submitCreateBooking({ allowDuplicate: true });
+        },
+        (bookingId) => {
+          const target = state.bookings.find((item) => item.id === bookingId);
+          if (target) {
+            openBookingInList(target);
+          }
+        }
+      );
       return;
     }
     notifications.show({
@@ -1331,12 +1310,25 @@ function BookingsPageContent() {
       message: result.message,
     });
     if (result.ok) {
+      const switchedFrom = branchId;
       setCustomerName("");
       setCustomerPhone("");
       setGuestCount(undefined);
       setNote("");
       setGuestType("Khách thường");
       setCreateModalOpened(false);
+      if (
+        currentUser?.role === "manager" &&
+        switchedFrom &&
+        createBranchId !== switchedFrom
+      ) {
+        notifications.show({
+          color: "blue",
+          message: "Đã tạo booking ở chi nhánh khác. Nhấn để quay về chi nhánh đang vận hành.",
+          autoClose: 6000,
+          onClick: () => setActiveBranchId(switchedFrom),
+        });
+      }
     }
   };
 
@@ -1345,22 +1337,39 @@ function BookingsPageContent() {
       await submitCreateBooking();
       return;
     }
-    confirmDuplicateBookingSecond(duplicateInfosForAlert, () => {
-      void submitCreateBooking({ allowDuplicate: true });
-    });
+    confirmDuplicateBookingSecond(
+      duplicateInfosForAlert,
+      () => {
+        void submitCreateBooking({ allowDuplicate: true });
+      },
+      (bookingId) => {
+        const target = state.bookings.find((item) => item.id === bookingId);
+        if (target) {
+          openBookingInList(target);
+        }
+      }
+    );
   };
 
   const createForm = (
     <PortalSectionCard>
       <Stack gap="sm">
         <Text size="sm" c="dimmed">
-          Chi nhánh: <strong>{branchName}</strong>
+          Chi nhánh đang tạo booking: <strong>{createBranchName}</strong>
         </Text>
+        <Select
+          label="Chi nhánh booking"
+          data={createBranchOptions}
+          value={createBranchId}
+          onChange={(value) => setCreateBranchId(value)}
+          allowDeselect={false}
+          size={isCompact ? "md" : "sm"}
+        />
         <Group justify="flex-start">
           <VoiceBookingAssistant
-            branch={branchId ? { id: branchId, name: branchName } : null}
-            areas={filteredAreas.map((a) => ({ id: a.id, name: a.name }))}
-            tables={branchTables.map((t) => ({
+            branch={createBranchId ? { id: createBranchId, name: createBranchName } : null}
+            areas={createBranchAreas.map((a) => ({ id: a.id, name: a.name }))}
+            tables={createBranchTables.map((t) => ({
               id: t.id,
               name: t.name,
               seats: t.seats,
@@ -1950,6 +1959,89 @@ function BookingsPageContent() {
     </Stack>
   );
 
+  const completedBookingsPanel = (
+    <PortalSectionCard>
+      <Stack gap="sm">
+        <Text fw={600}>Booking hoàn thành</Text>
+        <Text size="sm" c="dimmed">
+          {completedBookings.length} booking đã hoàn thành.
+        </Text>
+        {completedBookings.length === 0 ? (
+          <Text c="dimmed" size="sm">
+            Chưa có booking hoàn thành.
+          </Text>
+        ) : isCompact ? (
+          <Stack gap="sm">
+            {completedBookings.map((booking) => {
+              const customer = state.customers.find((item) => item.id === booking.customerId);
+              const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
+              const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
+              return (
+                <Card key={booking.id} withBorder radius="md" padding="md">
+                  <Stack gap="xs">
+                    <Group justify="space-between" align="flex-start" gap="xs">
+                      <Text fw={700} lineClamp={2}>
+                        {customer?.fullName ?? "—"}
+                      </Text>
+                      <Badge color={bookingStatusColor[booking.status]} variant="light">
+                        {bookingStatusLabel[booking.status]}
+                      </Badge>
+                    </Group>
+                    <Text size="sm">{dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY")}</Text>
+                    <Text size="sm" c="dimmed">
+                      {booking.areaId && booking.tableId ? `${area} · Bàn ${table}` : "Chờ xếp bàn"}
+                    </Text>
+                  </Stack>
+                </Card>
+              );
+            })}
+          </Stack>
+        ) : (
+          <DataTable
+            minHeight={220}
+            scrollAreaProps={portalDataTableScrollAreaProps}
+            withTableBorder
+            records={completedBookings}
+            columns={[
+              {
+                accessor: "bookingAt",
+                title: "Giờ đặt",
+                render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+              },
+              {
+                accessor: "customerId",
+                title: "Khách",
+                render: (booking) =>
+                  state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—",
+              },
+              {
+                accessor: "areaTable",
+                title: "Khu vực / Bàn",
+                render: (booking) => {
+                  if (!booking.areaId || !booking.tableId) {
+                    return "Chờ xếp bàn";
+                  }
+                  const area = state.areas.find((item) => item.id === booking.areaId);
+                  const table = state.tables.find((item) => item.id === booking.tableId);
+                  return `${area?.name ?? "—"} · ${table?.name ?? "—"}`;
+                },
+              },
+              {
+                accessor: "status",
+                title: "Trạng thái",
+                render: (booking) => (
+                  <Badge color={bookingStatusColor[booking.status]} variant="light">
+                    {bookingStatusLabel[booking.status]}
+                  </Badge>
+                ),
+              },
+            ]}
+          />
+        )}
+      </Stack>
+    </PortalSectionCard>
+  );
+
   const mobileTodayPaginationBar =
     todaySortedBookings.length > 0 ? (
       <Stack gap="xs">
@@ -2519,6 +2611,8 @@ function BookingsPageContent() {
         <Tabs.List grow>
           <Tabs.Tab value="today">Booking hôm nay</Tabs.Tab>
           <Tabs.Tab value="list">Danh sách booking</Tabs.Tab>
+          <Tabs.Tab value="completed">Hoàn thành</Tabs.Tab>
+          <Tabs.Tab value="calendar">Lịch</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="today" pt="md">
           {isCompact ? (
@@ -2549,6 +2643,16 @@ function BookingsPageContent() {
           ) : (
             bookingsTable
           )}
+        </Tabs.Panel>
+        <Tabs.Panel value="completed" pt="md">
+          {completedBookingsPanel}
+        </Tabs.Panel>
+        <Tabs.Panel value="calendar" pt="md">
+          <BookingCalendarPanel
+            title="Lịch booking"
+            compactTitle="Lịch booking"
+            showHeader={false}
+          />
         </Tabs.Panel>
       </Tabs>
       <Drawer

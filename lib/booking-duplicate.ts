@@ -27,12 +27,44 @@ export function bookingSlotKey(input: string) {
   };
 }
 
+export function normalizeVietnameseName(raw: string): string {
+  return raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+export function isLikelySameGuestName(left: string, right: string): boolean {
+  const a = normalizeVietnameseName(left);
+  const b = normalizeVietnameseName(right);
+  if (!a || !b) {
+    return false;
+  }
+  if (a === b) {
+    return true;
+  }
+  if (a.includes(b) || b.includes(a)) {
+    return true;
+  }
+  const aTokens = a.split(" ").filter(Boolean);
+  const bTokens = b.split(" ").filter(Boolean);
+  if (aTokens.length === 0 || bTokens.length === 0) {
+    return false;
+  }
+  const overlap = aTokens.filter((token) => bTokens.includes(token));
+  return overlap.length >= Math.min(2, Math.max(1, Math.min(aTokens.length, bTokens.length)));
+}
+
 export type BookingDuplicateInfo = {
   bookingId: string;
   bookingAt: string;
   guestCount: number;
   receiverFullName: string;
   receiverUserId?: string;
+  customerName?: string;
+  tableLabel?: string;
 };
 
 export function formatBookingDuplicateAlertMessage(

@@ -7,7 +7,8 @@ import { type BookingDuplicateInfo } from "@/lib/booking-duplicate";
 
 export function confirmDuplicateBookingSecond(
   duplicates: BookingDuplicateInfo[],
-  onConfirmSecondBooking: () => void
+  onConfirmSecondBooking: () => void,
+  onViewBooking?: (bookingId: string) => void
 ) {
   const first = duplicates[0];
   if (!first) {
@@ -23,11 +24,26 @@ export function confirmDuplicateBookingSecond(
           <strong>{first.guestCount}</strong> khách - người nhận:{" "}
           <strong>{first.receiverFullName}</strong>.
         </Text>
-        {duplicates.length > 1 ? (
-          <Text size="xs" c="dimmed">
-            Còn {duplicates.length - 1} booking trùng cùng khung giờ.
-          </Text>
-        ) : null}
+        <Stack gap={4}>
+          {duplicates.slice(0, 5).map((duplicate) => (
+            <Text
+              key={duplicate.bookingId}
+              size="xs"
+              c={onViewBooking ? "blue" : "dimmed"}
+              style={onViewBooking ? { cursor: "pointer" } : undefined}
+              onClick={() => onViewBooking?.(duplicate.bookingId)}
+            >
+              {dayjs(duplicate.bookingAt).format("HH:mm DD/MM/YYYY")} · {duplicate.guestCount} khách
+              {duplicate.customerName ? ` · ${duplicate.customerName}` : ""}
+              {duplicate.tableLabel ? ` · ${duplicate.tableLabel}` : ""}
+            </Text>
+          ))}
+          {duplicates.length > 5 ? (
+            <Text size="xs" c="dimmed">
+              Còn {duplicates.length - 5} booking trùng khác.
+            </Text>
+          ) : null}
+        </Stack>
         <Text size="xs" c="dimmed">
           Nếu đây là khách đặt thêm bàn, bấm &quot;Tạo booking thứ 2&quot;. Nếu không, quay lại để
           tránh nhập trùng.

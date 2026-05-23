@@ -99,6 +99,7 @@ export type Database = {
           start_time: string
           status: string
           table_id: string | null
+          merge_group_id: string | null
         }
         Insert: {
           area_id?: string | null
@@ -117,6 +118,7 @@ export type Database = {
           start_time?: string
           status?: string
           table_id?: string | null
+          merge_group_id?: string | null
         }
         Update: {
           area_id?: string | null
@@ -135,6 +137,7 @@ export type Database = {
           start_time?: string
           status?: string
           table_id?: string | null
+          merge_group_id?: string | null
         }
         Relationships: [
           {
@@ -177,6 +180,13 @@ export type Database = {
             columns: ["table_id"]
             isOneToOne: false
             referencedRelation: "tables"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_merge_group_id_fkey"
+            columns: ["merge_group_id"]
+            isOneToOne: false
+            referencedRelation: "table_merge_groups"
             referencedColumns: ["id"]
           },
         ]
@@ -535,6 +545,103 @@ export type Database = {
             columns: ["branch_id"]
             isOneToOne: false
             referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      table_merge_groups: {
+        Row: {
+          area_id: string
+          branch_id: string
+          created_at: string
+          created_by_user_id: string | null
+          id: string
+          merged_name: string
+          status: string
+          total_capacity: number
+          updated_at: string
+        }
+        Insert: {
+          area_id: string
+          branch_id: string
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          merged_name: string
+          status?: string
+          total_capacity?: number
+          updated_at?: string
+        }
+        Update: {
+          area_id?: string
+          branch_id?: string
+          created_at?: string
+          created_by_user_id?: string | null
+          id?: string
+          merged_name?: string
+          status?: string
+          total_capacity?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "table_merge_groups_area_id_fkey"
+            columns: ["area_id"]
+            isOneToOne: false
+            referencedRelation: "areas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "table_merge_groups_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "table_merge_groups_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      table_merge_members: {
+        Row: {
+          created_at: string
+          group_id: string
+          id: string
+          order_index: number
+          table_id: string
+        }
+        Insert: {
+          created_at?: string
+          group_id: string
+          id?: string
+          order_index?: number
+          table_id: string
+        }
+        Update: {
+          created_at?: string
+          group_id?: string
+          id?: string
+          order_index?: number
+          table_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "table_merge_members_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "table_merge_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "table_merge_members_table_id_fkey"
+            columns: ["table_id"]
+            isOneToOne: false
+            referencedRelation: "tables"
             referencedColumns: ["id"]
           },
         ]

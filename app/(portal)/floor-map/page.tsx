@@ -45,6 +45,7 @@ import {
   X,
 } from "lucide-react";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
+import { BookingCalendarPanel } from "@/components/booking-calendar-panel";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
 import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import {
@@ -83,8 +84,10 @@ import {
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
 import {
+  createTableMergeGroupInSupabase,
   confirmWaitlistOfferInSupabase,
   getTableBlockStateInSupabase,
+  listTableMergeGroupsInSupabase,
 } from "@/lib/supabase-store";
 import {
   type Booking,
@@ -357,6 +360,14 @@ export default function FloorMapPage() {
   const [quickAssignBookingId, setQuickAssignBookingId] = useState<string | null>(null);
   const [quickAssignTableId, setQuickAssignTableId] = useState<string | null>(null);
   const [quickAssignSaving, setQuickAssignSaving] = useState(false);
+  const [mergeModalOpen, setMergeModalOpen] = useState(false);
+  const [mergeName, setMergeName] = useState("");
+  const [mergePrimaryTableId, setMergePrimaryTableId] = useState<string | null>(null);
+  const [mergeSecondaryTableId, setMergeSecondaryTableId] = useState<string | null>(null);
+  const [mergeSaving, setMergeSaving] = useState(false);
+  const [mergeGroupsSummary, setMergeGroupsSummary] = useState<
+    Array<{ id: string; mergedName: string; totalCapacity: number; tableIds: string[] }>
+  >([]);
   const [detailTable, setDetailTable] = useState<DiningTable | null>(null);
   const [detailTableBlockState, setDetailTableBlockState] = useState<TableBlockState | null>(
     null
@@ -420,6 +431,11 @@ export default function FloorMapPage() {
   );
 
   const areaId = activeAreaId ?? availableAreas[0]?.id ?? null;
+  const activeArea = useMemo(
+    () => (areaId ? state.areas.find((area) => area.id === areaId) ?? null : null),
+    [areaId, state.areas]
+  );
+  const activeAreaBranchId = activeArea?.branchId ?? null;
 
   const selectedAreaTableCount = useMemo(() => {
     if (!areaId) {
@@ -627,6 +643,42 @@ export default function FloorMapPage() {
     }
     setQuickAssignTableId(quickAssignTableOptions[0]?.value ?? null);
   }, [quickAssignBookingId, quickAssignTableId, quickAssignTableOptions]);
+
+  const mergeCandidateTables = useMemo(() => {
+    if (!areaId) {
+      return [];
+    }
+    return state.tables
+      .filter((table) => table.areaId === areaId && table.status !== "locked")
+      .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  }, [areaId, state.tables]);
+
+  const mergeTableOptions = useMemo(
+    () =>
+      mergeCandidateTables.map((table) => ({
+        value: table.id,
+        label: `${table.name} · ${table.seats} ghế`,
+      })),
+    [mergeCandidateTables]
+  );
+
+  useEffect(() => {
+    if (!hasSupabase || !activeAreaBranchId) {
+      setMergeGroupsSummary([]);
+      return;
+    }
+    let cancelled = false;
+    void listTableMergeGroupsInSupabase(activeAreaBranchId).then((groups) => {
+      if (cancelled) {
+        return;
+      }
+      const inArea = groups.filter((group) => group.areaId === areaId);
+      setMergeGroupsSummary(inArea);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAreaBranchId, areaId, hasSupabase, state.bookings.length]);
 
   const closeDetailModal = () => {
     setDetailTable(null);
@@ -1508,6 +1560,47 @@ export default function FloorMapPage() {
     }
   };
 
+  const handleCreateMergeGroup = async () => {
+    if (!hasSupabase) {
+      notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
+      return;
+    }
+    if (!activeAreaBranchId || !areaId) {
+      notifications.show({ color: "red", message: "Vui lòng chọn khu vực trước khi gộp bàn." });
+      return;
+    }
+    const tableIds = [mergePrimaryTableId, mergeSecondaryTableId].filter(
+      (value): value is string => Boolean(value)
+    );
+    if (tableIds.length < 2 || tableIds[0] === tableIds[1]) {
+      notifications.show({ color: "red", message: "Cần chọn 2 bàn khác nhau để gộp." });
+      return;
+    }
+    setMergeSaving(true);
+    try {
+      const result = await createTableMergeGroupInSupabase({
+        branchId: activeAreaBranchId,
+        areaId,
+        mergedName: mergeName.trim() || `Cụm ${tableIds.join("-")}`,
+        tableIds,
+        createdByUserId: currentUser?.id,
+      });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        setMergeModalOpen(false);
+        setMergeName("");
+        setMergePrimaryTableId(null);
+        setMergeSecondaryTableId(null);
+        await reload();
+      }
+    } finally {
+      setMergeSaving(false);
+    }
+  };
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -2129,56 +2222,134 @@ export default function FloorMapPage() {
           <Stack gap="sm">
             <Group justify="space-between" align="center" wrap="wrap">
               <Text fw={600}>Booking chờ xếp bàn</Text>
-              <Badge variant="light" color={pendingBookings.length > 0 ? "orange" : "gray"}>
-                {pendingBookings.length}
-              </Badge>
+              <Group gap="xs">
+                <Badge variant="light" color={pendingBookings.length > 0 ? "orange" : "gray"}>
+                  {pendingBookings.length}
+                </Badge>
+                <Button
+                  size="compact-sm"
+                  variant="light"
+                  onClick={() => setMergeModalOpen(true)}
+                  disabled={!activeAreaBranchId}
+                >
+                  Gộp bàn
+                </Button>
+              </Group>
             </Group>
-            <Flex
-              direction={{ base: "column", sm: "row" }}
-              gap="sm"
-              align={{ base: "stretch", sm: "flex-end" }}
-              wrap="nowrap"
-            >
-              <Select
-                style={{ flex: "1 1 0", minWidth: 0 }}
-                label="Booking chờ"
-                placeholder="Chọn booking cần gán"
-                value={quickAssignBookingId}
-                onChange={setQuickAssignBookingId}
-                data={quickAssignBookingOptions}
-                searchable
-                clearable
-              />
-              <Select
-                style={{ flex: "1 1 0", minWidth: 0 }}
-                label="Bàn gán"
-                placeholder={
-                  selectedQuickAssignBooking
-                    ? "Chọn bàn (theo khung giờ booking)"
-                    : "Chọn booking trước"
-                }
-                value={quickAssignTableId}
-                onChange={setQuickAssignTableId}
-                data={quickAssignTableOptions}
-                searchable
-                clearable
-                disabled={!selectedQuickAssignBooking}
-              />
-              <Button
-                w={{ base: "100%", sm: "auto" }}
-                miw={{ sm: 120 }}
-                loading={quickAssignSaving}
-                disabled={!hasSupabase || isLoading || !quickAssignBookingId || !quickAssignTableId}
-                onClick={() => void handleQuickAssignPendingBooking()}
+            {mergeGroupsSummary.length > 0 ? (
+              <Group gap="xs" wrap="wrap">
+                {mergeGroupsSummary.slice(0, 6).map((group) => (
+                  <Badge key={group.id} variant="light" color="grape">
+                    {group.mergedName} · {group.totalCapacity} ghế
+                  </Badge>
+                ))}
+              </Group>
+            ) : null}
+            {isCompact ? (
+              <Stack gap="xs">
+                <Text size="xs" c="dimmed">
+                  Chọn booking rồi chạm bàn phù hợp. Ưu tiên thao tác thủ công trên sơ đồ.
+                </Text>
+                <Group gap="xs" wrap="wrap">
+                  {quickAssignBookingOptions.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      Không còn booking chờ.
+                    </Text>
+                  ) : (
+                    quickAssignBookingOptions.slice(0, 8).map((bookingOption) => (
+                      <Button
+                        key={bookingOption.value}
+                        size="sm"
+                        radius="xl"
+                        variant={quickAssignBookingId === bookingOption.value ? "filled" : "light"}
+                        onClick={() => setQuickAssignBookingId(bookingOption.value)}
+                      >
+                        {bookingOption.label}
+                      </Button>
+                    ))
+                  )}
+                </Group>
+                <Divider />
+                <Group gap="xs" wrap="wrap">
+                  {quickAssignTableOptions.length === 0 ? (
+                    <Text size="sm" c="dimmed">
+                      Chưa có bàn phù hợp với booking đã chọn.
+                    </Text>
+                  ) : (
+                    quickAssignTableOptions.slice(0, 10).map((tableOption) => (
+                      <Button
+                        key={tableOption.value}
+                        size="sm"
+                        radius="xl"
+                        variant={quickAssignTableId === tableOption.value ? "filled" : "default"}
+                        onClick={() => setQuickAssignTableId(tableOption.value)}
+                      >
+                        {tableOption.label}
+                      </Button>
+                    ))
+                  )}
+                </Group>
+                <Button
+                  fullWidth
+                  loading={quickAssignSaving}
+                  disabled={!hasSupabase || isLoading || !quickAssignBookingId || !quickAssignTableId}
+                  onClick={() => void handleQuickAssignPendingBooking()}
+                >
+                  Gán booking đã chọn
+                </Button>
+              </Stack>
+            ) : (
+              <Flex
+                direction={{ base: "column", sm: "row" }}
+                gap="sm"
+                align={{ base: "stretch", sm: "flex-end" }}
+                wrap="nowrap"
               >
-                Gán nhanh
-              </Button>
-            </Flex>
+                <Select
+                  style={{ flex: "1 1 0", minWidth: 0 }}
+                  label="Booking chờ"
+                  placeholder="Chọn booking cần gán"
+                  value={quickAssignBookingId}
+                  onChange={setQuickAssignBookingId}
+                  data={quickAssignBookingOptions}
+                  searchable
+                  clearable
+                />
+                <Select
+                  style={{ flex: "1 1 0", minWidth: 0 }}
+                  label="Bàn gán"
+                  placeholder={
+                    selectedQuickAssignBooking
+                      ? "Chọn bàn (theo khung giờ booking)"
+                      : "Chọn booking trước"
+                  }
+                  value={quickAssignTableId}
+                  onChange={setQuickAssignTableId}
+                  data={quickAssignTableOptions}
+                  searchable
+                  clearable
+                  disabled={!selectedQuickAssignBooking}
+                />
+                <Button
+                  w={{ base: "100%", sm: "auto" }}
+                  miw={{ sm: 120 }}
+                  loading={quickAssignSaving}
+                  disabled={!hasSupabase || isLoading || !quickAssignBookingId || !quickAssignTableId}
+                  onClick={() => void handleQuickAssignPendingBooking()}
+                >
+                  Gán nhanh
+                </Button>
+              </Flex>
+            )}
             <Text size="xs" c="dimmed">
               Booking tạo ở mục Đặt bàn sẽ xuất hiện tại đây với trạng thái Chờ xếp bàn. Bàn đang Giữ chỗ vẫn có thể chọn nếu khung giờ không trùng với booking đã gán trên bàn đó.
             </Text>
           </Stack>
         </PortalSectionCard>
+      ) : null}
+
+      {!isEmployee ? (
+        <BookingCalendarPanel title="Lịch booking theo sơ đồ" compactTitle="Lịch booking" showHeader={false} />
       ) : null}
 
       <PortalSectionCard>
@@ -3336,6 +3507,47 @@ export default function FloorMapPage() {
             </Stack>
           </Stack>
         ) : null}
+      </Modal>
+
+      <Modal
+        opened={mergeModalOpen}
+        onClose={() => setMergeModalOpen(false)}
+        title="Gộp bàn vật lý"
+        size="md"
+      >
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">
+            Gộp 2 bàn trong cùng khu vực thành một cụm để phục vụ booking đông người.
+          </Text>
+          <TextInput
+            label="Tên cụm bàn"
+            placeholder="Ví dụ: Cụm VIP A1-A2"
+            value={mergeName}
+            onChange={(event) => setMergeName(event.currentTarget.value)}
+          />
+          <Select
+            label="Bàn thứ nhất"
+            data={mergeTableOptions}
+            value={mergePrimaryTableId}
+            onChange={setMergePrimaryTableId}
+            searchable
+          />
+          <Select
+            label="Bàn thứ hai"
+            data={mergeTableOptions}
+            value={mergeSecondaryTableId}
+            onChange={setMergeSecondaryTableId}
+            searchable
+          />
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setMergeModalOpen(false)}>
+              Hủy
+            </Button>
+            <Button loading={mergeSaving} onClick={() => void handleCreateMergeGroup()}>
+              Tạo cụm gộp
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
 
       <Modal

@@ -61,7 +61,6 @@ import {
   updateBookingOrderInSupabase,
   updateBookingRuntimeSettingsInSupabase,
 } from "@/lib/supabase-store";
-import { supabase } from "@/lib/supabase";
 import {
   AppStateSnapshot,
   AppUser,
@@ -73,6 +72,19 @@ import {
 } from "@/lib/types";
 
 const SESSION_KEY = "ganh_hao_booking_session_v1";
+
+function userForSession(user: AppUser): AppUser {
+  return { ...user, password: "" };
+}
+
+function parseStoredSession(raw: string): AppUser | null {
+  try {
+    const parsed = JSON.parse(raw) as AppUser;
+    return userForSession(parsed);
+  } catch {
+    return null;
+  }
+}
 
 type CreateBookingInput = {
   customerName: string;
@@ -213,6 +225,16 @@ function userScopeBranchIds(user: AppUser | null, activeBranchId?: string): stri
   return [];
 }
 
+function canOperateBookingInBranch(user: AppUser | null, bookingBranchId: string): boolean {
+  if (!user) {
+    return false;
+  }
+  if (user.role === "admin" || user.role === "general_manager") {
+    return true;
+  }
+  return user.branchIds.includes(bookingBranchId);
+}
+
 export function AppContextProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppStateSnapshot>(initialState);
   const [isLoading, setIsLoading] = useState(true);
@@ -221,7 +243,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return null;
     }
     const storedSession = window.localStorage.getItem(SESSION_KEY);
-    return storedSession ? (JSON.parse(storedSession) as AppUser) : null;
+    return storedSession ? parseStoredSession(storedSession) : null;
   });
 
   const hasSupabase = isSupabaseEnabled();
@@ -273,12 +295,13 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   }, [reload]);
 
   useEffect(() => {
-    if (!hasSupabase || !supabase) {
+    if (!hasSupabase) {
       return;
     }
 
+    let eventSource: EventSource | null = null;
     let cancelled = false;
-    const interval = setInterval(() => {
+    const runReload = () => {
       if (cancelled) return;
       if (reloadInFlightRef.current) return;
       reloadInFlightRef.current = true;
@@ -286,17 +309,36 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       Promise.resolve(reload()).finally(() => {
         reloadInFlightRef.current = false;
       });
-    }, 5000);
+    };
+
+    try {
+      eventSource = new EventSource("/api/booking-events");
+      eventSource.onmessage = () => {
+        runReload();
+      };
+      eventSource.onerror = () => {
+        // Keep fallback poll active when SSE drops.
+      };
+    } catch {
+      eventSource = null;
+    }
+
+    const fallbackInterval = setInterval(() => {
+      runReload();
+    }, 120000);
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      clearInterval(fallbackInterval);
+      if (eventSource) {
+        eventSource.close();
+      }
     };
   }, [hasSupabase, reload]);
 
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
+      localStorage.setItem(SESSION_KEY, JSON.stringify(userForSession(currentUser)));
     } else {
       localStorage.removeItem(SESSION_KEY);
     }
@@ -323,7 +365,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return null;
     }
 
-    setCurrentUser(user);
+    const sessionUser = userForSession(user);
+    setCurrentUser(sessionUser);
     if (shouldPickBranchOnLogin(user.role)) {
       setBranchPickRequired();
       clearStoredActiveBranch(user.id);
@@ -337,7 +380,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         activeBranchId: user.branchIds[0],
       }));
     }
-    return user;
+    return sessionUser;
   };
 
   const logout = () => {
@@ -482,6 +525,13 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
     }
+    const booking = state.bookings.find((item) => item.id === input.bookingId);
+    if (!booking) {
+      return { ok: false, message: "Không tìm thấy booking." };
+    }
+    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+      return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
+    }
     if (!hasSupabase) {
       return { ok: false, message: "Chưa kết nối Supabase." };
     }
@@ -491,6 +541,13 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const updateBookingGuestCount = async (bookingId: string, guestCount: number) => {
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    const booking = state.bookings.find((item) => item.id === bookingId);
+    if (!booking) {
+      return { ok: false, message: "Không tìm thấy booking." };
+    }
+    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+      return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
     }
     if (!hasSupabase) {
       return { ok: false, message: "Chưa kết nối Supabase." };
@@ -526,6 +583,13 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!currentUser) {
       return { ok: false, message: "Chưa đăng nhập." };
     }
+    const booking = state.bookings.find((item) => item.id === input.bookingId);
+    if (!booking) {
+      return { ok: false, message: "Không tìm thấy booking." };
+    }
+    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+      return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
+    }
     const result = await updateBookingOrderInSupabase({
       ...input,
       editedByUserId: currentUser.id,
@@ -546,6 +610,13 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase) {
       return;
     }
+    const booking = state.bookings.find((item) => item.id === bookingId);
+    if (!booking) {
+      throw new Error("Không tìm thấy booking.");
+    }
+    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+      throw new Error("Bạn không có quyền chỉnh booking của chi nhánh này.");
+    }
     if (isEmployeeUser(currentUser)) {
       assertEmployeeMaySetBookingStatus(state, bookingId, status);
     }
@@ -558,6 +629,13 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }
     if (isEmployeeUser(currentUser)) {
       throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+    }
+    const booking = state.bookings.find((item) => item.id === bookingId);
+    if (!booking) {
+      throw new Error("Không tìm thấy booking.");
+    }
+    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+      throw new Error("Bạn không có quyền chỉnh booking của chi nhánh này.");
     }
     await checkInBookingInSupabase(bookingId);
   };

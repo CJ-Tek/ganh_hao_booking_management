@@ -1,11 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
-
-import type { Database } from "./database.types";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-export const supabase =
-  supabaseUrl && supabaseAnonKey
-    ? createClient<Database>(supabaseUrl, supabaseAnonKey)
-    : null;
+/**
+ * Browser Supabase client removed — all data access goes through `/api/store` and
+ * `/api/auth/*` using the server-side service role. Keep URL in env for feature detection.
+ */
+export const supabase = null;

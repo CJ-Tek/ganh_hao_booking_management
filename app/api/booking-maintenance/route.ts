@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runBookingMaintenanceInSupabase } from "@/lib/supabase-store";
+import { runBookingMaintenanceInSupabase } from "@/lib/supabase-store-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
