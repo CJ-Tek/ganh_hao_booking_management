@@ -90,7 +90,7 @@ function TablesPageContent() {
   const [seatsFilter, setSeatsFilter] = useState<string>("all");
   const [selectedRows, setSelectedRows] = useState<DiningTable[]>([]);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(10);
   const [sortStatus, setSortStatus] = useState<DataTableSortStatus<DiningTable>>({
     columnAccessor: "name",
     direction: "asc",
@@ -363,6 +363,20 @@ function TablesPageContent() {
 
   const tableCards = (
     <Stack gap="sm">
+      {sortedRecords.length > 0 ? (
+        <Select
+          label="Số thẻ mỗi trang"
+          size="sm"
+          data={["6", "8", "10", "12", "20"].map((value) => ({ value, label: value }))}
+          value={String(pageSize)}
+          onChange={(value) => {
+            if (!value) return;
+            setPageSize(Number(value));
+            setPage(1);
+          }}
+          allowDeselect={false}
+        />
+      ) : null}
       {pagedRecords.length === 0 ? (
         <Text c="dimmed" size="sm">
           Không có bàn phù hợp.

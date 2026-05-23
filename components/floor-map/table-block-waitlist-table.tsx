@@ -1,7 +1,7 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Badge, Button, Select, Stack, Text } from "@mantine/core";
+import { Badge, Button, Card, Group, Select, Stack, Text } from "@mantine/core";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { useCallback, useMemo, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
@@ -123,6 +123,46 @@ export function TableBlockWaitlistTable(props: {
           miw={200}
         />
       }
+      mobileCardRender={(entry) => {
+        const customer = state.customers.find((item) => item.id === entry.customerId);
+        return (
+          <Card key={entry.id} withBorder radius="md" padding="md">
+            <Stack gap="xs">
+              <Group justify="space-between" align="flex-start" wrap="nowrap">
+                <Text fw={700} lineClamp={2}>
+                  #{entry.position} · {customer?.fullName ?? "—"}
+                </Text>
+                <Badge color={waitlistStatusColor[entry.status]} variant="light" size="sm">
+                  {waitlistStatusLabel[entry.status]}
+                </Badge>
+              </Group>
+              <Text size="sm">
+                {dayjs(entry.desiredStartTime).format("HH:mm")} –{" "}
+                {dayjs(entry.desiredEndTime).format("HH:mm")}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {entry.partySize} khách
+              </Text>
+              {entry.status === "offered" && entry.offerExpiresAt ? (
+                <Text size="xs" c="dimmed">
+                  Hết hạn: {dayjs(entry.offerExpiresAt).format("HH:mm DD/MM/YYYY")}
+                </Text>
+              ) : null}
+              {!isEmployee && entry.status === "offered" ? (
+                <Button
+                  size="compact-sm"
+                  variant="filled"
+                  color="green"
+                  loading={confirmLoadingId === entry.id}
+                  onClick={() => onConfirmOffer(entry.id)}
+                >
+                  Xác nhận
+                </Button>
+              ) : null}
+            </Stack>
+          </Card>
+        );
+      }}
       columns={[
         {
           accessor: "position",

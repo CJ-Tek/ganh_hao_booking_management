@@ -1,6 +1,6 @@
 "use client";
 
-import { Group, Stack } from "@mantine/core";
+import { Button, Group, Select, Stack, Text } from "@mantine/core";
 import {
   DataTable,
   type DataTableColumn,
@@ -15,6 +15,7 @@ import {
   PORTAL_DATA_TABLE_RECORDS_PER_PAGE_LABEL,
   portalDataTableScrollAreaProps,
 } from "@/lib/portal-datatable";
+import { usePortalCompact } from "@/lib/use-portal-compact";
 
 function defaultGetRecordSearchValue<T>(record: T, columns: DataTableColumn<T>[]): string {
   const parts: string[] = [];
@@ -73,6 +74,9 @@ export type PortalDataTableProps<T> = {
   onRecordsPerPageChange?: (size: number) => void;
   recordsPerPageOptions?: readonly number[];
   defaultRecordsPerPage?: number;
+  mobileCardRender?: (record: T) => ReactNode;
+  mobileDefaultRecordsPerPage?: number;
+  mobileRecordsPerPageOptions?: readonly number[];
   withToolbar?: boolean;
   hideSearch?: boolean;
 } & Omit<
@@ -114,6 +118,9 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
     onRecordsPerPageChange,
     recordsPerPageOptions = PORTAL_DATA_TABLE_PAGE_SIZE_OPTIONS,
     defaultRecordsPerPage = PORTAL_DATA_TABLE_DEFAULT_PAGE_SIZE,
+    mobileCardRender,
+    mobileDefaultRecordsPerPage = 8,
+    mobileRecordsPerPageOptions = [6, 8, 10, 12],
     withToolbar = true,
     hideSearch = false,
     minHeight = 260,
@@ -121,6 +128,7 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
     noRecordsText = "Không có dữ liệu phù hợp.",
     ...dataTableProps
   } = props;
+  const isCompact = usePortalCompact();
 
   const [internalSearchQuery, setInternalSearchQuery] = useState("");
   const searchQuery = controlledSearchQuery ?? internalSearchQuery;
@@ -138,6 +146,8 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
   );
   const [internalPage, setInternalPage] = useState(1);
   const [internalRecordsPerPage, setInternalRecordsPerPage] = useState(defaultRecordsPerPage);
+  const [mobilePage, setMobilePage] = useState(1);
+  const [mobileRecordsPerPage, setMobileRecordsPerPage] = useState(mobileDefaultRecordsPerPage);
 
   const sortStatus = controlledSortStatus ?? internalSortStatus;
   const setSortStatus = onSortStatusChange ?? setInternalSortStatus;
@@ -164,11 +174,21 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
 
   const totalPages = Math.max(1, Math.ceil(sortedRecords.length / recordsPerPage));
   const pageSafe = Math.min(page, totalPages);
+  const totalMobilePages = Math.max(1, Math.ceil(sortedRecords.length / mobileRecordsPerPage));
+  const mobilePageSafe = Math.min(mobilePage, totalMobilePages);
 
   const pagedRecords = useMemo(
     () =>
       sortedRecords.slice((pageSafe - 1) * recordsPerPage, pageSafe * recordsPerPage),
     [pageSafe, recordsPerPage, sortedRecords]
+  );
+  const pagedMobileRecords = useMemo(
+    () =>
+      sortedRecords.slice(
+        (mobilePageSafe - 1) * mobileRecordsPerPage,
+        mobilePageSafe * mobileRecordsPerPage
+      ),
+    [mobilePageSafe, mobileRecordsPerPage, sortedRecords]
   );
 
   const showToolbar = withToolbar && (!hideSearch || filters);
@@ -185,6 +205,7 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
               onChange={(event) => {
                 setSearchQuery(event.currentTarget.value);
                 setPage(1);
+                setMobilePage(1);
               }}
               size="sm"
               style={{ flex: "1 1 12rem", minWidth: 0 }}
@@ -194,38 +215,117 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
           {filters}
         </Group>
       ) : null}
-      <DataTable
-        minHeight={minHeight}
-        scrollAreaProps={portalDataTableScrollAreaProps}
-        withTableBorder={withTableBorder}
-        records={pagedRecords}
-        columns={columns}
-        totalRecords={sortedRecords.length}
-        recordsPerPage={recordsPerPage}
-        recordsPerPageOptions={[...recordsPerPageOptions]}
-        recordsPerPageLabel={PORTAL_DATA_TABLE_RECORDS_PER_PAGE_LABEL}
-        onRecordsPerPageChange={(next) => {
-          setRecordsPerPage(next);
-          if (controlledPage === undefined) {
-            setPage(1);
-          } else {
-            onPageChange?.(1);
-          }
-        }}
-        page={pageSafe}
-        onPageChange={setPage}
-        sortStatus={sortStatus}
-        onSortStatusChange={(next) => {
-          setSortStatus(next);
-          if (controlledPage === undefined) {
-            setPage(1);
-          } else {
-            onPageChange?.(1);
-          }
-        }}
-        noRecordsText={noRecordsText}
-        {...dataTableProps}
-      />
+      {isCompact && mobileCardRender ? (
+        <Stack gap="sm">
+          {sortedRecords.length > 0 ? (
+            <Stack gap="xs">
+              <Select
+                label="Số thẻ mỗi trang"
+                size="sm"
+                data={[...mobileRecordsPerPageOptions].map((size) => ({
+                  value: String(size),
+                  label: String(size),
+                }))}
+                value={String(mobileRecordsPerPage)}
+                onChange={(value) => {
+                  if (!value) return;
+                  setMobileRecordsPerPage(Number(value));
+                  setMobilePage(1);
+                }}
+                allowDeselect={false}
+              />
+              <Group justify="center" gap="xs">
+                <Button
+                  variant="default"
+                  size="compact-sm"
+                  disabled={mobilePageSafe <= 1}
+                  onClick={() => setMobilePage((p) => Math.max(1, p - 1))}
+                >
+                  Trước
+                </Button>
+                <Text size="sm" c="dimmed">
+                  {mobilePageSafe}/{totalMobilePages}
+                </Text>
+                <Button
+                  variant="default"
+                  size="compact-sm"
+                  disabled={mobilePageSafe >= totalMobilePages}
+                  onClick={() => setMobilePage((p) => Math.min(totalMobilePages, p + 1))}
+                >
+                  Sau
+                </Button>
+              </Group>
+              <Text size="xs" c="dimmed" ta="center">
+                {sortedRecords.length} mục · trang {mobilePageSafe}/{totalMobilePages}
+              </Text>
+            </Stack>
+          ) : null}
+          {pagedMobileRecords.length === 0 ? (
+            <Text c="dimmed" size="sm">
+              {noRecordsText}
+            </Text>
+          ) : (
+            pagedMobileRecords.map((record) => mobileCardRender(record))
+          )}
+          {sortedRecords.length > 0 ? (
+            <Group justify="center" gap="xs">
+              <Button
+                variant="default"
+                size="compact-sm"
+                disabled={mobilePageSafe <= 1}
+                onClick={() => setMobilePage((p) => Math.max(1, p - 1))}
+              >
+                Trước
+              </Button>
+              <Text size="sm" c="dimmed">
+                {mobilePageSafe}/{totalMobilePages}
+              </Text>
+              <Button
+                variant="default"
+                size="compact-sm"
+                disabled={mobilePageSafe >= totalMobilePages}
+                onClick={() => setMobilePage((p) => Math.min(totalMobilePages, p + 1))}
+              >
+                Sau
+              </Button>
+            </Group>
+          ) : null}
+        </Stack>
+      ) : (
+        <DataTable
+          minHeight={minHeight}
+          scrollAreaProps={portalDataTableScrollAreaProps}
+          withTableBorder={withTableBorder}
+          records={pagedRecords}
+          columns={columns}
+          totalRecords={sortedRecords.length}
+          recordsPerPage={recordsPerPage}
+          recordsPerPageOptions={[...recordsPerPageOptions]}
+          recordsPerPageLabel={PORTAL_DATA_TABLE_RECORDS_PER_PAGE_LABEL}
+          onRecordsPerPageChange={(next) => {
+            setRecordsPerPage(next);
+            if (controlledPage === undefined) {
+              setPage(1);
+            } else {
+              onPageChange?.(1);
+            }
+          }}
+          page={pageSafe}
+          onPageChange={setPage}
+          sortStatus={sortStatus}
+          onSortStatusChange={(next) => {
+            setSortStatus(next);
+            setMobilePage(1);
+            if (controlledPage === undefined) {
+              setPage(1);
+            } else {
+              onPageChange?.(1);
+            }
+          }}
+          noRecordsText={noRecordsText}
+          {...dataTableProps}
+        />
+      )}
     </Stack>
   );
 }

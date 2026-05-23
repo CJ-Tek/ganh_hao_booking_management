@@ -8,6 +8,7 @@ import {
   Grid,
   Group,
   RingProgress,
+  Select,
   SimpleGrid,
   Stack,
   Tabs,
@@ -19,6 +20,7 @@ import { useCallback, useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
+import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
 import {
@@ -46,7 +48,8 @@ export default function DashboardPage() {
     }
   }, [isEmployee, router]);
   const [mobilePage, setMobilePage] = useState(1);
-  const mobilePageSize = 8;
+  const [mobilePageSize, setMobilePageSize] = useState(8);
+  const [mobileQuery, setMobileQuery] = useState("");
 
   const branchBookings = useMemo(
     () => state.bookings.filter((item) => filteredBranchIds.includes(item.branchId)),
@@ -70,12 +73,35 @@ export default function DashboardPage() {
     locked: branchTables.filter((table) => table.status === "locked").length,
   };
 
+  const mobileFilteredBookings = useMemo(() => {
+    const q = mobileQuery.trim().toLowerCase();
+    if (!q) return branchBookings;
+    return branchBookings.filter((booking) => {
+      const customer = state.customers.find((item) => item.id === booking.customerId);
+      const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
+      const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
+      const creator = state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
+      return [
+        customer?.fullName ?? "",
+        displayCustomerPhone(customer?.phone),
+        area,
+        table,
+        creator,
+        bookingStatusLabel[booking.status],
+        stripUnknownGuestTag(booking.note) ?? "",
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [branchBookings, mobileQuery, state.areas, state.customers, state.tables, state.users]);
+
   const mobileSortedBookings = useMemo(
     () =>
-      [...branchBookings].sort(
+      [...mobileFilteredBookings].sort(
         (a, b) => dayjs(b.bookingAt).valueOf() - dayjs(a.bookingAt).valueOf()
       ),
-    [branchBookings]
+    [mobileFilteredBookings]
   );
 
   const mobileTotalPages = Math.max(1, Math.ceil(mobileSortedBookings.length / mobilePageSize));
@@ -227,6 +253,30 @@ export default function DashboardPage() {
       </Text>
       {isCompact ? (
         <Stack gap="sm">
+          <TextInputWithVoice
+            placeholder="Tìm khách, SĐT, bàn, người tạo..."
+            value={mobileQuery}
+            onChange={(event) => {
+              setMobileQuery(event.currentTarget.value);
+              setMobilePage(1);
+            }}
+            size="md"
+            voiceIconSize="md"
+          />
+          {mobileSortedBookings.length > 0 ? (
+            <Select
+              label="Số thẻ mỗi trang"
+              size="sm"
+              data={["6", "8", "10", "12", "20"].map((value) => ({ value, label: value }))}
+              value={String(mobilePageSize)}
+              onChange={(value) => {
+                if (!value) return;
+                setMobilePageSize(Number(value));
+                setMobilePage(1);
+              }}
+              allowDeselect={false}
+            />
+          ) : null}
           {pagedMobileBookings.length === 0 ? (
             <Text c="dimmed" size="sm">
               Chưa có booking nào.

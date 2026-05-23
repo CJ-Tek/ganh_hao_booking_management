@@ -1,7 +1,7 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Badge, Select, Text } from "@mantine/core";
+import { Badge, Card, Group, Select, Stack, Text } from "@mantine/core";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { useCallback, useMemo, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
@@ -110,6 +110,30 @@ export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) 
           miw={168}
         />
       }
+      mobileCardRender={(booking) => {
+        const customer = state.customers.find((item) => item.id === booking.customerId);
+        return (
+          <Card key={booking.id} withBorder radius="md" padding="md">
+            <Stack gap="xs">
+              <Group justify="space-between" align="flex-start" wrap="nowrap">
+                <Text fw={700} lineClamp={2}>
+                  {customer?.fullName ?? "—"}
+                </Text>
+                <Badge color={bookingStatusColor[booking.status]} variant="light" size="sm">
+                  {bookingStatusLabel[booking.status]}
+                </Badge>
+              </Group>
+              <Text size="sm">
+                {formatScheduleVisitDate(booking.startTime ?? booking.bookingAt)} ·{" "}
+                {dayjs(booking.startTime).format("HH:mm")} – {dayjs(booking.endTime).format("HH:mm")}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {booking.guestCount} khách
+              </Text>
+            </Stack>
+          </Card>
+        );
+      }}
       columns={[
         {
           accessor: "visitDate",

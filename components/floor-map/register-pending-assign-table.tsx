@@ -1,7 +1,7 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Alert, Badge, Group, Stack, Text } from "@mantine/core";
+import { Alert, Badge, Card, Checkbox, Group, Stack, Text } from "@mantine/core";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { useCallback, useMemo } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
@@ -111,6 +111,10 @@ export function RegisterPendingAssignTable(props: {
     () => new Set(assignPlan.assignable.map((booking) => booking.id)),
     [assignPlan.assignable]
   );
+  const selectedIds = useMemo(
+    () => new Set(selectedBookings.map((booking) => booking.id)),
+    [selectedBookings]
+  );
 
   return (
     <Stack gap="xs">
@@ -177,6 +181,78 @@ export function RegisterPendingAssignTable(props: {
           if (!disabled && onNavigateToBookingList) {
             onNavigateToBookingList(record);
           }
+        }}
+        mobileCardRender={(booking) => {
+          const customer = state.customers.find((item) => item.id === booking.customerId);
+          const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
+          const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
+          const isSelected = selectedIds.has(booking.id);
+          const willAssign = isSelected && assignableIds.has(booking.id);
+          const willSkip = isSelected && !assignableIds.has(booking.id);
+          return (
+            <Card
+              key={booking.id}
+              withBorder
+              radius="md"
+              padding="md"
+              style={
+                willAssign
+                  ? { backgroundColor: "var(--mantine-color-brand-light)" }
+                  : willSkip
+                    ? { backgroundColor: "var(--mantine-color-yellow-light)" }
+                    : undefined
+              }
+            >
+              <Stack gap="xs">
+                <Group justify="space-between" align="flex-start" wrap="nowrap">
+                  <Checkbox
+                    checked={isSelected}
+                    disabled={disabled}
+                    onChange={(event) => {
+                      if (disabled) return;
+                      const checked = event.currentTarget.checked;
+                      const next = checked
+                        ? [...selectedBookings, booking]
+                        : selectedBookings.filter((item) => item.id !== booking.id);
+                      onSelectedBookingsChange(next);
+                    }}
+                    label={
+                      <Stack gap={2}>
+                        <Text fw={700}>{customer?.fullName ?? "Khách vãng lai"}</Text>
+                        <Text size="xs" c="dimmed">
+                          {displayCustomerPhone(customer?.phone)}
+                        </Text>
+                      </Stack>
+                    }
+                  />
+                  <Badge color={bookingStatusColor[booking.status]} variant="light" size="sm">
+                    {bookingStatusLabel[booking.status]}
+                  </Badge>
+                </Group>
+                <Text size="sm">{dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}</Text>
+                <Text size="sm" c="dimmed">
+                  {booking.areaId && booking.tableId ? `${area} · ${table}` : "Chưa gán"}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {booking.guestCount} khách
+                </Text>
+                {onNavigateToBookingList ? (
+                  <Text
+                    size="xs"
+                    c={disabled ? "dimmed" : "blue"}
+                    style={{ cursor: disabled ? "default" : "pointer" }}
+                    onClick={() => {
+                      if (!disabled) {
+                        onNavigateToBookingList(booking);
+                      }
+                    }}
+                  >
+                    Mở Danh sách booking
+                  </Text>
+                ) : null}
+              </Stack>
+            </Card>
+          );
         }}
         rowStyle={(record) => {
           const isSelected = selectedBookings.some((booking) => booking.id === record.id);

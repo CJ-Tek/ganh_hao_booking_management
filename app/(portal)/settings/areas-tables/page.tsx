@@ -51,7 +51,7 @@ export default function AreasTablesSettingsPage() {
   const [capacity, setCapacity] = useState<number>(30);
   const [search, setSearch] = useState("");
   const [mobilePage, setMobilePage] = useState(1);
-  const mobilePageSize = 10;
+  const [mobilePageSize, setMobilePageSize] = useState(10);
 
   const [editOpen, setEditOpen] = useState(false);
   const [editingArea, setEditingArea] = useState<AreaRow | null>(null);
@@ -269,6 +269,20 @@ export default function AreasTablesSettingsPage() {
               size="md"
               voiceIconSize="md"
             />
+            {mobileFilteredAreas.length > 0 ? (
+              <Select
+                label="Số thẻ mỗi trang"
+                size="sm"
+                data={["6", "8", "10", "12", "20"].map((value) => ({ value, label: value }))}
+                value={String(mobilePageSize)}
+                onChange={(value) => {
+                  if (!value) return;
+                  setMobilePageSize(Number(value));
+                  setMobilePage(1);
+                }}
+                allowDeselect={false}
+              />
+            ) : null}
             {pagedMobileAreas.length === 0 ? (
               <Text c="dimmed" size="sm">
                 Không có khu vực phù hợp.

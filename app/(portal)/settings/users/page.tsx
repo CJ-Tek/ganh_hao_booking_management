@@ -4,6 +4,7 @@ import {
   ActionIcon,
   Badge,
   Button,
+  Card,
   Group,
   Modal,
   MultiSelect,
@@ -268,6 +269,51 @@ export default function UserManagementPage() {
             searchPlaceholder="Tên đăng nhập, họ tên, vai trò..."
             minHeight={240}
             rowStyle={(u) => bookingRowBusyStyle(isUserRowBusy(u.id))}
+            mobileCardRender={(u) => (
+              <Card key={u.id} withBorder radius="md" padding="md">
+                <Stack gap="xs">
+                  <Group justify="space-between" align="flex-start" wrap="nowrap">
+                    <Stack gap={2} style={{ minWidth: 0 }}>
+                      <Text fw={700} lineClamp={2}>
+                        {u.fullName}
+                      </Text>
+                      <Text size="sm" c="dimmed">
+                        @{u.username}
+                      </Text>
+                    </Stack>
+                    <Badge>{roleLabel[u.role]}</Badge>
+                  </Group>
+                  <Text size="xs" c="dimmed">
+                    {u.branchIds
+                      .map((id) => state.branches.find((branch) => branch.id === id)?.name ?? id)
+                      .join(", ")}
+                  </Text>
+                  <Group gap={6} justify="flex-end" wrap="nowrap">
+                    <ActionIcon
+                      variant="subtle"
+                      aria-label="Sửa"
+                      disabled={
+                        u.id === currentUser?.id || gmCannotManageUser(u) || isUserRowBusy(u.id)
+                      }
+                      onClick={() => openEdit(u)}
+                    >
+                      <Pencil size={16} />
+                    </ActionIcon>
+                    <ActionIcon
+                      variant="subtle"
+                      color="red"
+                      aria-label="Xóa"
+                      disabled={
+                        u.id === currentUser?.id || gmCannotManageUser(u) || isUserRowBusy(u.id)
+                      }
+                      onClick={() => setDeleteTarget(u)}
+                    >
+                      <Trash2 size={16} />
+                    </ActionIcon>
+                  </Group>
+                </Stack>
+              </Card>
+            )}
             columns={[
               { accessor: "username", title: "Tài khoản", sortable: true },
               { accessor: "fullName", title: "Họ tên", sortable: true },

@@ -1,7 +1,7 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Badge, Select, Stack, Text } from "@mantine/core";
+import { Badge, Card, Group, Select, Stack, Text } from "@mantine/core";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { useAppContext } from "@/contexts/app-context";
@@ -77,6 +77,44 @@ export function BookingDayBookingsTable(props: {
           miw={168}
         />
       }
+      mobileCardRender={(booking) => {
+        const customer = state.customers.find((item) => item.id === booking.customerId);
+        const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
+        const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
+        return (
+          <Card
+            key={booking.id}
+            withBorder
+            radius="md"
+            padding="md"
+            onClick={() => onRowClick(booking)}
+            style={{ cursor: "pointer" }}
+          >
+            <Stack gap="xs">
+              <Group justify="space-between" align="flex-start" wrap="nowrap">
+                <Text fw={700} lineClamp={2}>
+                  {customer?.fullName ?? "—"}
+                </Text>
+                <Badge color={bookingStatusColor[booking.status]} variant="light">
+                  {bookingStatusLabel[booking.status]}
+                </Badge>
+              </Group>
+              <Text size="sm">{dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}</Text>
+              {booking.checkedInAt ? (
+                <Text size="xs" c="dimmed">
+                  Check-in: {dayjs(booking.checkedInAt).format("HH:mm · DD/MM/YYYY")}
+                </Text>
+              ) : null}
+              <Text size="sm" c="dimmed">
+                {booking.areaId && booking.tableId ? `${area} · Bàn ${table}` : "Chờ xếp bàn"}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {isGuestCountSpecified(booking) ? `${booking.guestCount} khách` : "Chưa rõ số khách"}
+              </Text>
+            </Stack>
+          </Card>
+        );
+      }}
       columns={[
         {
           accessor: "bookingAt",

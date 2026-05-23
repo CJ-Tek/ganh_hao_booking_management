@@ -1979,9 +1979,15 @@ function BookingsPageContent() {
           <Text c="dimmed" size="sm">
             Chưa có booking hoàn thành.
           </Text>
-        ) : isCompact ? (
-          <Stack gap="sm">
-            {completedBookings.map((booking) => {
+        ) : (
+          <PortalDataTable<Booking>
+            records={completedBookings}
+            getRecordSearchValue={getListBookingSearchValue}
+            sortRecords={sortListBookings}
+            defaultSort={{ columnAccessor: "bookingAt", direction: "desc" }}
+            searchPlaceholder="Khách, SĐT, khu, bàn, ghi chú..."
+            minHeight={220}
+            mobileCardRender={(booking) => {
               const customer = state.customers.find((item) => item.id === booking.customerId);
               const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
               const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
@@ -2003,15 +2009,7 @@ function BookingsPageContent() {
                   </Stack>
                 </Card>
               );
-            })}
-          </Stack>
-        ) : (
-          <PortalDataTable<Booking>
-            records={completedBookings}
-            hideSearch
-            withToolbar={false}
-            defaultSort={{ columnAccessor: "bookingAt", direction: "desc" }}
-            minHeight={220}
+            }}
             columns={[
               {
                 accessor: "bookingAt",

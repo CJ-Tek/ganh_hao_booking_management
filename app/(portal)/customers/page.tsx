@@ -7,6 +7,7 @@ import {
   Card,
   Drawer,
   Group,
+  Select,
   SegmentedControl,
   Stack,
   Text,
@@ -23,7 +24,6 @@ import { usePortalCompact } from "@/lib/use-portal-compact";
 import { displayCustomerPhone } from "@/lib/booking-meta";
 import { Customer } from "@/lib/types";
 
-const LIST_PAGE_SIZE = 10;
 const DRAWER_BOOKING_PAGE_SIZE = 8;
 
 type CustomerFilter = "all" | "has_booking" | "no_booking";
@@ -35,6 +35,7 @@ export default function CustomersPage() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<CustomerFilter>("all");
   const [listPage, setListPage] = useState(1);
+  const [mobileListPageSize, setMobileListPageSize] = useState(10);
   const [drawerBookingPage, setDrawerBookingPage] = useState(1);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null);
   const [selectedCustomers, setSelectedCustomers] = useState<CustomerRow[]>([]);
@@ -131,15 +132,15 @@ export default function CustomersPage() {
     []
   );
 
-  const listTotalPages = Math.max(1, Math.ceil(customerStats.length / LIST_PAGE_SIZE));
+  const listTotalPages = Math.max(1, Math.ceil(customerStats.length / mobileListPageSize));
   const listPageSafe = Math.min(listPage, listTotalPages);
   const pagedCustomerStats = useMemo(
     () =>
       customerStats.slice(
-        (listPageSafe - 1) * LIST_PAGE_SIZE,
-        listPageSafe * LIST_PAGE_SIZE
+        (listPageSafe - 1) * mobileListPageSize,
+        listPageSafe * mobileListPageSize
       ),
-    [customerStats, listPageSafe]
+    [customerStats, listPageSafe, mobileListPageSize]
   );
 
   const customerBookings = useMemo(() => {
@@ -241,6 +242,18 @@ export default function CustomersPage() {
             </Text>
           ) : (
             <>
+              <Select
+                label="Số thẻ mỗi trang"
+                size="sm"
+                data={["6", "8", "10", "12", "20"].map((value) => ({ value, label: value }))}
+                value={String(mobileListPageSize)}
+                onChange={(value) => {
+                  if (!value) return;
+                  setMobileListPageSize(Number(value));
+                  setListPage(1);
+                }}
+                allowDeselect={false}
+              />
               {pagedCustomerStats.map((row) => (
                 <Card
                   key={row.id}
@@ -275,7 +288,7 @@ export default function CustomersPage() {
                   </Text>
                 </Card>
               ))}
-              {customerStats.length > LIST_PAGE_SIZE ? (
+              {customerStats.length > mobileListPageSize ? (
                 <Group justify="center" gap="xs" mt="xs" wrap="wrap">
                   <Button
                     variant="default"
