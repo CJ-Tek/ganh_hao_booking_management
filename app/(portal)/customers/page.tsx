@@ -11,14 +11,14 @@ import {
   Stack,
   Text,
 } from "@mantine/core";
-import { DataTable, type DataTableSortStatus } from "mantine-datatable";
+import { type DataTableSortStatus } from "mantine-datatable";
 import { Phone } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
-import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { displayCustomerPhone } from "@/lib/booking-meta";
 import { Customer } from "@/lib/types";
@@ -38,10 +38,6 @@ export default function CustomersPage() {
   const [drawerBookingPage, setDrawerBookingPage] = useState(1);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerRow | null>(null);
   const [selectedCustomers, setSelectedCustomers] = useState<CustomerRow[]>([]);
-  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<CustomerRow>>({
-    columnAccessor: "latestBooking",
-    direction: "desc",
-  });
 
   const customerStats = useMemo(
     () =>
@@ -76,32 +72,64 @@ export default function CustomersPage() {
     [filteredBranchIds, filter, query, state.bookings, state.customers]
   );
 
-  const sortedCustomerStats = useMemo(() => {
-    const dir = sortStatus.direction === "asc" ? 1 : -1;
-    const accessor = sortStatus.columnAccessor;
-    const next = [...customerStats];
-    next.sort((a, b) => {
-      if (accessor === "fullName") {
-        return dir * a.fullName.localeCompare(b.fullName, "vi");
-      }
-      if (accessor === "phone") {
-        return (
-          dir *
-          displayCustomerPhone(a.phone).localeCompare(displayCustomerPhone(b.phone), "vi")
-        );
-      }
-      if (accessor === "bookingCount") {
-        return dir * (a.bookingCount - b.bookingCount);
-      }
-      if (accessor === "latestBooking") {
-        const av = a.latestBooking ? dayjs(a.latestBooking).valueOf() : 0;
-        const bv = b.latestBooking ? dayjs(b.latestBooking).valueOf() : 0;
-        return dir * (av - bv);
-      }
-      return 0;
-    });
-    return next;
-  }, [customerStats, sortStatus.columnAccessor, sortStatus.direction]);
+  const desktopCustomerRows = useMemo(
+    () =>
+      state.customers
+        .map((customer) => {
+          const bookings = state.bookings
+            .filter(
+              (booking) =>
+                booking.customerId === customer.id && filteredBranchIds.includes(booking.branchId)
+            )
+            .sort((a, b) => dayjs(b.bookingAt).valueOf() - dayjs(a.bookingAt).valueOf());
+          return {
+            ...customer,
+            bookingCount: bookings.length,
+            latestBooking: bookings[0]?.bookingAt,
+          };
+        })
+        .filter((item) => {
+          if (filter === "has_booking") return item.bookingCount > 0;
+          if (filter === "no_booking") return item.bookingCount === 0;
+          return true;
+        }),
+    [filter, filteredBranchIds, state.bookings, state.customers]
+  );
+
+  const getCustomerSearchValue = useCallback((row: CustomerRow) => {
+    const rawPhone = (row.phone ?? "").toLowerCase();
+    return [row.fullName, rawPhone, displayCustomerPhone(row.phone)]
+      .join(" ")
+      .toLowerCase();
+  }, []);
+
+  const sortCustomerRows = useCallback(
+    (records: CustomerRow[], sortStatus: DataTableSortStatus<CustomerRow>) => {
+      const dir = sortStatus.direction === "asc" ? 1 : -1;
+      const accessor = sortStatus.columnAccessor;
+      return [...records].sort((a, b) => {
+        if (accessor === "fullName") {
+          return dir * a.fullName.localeCompare(b.fullName, "vi");
+        }
+        if (accessor === "phone") {
+          return (
+            dir *
+            displayCustomerPhone(a.phone).localeCompare(displayCustomerPhone(b.phone), "vi")
+          );
+        }
+        if (accessor === "bookingCount") {
+          return dir * (a.bookingCount - b.bookingCount);
+        }
+        if (accessor === "latestBooking") {
+          const av = a.latestBooking ? dayjs(a.latestBooking).valueOf() : 0;
+          const bv = b.latestBooking ? dayjs(b.latestBooking).valueOf() : 0;
+          return dir * (av - bv);
+        }
+        return 0;
+      });
+    },
+    []
+  );
 
   const listTotalPages = Math.max(1, Math.ceil(customerStats.length / LIST_PAGE_SIZE));
   const listPageSafe = Math.min(listPage, listTotalPages);
@@ -279,12 +307,16 @@ export default function CustomersPage() {
         </Stack>
       ) : (
         <PortalSectionCard>
-          <DataTable
-            minHeight={260}
-            scrollAreaProps={portalDataTableScrollAreaProps}
-            withTableBorder
+          <PortalDataTable<CustomerRow>
+            records={desktopCustomerRows}
+            searchQuery={query}
+            onSearchQueryChange={setQuery}
+            hideSearch
+            withToolbar={false}
+            getRecordSearchValue={getCustomerSearchValue}
+            sortRecords={sortCustomerRows}
+            defaultSort={{ columnAccessor: "latestBooking", direction: "desc" }}
             idAccessor="id"
-            records={sortedCustomerStats}
             noRecordsText="Không tìm thấy khách hàng phù hợp."
             onRowClick={({ record }) => {
               setDrawerBookingPage(1);
@@ -292,8 +324,6 @@ export default function CustomersPage() {
             }}
             selectedRecords={selectedCustomers}
             onSelectedRecordsChange={setSelectedCustomers}
-            sortStatus={sortStatus}
-            onSortStatusChange={setSortStatus}
             columns={[
               { accessor: "fullName", title: "Khách hàng", sortable: true },
               {

@@ -24,8 +24,9 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { DateTimePicker } from "@mantine/dates";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
-import { DataTable, type DataTableSortStatus } from "mantine-datatable";
+import { type DataTableSortStatus } from "mantine-datatable";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { PortalDataTable } from "@/components/portal-data-table";
 import {
   PortalPageTitle,
   PortalSectionCard,
@@ -58,7 +59,6 @@ import {
   isSyntheticPhoneValue,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
-import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking, type BookingStatus } from "@/lib/types";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
@@ -924,56 +924,86 @@ function BookingsPageContent() {
     });
   }, [pipelineFilteredBookings, searchQuery, state.areas, state.customers, state.tables]);
 
-  const sortedBookings = useMemo(() => {
-    const getValue = (booking: Booking) => {
-      const acc = sortStatus.columnAccessor as string;
-      if (acc === "customerId") {
-        return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
-      }
-      if (acc === "guestCount") {
-        return booking.guestCount;
-      }
-      if (acc === "areaTable") {
-        const areaName = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
-        const tableName = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
-        return `${areaName} ${tableName}`;
-      }
-      if (acc === "note") {
-        return stripUnknownGuestTag(booking.note) ?? "";
-      }
-      if (acc === "createdByUserId") {
-        return state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
-      }
-      if (acc === "lastEditedByUserId") {
-        return bookingLastEditorName(booking, state.users);
-      }
-      if (acc === "lastEditedAt") {
-        return booking.lastEditedAt ? dayjs(booking.lastEditedAt).valueOf() : 0;
-      }
-      if (acc === "status") {
-        return bookingStatusLabel[booking.status];
-      }
-      if (acc === "checkedInAt") {
-        return booking.checkedInAt ? dayjs(booking.checkedInAt).valueOf() : 0;
-      }
-      return dayjs(booking.bookingAt).valueOf();
-    };
-    return [...searchedBookings].sort((a, b) => {
-      const left = getValue(a);
-      const right = getValue(b);
-      const compare = typeof left === "number" && typeof right === "number"
-        ? left - right
-        : String(left).localeCompare(String(right), "vi");
-      return sortStatus.direction === "asc" ? compare : -compare;
-    });
-  }, [
-    searchedBookings,
-    sortStatus,
-    state.areas,
-    state.customers,
-    state.tables,
-    state.users,
-  ]);
+  const getListBookingSearchValue = useCallback(
+    (booking: Booking) => {
+      const customer = state.customers.find((item) => item.id === booking.customerId);
+      const area = state.areas.find((item) => item.id === booking.areaId);
+      const table = state.tables.find((item) => item.id === booking.tableId);
+      const noteText = stripUnknownGuestTag(booking.note) ?? "";
+      return [
+        customer?.fullName ?? "",
+        displayCustomerPhone(customer?.phone),
+        dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+        dayjs(booking.bookingAt).format("DD/MM/YYYY HH:mm"),
+        booking.checkedInAt ? dayjs(booking.checkedInAt).format("HH:mm DD/MM/YYYY") : "",
+        booking.checkedInAt ? dayjs(booking.checkedInAt).format("DD/MM/YYYY HH:mm") : "",
+        "check-in",
+        "checkin",
+        "giờ check-in",
+        String(booking.guestCount),
+        area?.name ?? "",
+        table?.name ?? "",
+        bookingStatusLabel[booking.status],
+        noteText,
+      ]
+        .join(" ")
+        .toLowerCase();
+    },
+    [state.areas, state.customers, state.tables]
+  );
+
+  const sortListBookings = useCallback(
+    (records: Booking[], sortStatus: DataTableSortStatus<Booking>) => {
+      const getValue = (booking: Booking) => {
+        const acc = sortStatus.columnAccessor as string;
+        if (acc === "customerId") {
+          return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
+        }
+        if (acc === "guestCount") {
+          return booking.guestCount;
+        }
+        if (acc === "areaTable") {
+          const areaName = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
+          const tableName = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
+          return `${areaName} ${tableName}`;
+        }
+        if (acc === "note") {
+          return stripUnknownGuestTag(booking.note) ?? "";
+        }
+        if (acc === "createdByUserId") {
+          return state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
+        }
+        if (acc === "lastEditedByUserId") {
+          return bookingLastEditorName(booking, state.users);
+        }
+        if (acc === "lastEditedAt") {
+          return booking.lastEditedAt ? dayjs(booking.lastEditedAt).valueOf() : 0;
+        }
+        if (acc === "status") {
+          return bookingStatusLabel[booking.status];
+        }
+        if (acc === "checkedInAt") {
+          return booking.checkedInAt ? dayjs(booking.checkedInAt).valueOf() : 0;
+        }
+        return dayjs(booking.bookingAt).valueOf();
+      };
+      return [...records].sort((a, b) => {
+        const left = getValue(a);
+        const right = getValue(b);
+        const compare =
+          typeof left === "number" && typeof right === "number"
+            ? left - right
+            : String(left).localeCompare(String(right), "vi");
+        return sortStatus.direction === "asc" ? compare : -compare;
+      });
+    },
+    [state.areas, state.customers, state.tables, state.users]
+  );
+
+  const sortedBookings = useMemo(
+    () => sortListBookings(searchedBookings, sortStatus),
+    [searchedBookings, sortListBookings, sortStatus]
+  );
 
   const completedBookings = useMemo(
     () =>
@@ -1118,53 +1148,93 @@ function BookingsPageContent() {
     todaySearchQuery,
   ]);
 
-  const todaySortedBookings = useMemo(() => {
-    const getValue = (booking: Booking) => {
-      const acc = todaySortStatus.columnAccessor as string;
-      if (acc === "customerId") {
-        return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
-      }
-      if (acc === "guestCount") {
-        return booking.guestCount;
-      }
-      if (acc === "guestType") {
-        return getTodayGuestTypeLabel(booking);
-      }
-      if (acc === "areaTable") {
-        const areaName = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
-        const tableName = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
-        return formatTodayBookingAreaTable(booking, areaName, tableName);
-      }
-      if (acc === "note") {
-        return stripUnknownGuestTag(booking.note) ?? "";
-      }
-      if (acc === "createdByUserId") {
-        return state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
-      }
-      if (acc === "status") {
-        return getTodayReceptionStatusLabel(booking);
-      }
-      return dayjs(booking.bookingAt).valueOf();
-    };
-    return [...todaySearchedBookings].sort((a, b) => {
-      const left = getValue(a);
-      const right = getValue(b);
-      const compare =
-        typeof left === "number" && typeof right === "number"
-          ? left - right
-          : String(left).localeCompare(String(right), "vi");
-      return todaySortStatus.direction === "asc" ? compare : -compare;
-    });
-  }, [
-    getTodayGuestTypeLabel,
-    getTodayReceptionStatusLabel,
-    state.areas,
-    state.customers,
-    state.tables,
-    state.users,
-    todaySearchedBookings,
-    todaySortStatus,
-  ]);
+  const getTodayBookingSearchValue = useCallback(
+    (booking: Booking) => {
+      const customer = state.customers.find((item) => item.id === booking.customerId);
+      const area = state.areas.find((item) => item.id === booking.areaId);
+      const table = state.tables.find((item) => item.id === booking.tableId);
+      const noteText = stripUnknownGuestTag(booking.note) ?? "";
+      return [
+        customer?.fullName ?? "",
+        displayCustomerPhone(customer?.phone),
+        dayjs(booking.bookingAt).format("HH:mm"),
+        dayjs(booking.bookingAt).format("DD/MM/YYYY HH:mm"),
+        String(booking.guestCount),
+        area?.name ?? "",
+        table?.name ?? "",
+        formatTodayBookingAreaTable(booking, area?.name, table?.name),
+        getTodayGuestTypeLabel(booking),
+        getTodayReceptionStatusLabel(booking),
+        bookingStatusLabel[booking.status],
+        state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "",
+        noteText,
+      ]
+        .join(" ")
+        .toLowerCase();
+    },
+    [
+      getTodayGuestTypeLabel,
+      getTodayReceptionStatusLabel,
+      state.areas,
+      state.customers,
+      state.tables,
+      state.users,
+    ]
+  );
+
+  const sortTodayBookings = useCallback(
+    (records: Booking[], sortStatus: DataTableSortStatus<Booking>) => {
+      const getValue = (booking: Booking) => {
+        const acc = sortStatus.columnAccessor as string;
+        if (acc === "customerId") {
+          return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
+        }
+        if (acc === "guestCount") {
+          return booking.guestCount;
+        }
+        if (acc === "guestType") {
+          return getTodayGuestTypeLabel(booking);
+        }
+        if (acc === "areaTable") {
+          const areaName = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
+          const tableName = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
+          return formatTodayBookingAreaTable(booking, areaName, tableName);
+        }
+        if (acc === "note") {
+          return stripUnknownGuestTag(booking.note) ?? "";
+        }
+        if (acc === "createdByUserId") {
+          return state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
+        }
+        if (acc === "status") {
+          return getTodayReceptionStatusLabel(booking);
+        }
+        return dayjs(booking.bookingAt).valueOf();
+      };
+      return [...records].sort((a, b) => {
+        const left = getValue(a);
+        const right = getValue(b);
+        const compare =
+          typeof left === "number" && typeof right === "number"
+            ? left - right
+            : String(left).localeCompare(String(right), "vi");
+        return sortStatus.direction === "asc" ? compare : -compare;
+      });
+    },
+    [
+      getTodayGuestTypeLabel,
+      getTodayReceptionStatusLabel,
+      state.areas,
+      state.customers,
+      state.tables,
+      state.users,
+    ]
+  );
+
+  const todaySortedBookings = useMemo(
+    () => sortTodayBookings(todaySearchedBookings, todaySortStatus),
+    [sortTodayBookings, todaySearchedBookings, todaySortStatus]
+  );
 
   const totalTodayListPages = useMemo(
     () => Math.max(1, Math.ceil(todaySortedBookings.length / todayPageSize)),
@@ -1514,70 +1584,62 @@ function BookingsPageContent() {
     <PortalSectionCard>
       <Stack gap="sm">
         <Text fw={600}>Danh sách booking</Text>
-        <Group align="flex-end" gap="sm" wrap="nowrap" justify="flex-start">
-          <TextInputWithVoice
-            placeholder={bookingsSearchPlaceholder}
-            value={searchQuery}
-            onChange={(event) => {
-              setSearchQuery(event.currentTarget.value);
-              setPage(1);
-            }}
-            size="sm"
-            style={{ flex: "1 1 12rem", minWidth: 0 }}
-            voiceIconSize="sm"
-          />
-          <Select
-            label="Trạng thái"
-            placeholder="Tất cả"
-            clearable
-            data={bookingStatusFilterOptions}
-            value={listStatusFilter}
-            onChange={(value) => {
-              setListStatusFilter((value as BookingStatus | null) ?? null);
-              setPage(1);
-            }}
-            size="sm"
-            w={168}
-            miw={168}
-          />
-          <Select
-            label="Bàn"
-            data={tableAssignFilterOptions}
-            value={listTableAssignFilter}
-            onChange={(value) => {
-              setListTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
-              setPage(1);
-            }}
-            size="sm"
-            w={168}
-            miw={168}
-          />
-        </Group>
       </Stack>
-      <div style={{ height: 12 }} />
-      <DataTable
-        minHeight={260}
-        scrollAreaProps={portalDataTableScrollAreaProps}
-        withTableBorder
-        records={pagedBookings}
-        totalRecords={sortedBookings.length}
-        recordsPerPage={desktopBookingsPageSize}
-        recordsPerPageOptions={[...DESKTOP_BOOKINGS_PAGE_SIZE_OPTIONS]}
-        recordsPerPageLabel="Số dòng mỗi trang"
-        onRecordsPerPageChange={(n) => {
-          setDesktopBookingsPageSize(n);
+      <PortalDataTable<Booking>
+        records={pipelineFilteredBookings}
+        searchQuery={searchQuery}
+        onSearchQueryChange={(value) => {
+          setSearchQuery(value);
           setPage(1);
         }}
-        page={Math.min(
-          page,
-          Math.max(1, Math.ceil(sortedBookings.length / desktopBookingsPageSize))
-        )}
-        onPageChange={setPage}
+        getRecordSearchValue={getListBookingSearchValue}
+        sortRecords={sortListBookings}
         sortStatus={sortStatus}
         onSortStatusChange={(next) => {
           setSortStatus(next);
           setPage(1);
         }}
+        page={page}
+        onPageChange={setPage}
+        recordsPerPage={desktopBookingsPageSize}
+        onRecordsPerPageChange={(size) => {
+          setDesktopBookingsPageSize(size);
+          setPage(1);
+        }}
+        recordsPerPageOptions={[...DESKTOP_BOOKINGS_PAGE_SIZE_OPTIONS]}
+        defaultSort={{ columnAccessor: "bookingAt", direction: "desc" }}
+        searchPlaceholder={bookingsSearchPlaceholder}
+        filters={
+          <>
+            <Select
+              label="Trạng thái"
+              placeholder="Tất cả"
+              clearable
+              data={bookingStatusFilterOptions}
+              value={listStatusFilter}
+              onChange={(value) => {
+                setListStatusFilter((value as BookingStatus | null) ?? null);
+                setPage(1);
+              }}
+              size="sm"
+              w={168}
+              miw={168}
+            />
+            <Select
+              label="Bàn"
+              data={tableAssignFilterOptions}
+              value={listTableAssignFilter}
+              onChange={(value) => {
+                setListTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
+                setPage(1);
+              }}
+              size="sm"
+              w={168}
+              miw={168}
+            />
+          </>
+        }
+        minHeight={260}
         rowStyle={(booking) =>
           booking.id === listFocusBookingId
             ? {
@@ -1997,11 +2059,12 @@ function BookingsPageContent() {
             })}
           </Stack>
         ) : (
-          <DataTable
-            minHeight={220}
-            scrollAreaProps={portalDataTableScrollAreaProps}
-            withTableBorder
+          <PortalDataTable<Booking>
             records={completedBookings}
+            hideSearch
+            withToolbar={false}
+            defaultSort={{ columnAccessor: "bookingAt", direction: "desc" }}
+            minHeight={220}
             columns={[
               {
                 accessor: "bookingAt",
@@ -2235,18 +2298,33 @@ function BookingsPageContent() {
           {todaySortedBookings.length}/{todayBookings.length} booking
           {todayBookings.length !== todaySortedBookings.length ? " (đã lọc)" : ""} trong ngày.
         </Text>
-        <Group align="flex-end" gap="sm" wrap="wrap" justify="flex-start">
-            <TextInputWithVoice
-              placeholder={todaySearchPlaceholder}
-              value={todaySearchQuery}
-              onChange={(event) => {
-                setTodaySearchQuery(event.currentTarget.value);
-                setTodayPage(1);
-              }}
-              size="sm"
-              style={{ flex: "1 1 12rem", minWidth: 0 }}
-              voiceIconSize="sm"
-            />
+      </Stack>
+      <PortalDataTable<Booking>
+        records={todayPipelineFilteredBookings}
+        searchQuery={todaySearchQuery}
+        onSearchQueryChange={(value) => {
+          setTodaySearchQuery(value);
+          setTodayPage(1);
+        }}
+        getRecordSearchValue={getTodayBookingSearchValue}
+        sortRecords={sortTodayBookings}
+        sortStatus={todaySortStatus}
+        onSortStatusChange={(next) => {
+          setTodaySortStatus(next);
+          setTodayPage(1);
+        }}
+        page={todayPage}
+        onPageChange={setTodayPage}
+        recordsPerPage={todayDesktopPageSize}
+        onRecordsPerPageChange={(size) => {
+          setTodayDesktopPageSize(size);
+          setTodayPage(1);
+        }}
+        recordsPerPageOptions={[...TODAY_DESKTOP_PAGE_SIZE_OPTIONS]}
+        defaultSort={{ columnAccessor: "bookingAt", direction: "asc" }}
+        searchPlaceholder={todaySearchPlaceholder}
+        filters={
+          <>
             <Select
               label="Trạng thái"
               placeholder="Tất cả"
@@ -2301,32 +2379,9 @@ function BookingsPageContent() {
               w={132}
               miw={132}
             />
-        </Group>
-      </Stack>
-      <div style={{ height: 12 }} />
-      <DataTable
+          </>
+        }
         minHeight={260}
-        scrollAreaProps={portalDataTableScrollAreaProps}
-        withTableBorder
-        records={pagedTodayBookings}
-        totalRecords={todaySortedBookings.length}
-        recordsPerPage={todayDesktopPageSize}
-        recordsPerPageOptions={[...TODAY_DESKTOP_PAGE_SIZE_OPTIONS]}
-        recordsPerPageLabel="Số dòng mỗi trang"
-        onRecordsPerPageChange={(n) => {
-          setTodayDesktopPageSize(n);
-          setTodayPage(1);
-        }}
-        page={Math.min(
-          todayPage,
-          Math.max(1, Math.ceil(todaySortedBookings.length / todayDesktopPageSize))
-        )}
-        onPageChange={setTodayPage}
-        sortStatus={todaySortStatus}
-        onSortStatusChange={(next) => {
-          setTodaySortStatus(next);
-          setTodayPage(1);
-        }}
         onRowClick={({ record }) => openBookingInList(record)}
         rowStyle={() => ({ cursor: "pointer" })}
         noRecordsText={

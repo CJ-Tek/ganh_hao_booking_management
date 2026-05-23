@@ -19,13 +19,13 @@ import {
   TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { DataTable, type DataTableSortStatus } from "mantine-datatable";
+import { type DataTableSortStatus } from "mantine-datatable";
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
-import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { getAreaSeatBudget } from "@/lib/area-capacity";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { FLOOR_TABLE_PALETTE_SENTINEL } from "@/lib/floor-map-layout";
@@ -148,31 +148,40 @@ function TablesPageContent() {
     });
   }, [areaNameById, baseRecords, branchNameById, search, seatsFilter, statusFilter]);
 
-  const sortedRecords = useMemo(() => {
-    const getValue = (item: DiningTable) => {
-      if (sortStatus.columnAccessor === "branchId") {
-        return branchNameById[item.branchId] ?? "";
-      }
-      if (sortStatus.columnAccessor === "areaId") {
-        return areaNameById[item.areaId] ?? "";
-      }
-      if (sortStatus.columnAccessor === "seats") {
-        return item.seats;
-      }
-      if (sortStatus.columnAccessor === "status") {
-        return tableStatusLabel[item.status];
-      }
-      return item.name;
-    };
-    return [...filteredRecords].sort((a, b) => {
-      const left = getValue(a);
-      const right = getValue(b);
-      const compare = typeof left === "number" && typeof right === "number"
-        ? left - right
-        : String(left).localeCompare(String(right), "vi");
-      return sortStatus.direction === "asc" ? compare : -compare;
-    });
-  }, [areaNameById, branchNameById, filteredRecords, sortStatus]);
+  const sortTableRecords = useCallback(
+    (records: DiningTable[], sortStatus: DataTableSortStatus<DiningTable>) => {
+      const getValue = (item: DiningTable) => {
+        if (sortStatus.columnAccessor === "branchId") {
+          return branchNameById[item.branchId] ?? "";
+        }
+        if (sortStatus.columnAccessor === "areaId") {
+          return areaNameById[item.areaId] ?? "";
+        }
+        if (sortStatus.columnAccessor === "seats") {
+          return item.seats;
+        }
+        if (sortStatus.columnAccessor === "status") {
+          return tableStatusLabel[item.status];
+        }
+        return item.name;
+      };
+      return [...records].sort((a, b) => {
+        const left = getValue(a);
+        const right = getValue(b);
+        const compare =
+          typeof left === "number" && typeof right === "number"
+            ? left - right
+            : String(left).localeCompare(String(right), "vi");
+        return sortStatus.direction === "asc" ? compare : -compare;
+      });
+    },
+    [areaNameById, branchNameById]
+  );
+
+  const sortedRecords = useMemo(
+    () => sortTableRecords(filteredRecords, sortStatus),
+    [filteredRecords, sortStatus, sortTableRecords]
+  );
 
   const totalPages = Math.max(1, Math.ceil(sortedRecords.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -762,23 +771,23 @@ function TablesPageContent() {
               </Button>
             </Group>
 
-            <DataTable
-              minHeight={260}
-              scrollAreaProps={portalDataTableScrollAreaProps}
-              withTableBorder
-              idAccessor="id"
-              records={pagedRecords}
-              selectedRecords={selectedRows}
-              onSelectedRecordsChange={setSelectedRows}
-              totalRecords={sortedRecords.length}
-              recordsPerPage={pageSize}
-              page={currentPage}
-              onPageChange={setPage}
+            <PortalDataTable<DiningTable>
+              records={filteredRecords}
+              hideSearch
+              withToolbar={false}
+              sortRecords={sortTableRecords}
               sortStatus={sortStatus}
               onSortStatusChange={(next) => {
                 setSortStatus(next);
                 setPage(1);
               }}
+              page={currentPage}
+              onPageChange={setPage}
+              recordsPerPage={pageSize}
+              minHeight={260}
+              idAccessor="id"
+              selectedRecords={selectedRows}
+              onSelectedRecordsChange={setSelectedRows}
               noRecordsText="Không có bàn phù hợp với bộ lọc hiện tại."
               columns={[
                 { accessor: "name", title: "Bàn", sortable: true },

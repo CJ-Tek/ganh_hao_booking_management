@@ -15,14 +15,13 @@ import {
   TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { DataTable, type DataTableSortStatus } from "mantine-datatable";
+import { type DataTableSortStatus } from "mantine-datatable";
 import { Pencil, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard, PortalStickyAction } from "@/components/portal-page";
-import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { RouteGuard } from "@/components/route-guard";
 import { useAppContext } from "@/contexts/app-context";
-import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { AppUser, Role } from "@/lib/types";
 
 const roleLabel: Record<Role, string> = {
@@ -46,14 +45,6 @@ export default function UserManagementPage() {
   const [fullName, setFullName] = useState("");
   const [role, setRole] = useState<Role>("manager");
   const [branchIds, setBranchIds] = useState<string[]>([]);
-  const [search, setSearch] = useState("");
-  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<AppUser>>({
-    columnAccessor: "username",
-    direction: "asc",
-  });
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
-
   const [editOpen, setEditOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [editUsername, setEditUsername] = useState("");
@@ -66,30 +57,28 @@ export default function UserManagementPage() {
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  const filteredUsers = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
-    return state.users.filter((user) => {
-      if (currentUser?.role === "general_manager" && user.role === "admin") {
-        return false;
-      }
-      if (!keyword) {
-        return true;
-      }
+  const visibleUsers = useMemo(
+    () =>
+      state.users.filter(
+        (user) => !(currentUser?.role === "general_manager" && user.role === "admin")
+      ),
+    [currentUser?.role, state.users]
+  );
+
+  const getUserSearchValue = useCallback(
+    (user: AppUser) => {
       const branchText = user.branchIds
         .map((id) => state.branches.find((branch) => branch.id === id)?.name ?? id)
-        .join(", ")
+        .join(", ");
+      return [user.username, user.fullName, roleLabel[user.role], branchText]
+        .join(" ")
         .toLowerCase();
-      return (
-        user.username.toLowerCase().includes(keyword) ||
-        user.fullName.toLowerCase().includes(keyword) ||
-        roleLabel[user.role].toLowerCase().includes(keyword) ||
-        branchText.includes(keyword)
-      );
-    });
-  }, [search, state.branches, state.users, currentUser?.role]);
+    },
+    [state.branches]
+  );
 
-  const sortedUsers = useMemo(() => {
-    return [...filteredUsers].sort((a, b) => {
+  const sortUsers = useCallback((records: AppUser[], sortStatus: DataTableSortStatus<AppUser>) => {
+    return [...records].sort((a, b) => {
       let left = "";
       let right = "";
       if (sortStatus.columnAccessor === "fullName") {
@@ -108,16 +97,7 @@ export default function UserManagementPage() {
       const compare = left.localeCompare(right, "vi");
       return sortStatus.direction === "asc" ? compare : -compare;
     });
-  }, [filteredUsers, sortStatus]);
-
-  const pagedUsers = useMemo(
-    () => {
-      const totalPages = Math.max(1, Math.ceil(sortedUsers.length / pageSize));
-      const currentPage = Math.min(page, totalPages);
-      return sortedUsers.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-    },
-    [page, pageSize, sortedUsers]
-  );
+  }, []);
 
   const canAssignAdmin = currentUser?.role === "admin";
 
@@ -258,30 +238,14 @@ export default function UserManagementPage() {
         </PortalSectionCard>
 
         <PortalSectionCard>
-          <TextInputWithVoice
-            label="Tìm tài khoản"
-            placeholder="Tên đăng nhập, họ tên, vai trò..."
-            value={search}
-            onChange={(event) => {
-              setSearch(event.currentTarget.value);
-              setPage(1);
-            }}
-            mb="sm"
-          />
-          <DataTable
+          <PortalDataTable<AppUser>
+            records={visibleUsers}
+            getRecordSearchValue={getUserSearchValue}
+            sortRecords={sortUsers}
+            defaultSort={{ columnAccessor: "username", direction: "asc" }}
+            searchLabel="Tìm tài khoản"
+            searchPlaceholder="Tên đăng nhập, họ tên, vai trò..."
             minHeight={240}
-            scrollAreaProps={portalDataTableScrollAreaProps}
-            withTableBorder
-            records={pagedUsers}
-            totalRecords={sortedUsers.length}
-            recordsPerPage={pageSize}
-            page={Math.min(page, Math.max(1, Math.ceil(sortedUsers.length / pageSize)))}
-            onPageChange={setPage}
-            sortStatus={sortStatus}
-            onSortStatusChange={(next) => {
-              setSortStatus(next);
-              setPage(1);
-            }}
             columns={[
               { accessor: "username", title: "Tài khoản", sortable: true },
               { accessor: "fullName", title: "Họ tên", sortable: true },

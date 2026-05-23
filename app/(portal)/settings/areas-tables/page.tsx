@@ -15,9 +15,10 @@ import {
   TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { DataTable, type DataTableSortStatus } from "mantine-datatable";
+import { type DataTableSortStatus } from "mantine-datatable";
 import { Pencil, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { PortalDataTable } from "@/components/portal-data-table";
 import {
   PortalPageTitle,
   PortalSectionCard,
@@ -26,7 +27,6 @@ import {
 } from "@/components/portal-page";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
-import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 
 type AreaRow = {
@@ -49,12 +49,8 @@ export default function AreasTablesSettingsPage() {
   const [name, setName] = useState("");
   const [capacity, setCapacity] = useState<number>(30);
   const [search, setSearch] = useState("");
-  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<AreaRow>>({
-    columnAccessor: "name",
-    direction: "asc",
-  });
-  const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [mobilePage, setMobilePage] = useState(1);
+  const mobilePageSize = 10;
 
   const [editOpen, setEditOpen] = useState(false);
   const [editingArea, setEditingArea] = useState<AreaRow | null>(null);
@@ -89,18 +85,8 @@ export default function AreasTablesSettingsPage() {
         })),
     [filteredBranchIds, state.areas, state.bookings, state.branches, state.tables]
   );
-  const filteredAreas = useMemo(() => {
-    const keyword = search.trim().toLowerCase();
-    return areaRows.filter((area) => {
-      if (!keyword) {
-        return true;
-      }
-      return area.name.toLowerCase().includes(keyword) || area.branchName.toLowerCase().includes(keyword);
-    });
-  }, [areaRows, search]);
-
-  const sortedAreas = useMemo(() => {
-    return [...filteredAreas].sort((a, b) => {
+  const sortAreas = useCallback((records: AreaRow[], sortStatus: DataTableSortStatus<AreaRow>) => {
+    return [...records].sort((a, b) => {
       let compare = 0;
       if (sortStatus.columnAccessor === "branchName") {
         compare = a.branchName.localeCompare(b.branchName, "vi");
@@ -115,15 +101,36 @@ export default function AreasTablesSettingsPage() {
       }
       return sortStatus.direction === "asc" ? compare : -compare;
     });
-  }, [filteredAreas, sortStatus]);
+  }, []);
 
-  const pagedAreas = useMemo(
-    () => {
-      const totalPages = Math.max(1, Math.ceil(sortedAreas.length / pageSize));
-      const currentPage = Math.min(page, totalPages);
-      return sortedAreas.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-    },
-    [page, pageSize, sortedAreas]
+  const getAreaSearchValue = useCallback(
+    (area: AreaRow) => `${area.name} ${area.branchName}`.toLowerCase(),
+    []
+  );
+
+  const mobileSortedAreas = useMemo(
+    () => sortAreas(areaRows, { columnAccessor: "name", direction: "asc" }),
+    [areaRows, sortAreas]
+  );
+
+  const mobileFilteredAreas = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) {
+      return mobileSortedAreas;
+    }
+    return mobileSortedAreas.filter((area) => getAreaSearchValue(area).includes(keyword));
+  }, [getAreaSearchValue, mobileSortedAreas, search]);
+
+  const mobileTotalPages = Math.max(1, Math.ceil(mobileFilteredAreas.length / mobilePageSize));
+  const mobilePageSafe = Math.min(mobilePage, mobileTotalPages);
+
+  const pagedMobileAreas = useMemo(
+    () =>
+      mobileFilteredAreas.slice(
+        (mobilePageSafe - 1) * mobilePageSize,
+        mobilePageSafe * mobilePageSize
+      ),
+    [mobileFilteredAreas, mobilePageSafe, mobilePageSize]
   );
 
   const handleAddArea = async () => {
@@ -189,8 +196,6 @@ export default function AreasTablesSettingsPage() {
     }
   };
 
-  const areaTotalPages = Math.max(1, Math.ceil(sortedAreas.length / pageSize));
-
   return (
     <Stack>
       <PortalPageTitle order={isCompact ? 3 : 2}>
@@ -237,26 +242,25 @@ export default function AreasTablesSettingsPage() {
         <Text fw={600} mb="sm" size={isCompact ? "sm" : "md"}>
           Danh sách khu vực
         </Text>
-        <TextInputWithVoice
-          label="Tìm khu vực"
-          placeholder="Tên hoặc chi nhánh"
-          value={search}
-          onChange={(event) => {
-            setSearch(event.currentTarget.value);
-            setPage(1);
-          }}
-          mb="sm"
-          size={isCompact ? "md" : "sm"}
-          voiceIconSize={isCompact ? "md" : "sm"}
-        />
         {isCompact ? (
           <Stack gap="sm">
-            {pagedAreas.length === 0 ? (
+            <TextInputWithVoice
+              label="Tìm khu vực"
+              placeholder="Tên hoặc chi nhánh"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.currentTarget.value);
+                setMobilePage(1);
+              }}
+              size="md"
+              voiceIconSize="md"
+            />
+            {pagedMobileAreas.length === 0 ? (
               <Text c="dimmed" size="sm">
                 Không có khu vực phù hợp.
               </Text>
             ) : (
-              pagedAreas.map((area) => (
+              pagedMobileAreas.map((area) => (
                 <Card key={area.id} withBorder radius="md" padding="md">
                   <Stack gap="sm">
                     <Group justify="space-between" align="flex-start" wrap="nowrap">
@@ -295,24 +299,24 @@ export default function AreasTablesSettingsPage() {
                 </Card>
               ))
             )}
-            {sortedAreas.length > pageSize ? (
+            {mobileFilteredAreas.length > mobilePageSize ? (
               <Group justify="center" gap="xs" mt="xs">
                 <Button
                   variant="default"
                   size="compact-sm"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={mobilePageSafe <= 1}
+                  onClick={() => setMobilePage((p) => Math.max(1, p - 1))}
                 >
                   Trước
                 </Button>
                 <Text size="sm" c="dimmed">
-                  {page}/{areaTotalPages}
+                  {mobilePageSafe}/{mobileTotalPages}
                 </Text>
                 <Button
                   variant="default"
                   size="compact-sm"
-                  disabled={page >= areaTotalPages}
-                  onClick={() => setPage((p) => Math.min(areaTotalPages, p + 1))}
+                  disabled={mobilePageSafe >= mobileTotalPages}
+                  onClick={() => setMobilePage((p) => Math.min(mobileTotalPages, p + 1))}
                 >
                   Sau
                 </Button>
@@ -320,20 +324,15 @@ export default function AreasTablesSettingsPage() {
             ) : null}
           </Stack>
         ) : (
-          <DataTable
+          <PortalDataTable<AreaRow>
+            records={areaRows}
+            getRecordSearchValue={getAreaSearchValue}
+            sortRecords={sortAreas}
+            defaultSort={{ columnAccessor: "name", direction: "asc" }}
+            searchLabel="Tìm khu vực"
+            searchPlaceholder="Tên hoặc chi nhánh"
             minHeight={240}
-            scrollAreaProps={portalDataTableScrollAreaProps}
-            withTableBorder
-            records={pagedAreas}
-            totalRecords={sortedAreas.length}
-            recordsPerPage={pageSize}
-            page={Math.min(page, areaTotalPages)}
-            onPageChange={setPage}
-            sortStatus={sortStatus}
-            onSortStatusChange={(next) => {
-              setSortStatus(next);
-              setPage(1);
-            }}
+            noRecordsText="Không có khu vực phù hợp."
             columns={[
               {
                 accessor: "branchName",

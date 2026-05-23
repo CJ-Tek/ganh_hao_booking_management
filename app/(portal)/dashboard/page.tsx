@@ -14,9 +14,10 @@ import {
   Text,
   Title,
 } from "@mantine/core";
-import { DataTable, type DataTableSortStatus } from "mantine-datatable";
-import { useMemo, useState, useEffect } from "react";
+import { type DataTableSortStatus } from "mantine-datatable";
+import { useCallback, useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
@@ -25,7 +26,6 @@ import {
   isGuestCountSpecified,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
-import { portalDataTableScrollAreaProps } from "@/lib/portal-datatable";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
 
@@ -45,12 +45,8 @@ export default function DashboardPage() {
       router.replace("/floor-map");
     }
   }, [isEmployee, router]);
-  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Booking>>({
-    columnAccessor: "bookingAt",
-    direction: "desc",
-  });
-  const [page, setPage] = useState(1);
-  const pageSize = 8;
+  const [mobilePage, setMobilePage] = useState(1);
+  const mobilePageSize = 8;
 
   const branchBookings = useMemo(
     () => state.bookings.filter((item) => filteredBranchIds.includes(item.branchId)),
@@ -74,61 +70,92 @@ export default function DashboardPage() {
     locked: branchTables.filter((table) => table.status === "locked").length,
   };
 
-  const sortedHistoryBookings = useMemo(() => {
-    const getValue = (booking: Booking) => {
-      const acc = sortStatus.columnAccessor as string;
-      if (acc === "customerId") {
-        return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
-      }
-      if (acc === "guestCount") {
-        return booking.guestCount;
-      }
-      if (acc === "areaTable") {
-        if (!booking.areaId || !booking.tableId) {
-          return "Chờ xếp bàn";
-        }
-        const areaName = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
-        const tableName = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
-        return `${areaName} ${tableName}`;
-      }
-      if (acc === "note") {
-        return stripUnknownGuestTag(booking.note) ?? "";
-      }
-      if (acc === "createdByUserId") {
-        return state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
-      }
-      if (acc === "status") {
-        return bookingStatusLabel[booking.status];
-      }
-      return dayjs(booking.bookingAt).valueOf();
-    };
-    return [...branchBookings].sort((a, b) => {
-      const left = getValue(a);
-      const right = getValue(b);
-      const compare = typeof left === "number" && typeof right === "number"
-        ? left - right
-        : String(left).localeCompare(String(right), "vi");
-      return sortStatus.direction === "asc" ? compare : -compare;
-    });
-  }, [
-    branchBookings,
-    sortStatus,
-    state.areas,
-    state.customers,
-    state.tables,
-    state.users,
-  ]);
-
-  const pagedHistoryBookings = useMemo(
-    () => {
-      const totalPages = Math.max(1, Math.ceil(sortedHistoryBookings.length / pageSize));
-      const currentPage = Math.min(page, totalPages);
-      return sortedHistoryBookings.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-    },
-    [page, pageSize, sortedHistoryBookings]
+  const mobileSortedBookings = useMemo(
+    () =>
+      [...branchBookings].sort(
+        (a, b) => dayjs(b.bookingAt).valueOf() - dayjs(a.bookingAt).valueOf()
+      ),
+    [branchBookings]
   );
 
-  const historyTotalPages = Math.max(1, Math.ceil(sortedHistoryBookings.length / pageSize));
+  const mobileTotalPages = Math.max(1, Math.ceil(mobileSortedBookings.length / mobilePageSize));
+  const mobilePageSafe = Math.min(mobilePage, mobileTotalPages);
+
+  const pagedMobileBookings = useMemo(
+    () =>
+      mobileSortedBookings.slice(
+        (mobilePageSafe - 1) * mobilePageSize,
+        mobilePageSafe * mobilePageSize
+      ),
+    [mobilePageSafe, mobilePageSize, mobileSortedBookings]
+  );
+
+  const sortHistoryBookings = useCallback(
+    (records: Booking[], sortStatus: DataTableSortStatus<Booking>) => {
+      const getValue = (booking: Booking) => {
+        const acc = sortStatus.columnAccessor as string;
+        if (acc === "customerId") {
+          return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
+        }
+        if (acc === "guestCount") {
+          return booking.guestCount;
+        }
+        if (acc === "areaTable") {
+          if (!booking.areaId || !booking.tableId) {
+            return "Chờ xếp bàn";
+          }
+          const areaName = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
+          const tableName = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
+          return `${areaName} ${tableName}`;
+        }
+        if (acc === "note") {
+          return stripUnknownGuestTag(booking.note) ?? "";
+        }
+        if (acc === "createdByUserId") {
+          return state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
+        }
+        if (acc === "status") {
+          return bookingStatusLabel[booking.status];
+        }
+        return dayjs(booking.bookingAt).valueOf();
+      };
+      return [...records].sort((a, b) => {
+        const left = getValue(a);
+        const right = getValue(b);
+        const compare =
+          typeof left === "number" && typeof right === "number"
+            ? left - right
+            : String(left).localeCompare(String(right), "vi");
+        return sortStatus.direction === "asc" ? compare : -compare;
+      });
+    },
+    [state.areas, state.customers, state.tables, state.users]
+  );
+
+  const getHistorySearchValue = useCallback(
+    (booking: Booking) => {
+      const customer = state.customers.find((item) => item.id === booking.customerId);
+      const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
+      const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
+      const creator =
+        state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
+      return [
+        customer?.fullName,
+        displayCustomerPhone(customer?.phone),
+        area,
+        table,
+        creator,
+        bookingStatusLabel[booking.status],
+        stripUnknownGuestTag(booking.note),
+        dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+        isGuestCountSpecified(booking) ? String(booking.guestCount) : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+    },
+    [state.areas, state.customers, state.tables, state.users]
+  );
 
   const statGrid = (
     <SimpleGrid cols={{ base: 2, sm: 2, lg: 4 }} spacing={isManager ? "md" : isCompact ? "sm" : "md"}>
@@ -200,12 +227,12 @@ export default function DashboardPage() {
       </Text>
       {isCompact ? (
         <Stack gap="sm">
-          {pagedHistoryBookings.length === 0 ? (
+          {pagedMobileBookings.length === 0 ? (
             <Text c="dimmed" size="sm">
               Chưa có booking nào.
             </Text>
           ) : (
-            pagedHistoryBookings.map((booking) => {
+            pagedMobileBookings.map((booking) => {
               const customer =
                 state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—";
               const phone =
@@ -255,24 +282,24 @@ export default function DashboardPage() {
               );
             })
           )}
-          {sortedHistoryBookings.length > pageSize ? (
+          {mobileSortedBookings.length > mobilePageSize ? (
             <Group justify="center" gap="xs">
               <Button
                 variant="default"
                 size="compact-sm"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={mobilePageSafe <= 1}
+                onClick={() => setMobilePage((p) => Math.max(1, p - 1))}
               >
                 Trước
               </Button>
               <Text size="sm" c="dimmed">
-                {page}/{historyTotalPages}
+                {mobilePageSafe}/{mobileTotalPages}
               </Text>
               <Button
                 variant="default"
                 size="compact-sm"
-                disabled={page >= historyTotalPages}
-                onClick={() => setPage((p) => Math.min(historyTotalPages, p + 1))}
+                disabled={mobilePageSafe >= mobileTotalPages}
+                onClick={() => setMobilePage((p) => Math.min(mobileTotalPages, p + 1))}
               >
                 Sau
               </Button>
@@ -280,20 +307,13 @@ export default function DashboardPage() {
           ) : null}
         </Stack>
       ) : (
-        <DataTable
-          minHeight={260}
-          scrollAreaProps={portalDataTableScrollAreaProps}
-          withTableBorder
-          records={pagedHistoryBookings}
-          totalRecords={sortedHistoryBookings.length}
-          recordsPerPage={pageSize}
-          page={Math.min(page, historyTotalPages)}
-          onPageChange={setPage}
-          sortStatus={sortStatus}
-          onSortStatusChange={(next) => {
-            setSortStatus(next);
-            setPage(1);
-          }}
+        <PortalDataTable<Booking>
+          records={branchBookings}
+          getRecordSearchValue={getHistorySearchValue}
+          sortRecords={sortHistoryBookings}
+          defaultSort={{ columnAccessor: "bookingAt", direction: "desc" }}
+          defaultRecordsPerPage={8}
+          searchPlaceholder="Khách, bàn, người tạo, ghi chú..."
           noRecordsText="Chưa có booking nào."
           columns={[
             {
