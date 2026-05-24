@@ -6,11 +6,13 @@ import {
   Alert,
   Badge,
   Button,
+  Divider,
   Flex,
   Group,
   Menu,
   Loader,
   Modal,
+  MultiSelect,
   NumberInput,
   Radio,
   Select,
@@ -20,6 +22,7 @@ import {
   Text,
   TextInput,
   Textarea,
+  Tooltip,
 } from "@mantine/core";
 import { DatePickerInput, TimeInput } from "@mantine/dates";
 import { modals } from "@mantine/modals";
@@ -75,6 +78,11 @@ import {
   FLOOR_TABLE_PALETTE_SENTINEL,
   FLOOR_TABLE_STACK_OFFSET_PX,
 } from "@/lib/floor-map-layout";
+import {
+  findMergeStripAnchorForPlug,
+  getMergeGroupStripCells,
+  packMergeGroupTablePositions,
+} from "@/lib/floor-map-merge-layout";
 import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
@@ -89,17 +97,15 @@ import {
   pickPrimaryBookingOnTable,
 } from "@/lib/booking-meta";
 import {
-  createTableMergeGroupInSupabase,
   confirmWaitlistOfferInSupabase,
   getTableBlockStateInSupabase,
-  listTableMergeGroupsInSupabase,
-  type TableMergeGroupSummary,
 } from "@/lib/supabase-store";
 import {
   type Booking,
   type Customer,
   type DiningTable,
   type TableBlockState,
+  type TableMergeGroup,
   type TableStatus,
 } from "@/lib/types";
 import classes from "./page.module.css";
@@ -257,12 +263,109 @@ type PanState = {
 
 type CanvasMode = "view" | "edit";
 
+type FloorEditMergeAdd = { groupId: string; tableId: string };
+type FloorEditMergeRemove = { groupId: string; tableId: string };
+
 type FloorEditLayout = {
   gridColumns: number;
   gridRows: number;
   nodeSpacing: number;
   positions: Record<string, { x: number; y: number }>;
+  /** Merge membership changes applied on save (not before). */
+  pendingMergeAdds: FloorEditMergeAdd[];
+  pendingMergeRemoves: FloorEditMergeRemove[];
 };
+
+function applyEditMergeDraft(
+  groups: TableMergeGroup[],
+  adds: FloorEditMergeAdd[],
+  removes: FloorEditMergeRemove[],
+  tableById: Record<string, DiningTable>
+): TableMergeGroup[] {
+  return groups
+    .map((group) => {
+      let tableIds = [...group.tableIds];
+      for (const remove of removes) {
+        if (remove.groupId === group.id) {
+          tableIds = tableIds.filter((id) => id !== remove.tableId);
+        }
+      }
+      for (const add of adds) {
+        if (add.groupId === group.id && !tableIds.includes(add.tableId)) {
+          tableIds.push(add.tableId);
+        }
+      }
+      const totalCapacity = tableIds.reduce((sum, id) => {
+        const table = tableById[id];
+        return sum + Math.max(1, table?.seats ?? 1);
+      }, 0);
+      return { ...group, tableIds, totalCapacity };
+    })
+    .filter((group) => group.tableIds.length > 0);
+}
+
+function buildAreaTablesForMergePack(
+  tables: DiningTable[],
+  positions: Record<string, { x: number; y: number }>
+): Array<Pick<DiningTable, "id" | "positionX" | "positionY">> {
+  return tables.map((table) => {
+    const p = positions[table.id];
+    return {
+      id: table.id,
+      positionX: p?.x ?? table.positionX,
+      positionY: p?.y ?? table.positionY,
+    };
+  });
+}
+
+function mergeMemberIdsForEdit(
+  group: TableMergeGroup,
+  adds: FloorEditMergeAdd[],
+  removes: FloorEditMergeRemove[]
+): string[] {
+  let tableIds = [...group.tableIds];
+  for (const remove of removes) {
+    if (remove.groupId === group.id) {
+      tableIds = tableIds.filter((id) => id !== remove.tableId);
+    }
+  }
+  for (const add of adds) {
+    if (add.groupId === group.id && !tableIds.includes(add.tableId)) {
+      tableIds.push(add.tableId);
+    }
+  }
+  return tableIds;
+}
+
+function applyMergePackToEditLayout(
+  layout: FloorEditLayout,
+  memberTableIds: string[],
+  tablesInArea: DiningTable[],
+  preferredAnchor?: { row: number; col: number }
+): FloorEditLayout {
+  if (memberTableIds.length === 0) {
+    return layout;
+  }
+  const pack = packMergeGroupTablePositions({
+    memberTableIds,
+    areaTables: buildAreaTablesForMergePack(tablesInArea, layout.positions),
+    gridColumns: layout.gridColumns,
+    gridRows: layout.gridRows,
+    preferredAnchor,
+  });
+  if (!pack) {
+    return layout;
+  }
+  const nextPositions = { ...layout.positions };
+  for (const [tableId, pos] of pack.positionUpdates) {
+    nextPositions[tableId] = { x: pos.col, y: pos.row };
+  }
+  return {
+    ...layout,
+    positions: nextPositions,
+    gridRows: Math.max(layout.gridRows, pack.gridRows),
+  };
+}
 
 export default function FloorMapPage() {
   const {
@@ -285,6 +388,10 @@ export default function FloorMapPage() {
     updateArea,
     deleteArea,
     reload,
+    createTableMergeGroup,
+    addTableToMergeGroup,
+    removeTableFromMergeGroup,
+    releaseTableMergeGroup,
   } = useAppContext();
   const isCompact = usePortalCompact();
   const reserveManagerDock =
@@ -337,11 +444,14 @@ export default function FloorMapPage() {
   const [registerSaving, setRegisterSaving] = useState(false);
   const { isBusy: isTableStatusBusy, run: runTableStatusAction } = useBusyId();
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
-  const [mergeName, setMergeName] = useState("");
-  const [mergePrimaryTableId, setMergePrimaryTableId] = useState<string | null>(null);
-  const [mergeSecondaryTableId, setMergeSecondaryTableId] = useState<string | null>(null);
+  /** Modal multi-select of tables to merge (view-mode "Gộp bàn" flow). */
+  const [mergeSelectedTableIds, setMergeSelectedTableIds] = useState<string[]>([]);
   const [mergeSaving, setMergeSaving] = useState(false);
-  const [mergeGroupsSummary, setMergeGroupsSummary] = useState<TableMergeGroupSummary[]>([]);
+  /** Edit-mode shift-click selection: a set of table ids highlighted for the "Gộp đã chọn" toolbar action. */
+  const [editSelectedTableIds, setEditSelectedTableIds] = useState<string[]>([]);
+  /** Bbox detail panel: when set, shows members + active bookings + release control for a merge group. */
+  const [openedMergeGroupId, setOpenedMergeGroupId] = useState<string | null>(null);
+  const [releaseMergeGroupId, setReleaseMergeGroupId] = useState<string | null>(null);
   const [detailTable, setDetailTable] = useState<DiningTable | null>(null);
   const [detailTableBlockState, setDetailTableBlockState] = useState<TableBlockState | null>(
     null
@@ -571,14 +681,33 @@ export default function FloorMapPage() {
         .sort((a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf()),
     [filteredBranchIds, state.bookings]
   );
+  /** Active groups across all areas — used to exclude already-merged tables from new-merge candidates. */
+  const allActiveMergedTableIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const group of state.mergeGroups) {
+      if (group.status !== "active") {
+        continue;
+      }
+      for (const tableId of group.tableIds) {
+        ids.add(tableId);
+      }
+    }
+    return ids;
+  }, [state.mergeGroups]);
+
   const mergeCandidateTables = useMemo(() => {
     if (!areaId) {
       return [];
     }
     return state.tables
-      .filter((table) => table.areaId === areaId && table.status !== "locked")
+      .filter(
+        (table) =>
+          table.areaId === areaId &&
+          table.status !== "locked" &&
+          !allActiveMergedTableIds.has(table.id)
+      )
       .sort((a, b) => a.name.localeCompare(b.name, "vi"));
-  }, [areaId, state.tables]);
+  }, [allActiveMergedTableIds, areaId, state.tables]);
 
   const mergeTableOptions = useMemo(
     () =>
@@ -589,23 +718,80 @@ export default function FloorMapPage() {
     [mergeCandidateTables]
   );
 
+  /** Active merge groups inside the currently selected area (snapshot-derived, no extra fetch). */
+  const mergeGroupsInArea = useMemo<TableMergeGroup[]>(() => {
+    if (!areaId || !activeAreaBranchId) {
+      return [];
+    }
+    return state.mergeGroups.filter(
+      (group) =>
+        group.status === "active" &&
+        group.branchId === activeAreaBranchId &&
+        group.areaId === areaId
+    );
+  }, [activeAreaBranchId, areaId, state.mergeGroups]);
+
+  const editMergeGroupsInArea = useMemo<TableMergeGroup[]>(() => {
+    if (!isEditMode || !editLayout || !areaId) {
+      return mergeGroupsInArea;
+    }
+    const tableById: Record<string, DiningTable> = {};
+    for (const table of state.tables) {
+      if (table.areaId === areaId) {
+        tableById[table.id] = table;
+      }
+    }
+    return applyEditMergeDraft(
+      mergeGroupsInArea,
+      editLayout.pendingMergeAdds,
+      editLayout.pendingMergeRemoves,
+      tableById
+    );
+  }, [areaId, editLayout, isEditMode, mergeGroupsInArea, state.tables]);
+
+  const effectiveMergeGroups = isEditMode ? editMergeGroupsInArea : mergeGroupsInArea;
+
+  /** All ids of tables currently belonging to an active group in this area — used for bbox layout + edit constraints. */
+  const tablesInActiveGroupInArea = useMemo(() => {
+    const ids = new Set<string>();
+    for (const group of effectiveMergeGroups) {
+      for (const tableId of group.tableIds) {
+        ids.add(tableId);
+      }
+    }
+    return ids;
+  }, [effectiveMergeGroups]);
+
+  /** Quick lookup: tableId → groupId for the active area (used by bbox highlight + commitDrop checks). */
+  const tableToMergeGroupId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const group of effectiveMergeGroups) {
+      for (const tableId of group.tableIds) {
+        map.set(tableId, group.id);
+      }
+    }
+    return map;
+  }, [effectiveMergeGroups]);
+
+  // Auto-close the bbox detail panel when its group disappears from the snapshot.
   useEffect(() => {
-    if (!hasSupabase || !activeAreaBranchId) {
-      setMergeGroupsSummary([]);
+    if (!openedMergeGroupId) {
       return;
     }
-    let cancelled = false;
-    void listTableMergeGroupsInSupabase(activeAreaBranchId).then((groups) => {
-      if (cancelled) {
-        return;
-      }
-      const inArea = groups.filter((group) => group.areaId === areaId);
-      setMergeGroupsSummary(inArea);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeAreaBranchId, areaId, hasSupabase, state.bookings.length]);
+    if (!effectiveMergeGroups.some((group) => group.id === openedMergeGroupId)) {
+      setOpenedMergeGroupId(null);
+    }
+  }, [effectiveMergeGroups, openedMergeGroupId]);
+
+  // Reset edit-mode selection when leaving edit mode or switching areas.
+  useEffect(() => {
+    if (!isEditMode) {
+      setEditSelectedTableIds([]);
+    }
+  }, [isEditMode]);
+  useEffect(() => {
+    setEditSelectedTableIds([]);
+  }, [areaId]);
 
   const closeDetailModal = () => {
     setDetailTable(null);
@@ -878,6 +1064,8 @@ export default function FloorMapPage() {
       gridRows: area?.floorGridRows ?? DEFAULT_GRID_ROWS,
       nodeSpacing: clampFloorNodeSpacing(area?.floorNodeSpacing ?? FLOOR_DEFAULT_NODE_SPACING_PX),
       positions,
+      pendingMergeAdds: [],
+      pendingMergeRemoves: [],
     });
     // Draft snapshot only when entering edit; remote updates handled after save.
   }, [mode, areaId, state.areas, state.tables, releaseFloorLayoutEditLock]);
@@ -897,6 +1085,8 @@ export default function FloorMapPage() {
       gridRows: area?.floorGridRows ?? DEFAULT_GRID_ROWS,
       nodeSpacing: clampFloorNodeSpacing(area?.floorNodeSpacing ?? FLOOR_DEFAULT_NODE_SPACING_PX),
       positions,
+      pendingMergeAdds: [],
+      pendingMergeRemoves: [],
     });
   }, [state.tables, state.areas, mode, areaId]);
 
@@ -1062,6 +1252,9 @@ export default function FloorMapPage() {
         return true;
       }
     }
+    if (editLayout.pendingMergeAdds.length > 0 || editLayout.pendingMergeRemoves.length > 0) {
+      return true;
+    }
     return false;
   }, [isEditMode, editLayout, areaId, state.areas, tablesInArea]);
 
@@ -1160,6 +1353,121 @@ export default function FloorMapPage() {
     return grouped;
   }, [basePositionMap, dragState, tableMap]);
 
+  /**
+   * Effective row/col of each visible table on the canvas — accounts for an in-progress drag in edit mode.
+   * Used by the bbox overlay so the rectangle tracks a table that's being moved into/out of a group.
+   */
+  const effectiveTablePositions = useMemo(() => {
+    const result = new Map<string, { row: number; col: number }>();
+    for (const [key, tables] of basePositionMap.entries()) {
+      const [rowStr, colStr] = key.split("-");
+      const row = Number.parseInt(rowStr ?? "0", 10);
+      const col = Number.parseInt(colStr ?? "0", 10);
+      for (const table of tables) {
+        result.set(table.id, { row, col });
+      }
+    }
+    if (dragState) {
+      result.set(dragState.tableId, { row: dragState.row, col: dragState.col });
+    }
+    return result;
+  }, [basePositionMap, dragState]);
+
+  /**
+   * Geometry for each active merge-group bbox in the current area.
+   * Computed once per (groups, layout, drag) change; pixel coords are relative to the canvas content layer.
+   */
+  const mergeBBoxes = useMemo(() => {
+    if (effectiveMergeGroups.length === 0) {
+      return [];
+    }
+    const halfW = FLOOR_TABLE_BLOCK_WIDTH_PX / 2;
+    const halfH = FLOOR_TABLE_BLOCK_HEIGHT_PX / 2;
+    const marginX = 10;
+    const marginY = 4;
+    const headerHeight = 26;
+    const rects: Array<{
+      groupId: string;
+      mergedName: string;
+      totalCapacity: number;
+      memberCount: number;
+      tableIds: string[];
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      headerHeight: number;
+      plugSlot: { left: number; top: number; row: number; col: number } | null;
+    }> = [];
+    for (const group of effectiveMergeGroups) {
+      const strip = getMergeGroupStripCells(
+        group.tableIds,
+        effectiveTablePositions,
+        effectiveGridColumns,
+        effectiveGridRows
+      );
+      if (!strip) {
+        continue;
+      }
+      let memberCount = 0;
+      let minRow = Number.POSITIVE_INFINITY;
+      let maxRow = Number.NEGATIVE_INFINITY;
+      let minCol = Number.POSITIVE_INFINITY;
+      let maxCol = Number.NEGATIVE_INFINITY;
+      for (const tableId of group.tableIds) {
+        const pos = effectiveTablePositions.get(tableId);
+        if (!pos) {
+          continue;
+        }
+        memberCount += 1;
+        minRow = Math.min(minRow, pos.row);
+        maxRow = Math.max(maxRow, pos.row);
+        minCol = Math.min(minCol, pos.col);
+        maxCol = Math.max(maxCol, pos.col);
+      }
+      if (memberCount === 0) {
+        continue;
+      }
+      minRow = Math.min(minRow, strip.plugRow);
+      maxRow = Math.max(maxRow, strip.plugRow);
+      minCol = Math.min(minCol, strip.plugCol);
+      maxCol = Math.max(maxCol, strip.plugCol);
+      const tableXMin = CANVAS_PADDING + minCol * effectiveNodeSpacing - halfW;
+      const tableXMax = CANVAS_PADDING + maxCol * effectiveNodeSpacing + halfW;
+      const tableYMin = CANVAS_PADDING + minRow * effectiveNodeSpacing - halfH;
+      const tableYMax = CANVAS_PADDING + maxRow * effectiveNodeSpacing + halfH;
+      const xMin = tableXMin - marginX;
+      const xMax = tableXMax + marginX;
+      const yMin = tableYMin - headerHeight - marginY;
+      const yMax = tableYMax + marginY;
+      rects.push({
+        groupId: group.id,
+        mergedName: group.mergedName,
+        totalCapacity: group.totalCapacity,
+        memberCount,
+        tableIds: group.tableIds,
+        x: xMin,
+        y: yMin,
+        width: Math.max(0, xMax - xMin),
+        height: Math.max(0, yMax - yMin),
+        headerHeight,
+        plugSlot: {
+          left: CANVAS_PADDING + strip.plugCol * effectiveNodeSpacing,
+          top: CANVAS_PADDING + strip.plugRow * effectiveNodeSpacing,
+          row: strip.plugRow,
+          col: strip.plugCol,
+        },
+      });
+    }
+    return rects;
+  }, [
+    effectiveGridColumns,
+    effectiveGridRows,
+    effectiveNodeSpacing,
+    effectiveTablePositions,
+    effectiveMergeGroups,
+  ]);
+
   const commitDrop = (tableId: string, row: number, col: number) => {
     const source = tableMap[tableId];
     if (!source || !editLayout) {
@@ -1171,14 +1479,108 @@ export default function FloorMapPage() {
       setDragState(null);
       return;
     }
+    const dropKey = `${row}-${col}`;
+    const currentGroupId = tableToMergeGroupId.get(tableId) ?? null;
+
     setEditLayout((prev) => {
       if (!prev) {
         return prev;
       }
-      return {
+      let next: FloorEditLayout = {
         ...prev,
         positions: { ...prev.positions, [source.id]: { x: col, y: row } },
       };
+
+      if (effectiveMergeGroups.length === 0) {
+        return next;
+      }
+
+      if (!currentGroupId) {
+        for (const group of effectiveMergeGroups) {
+          const positionsForStrip = new Map(effectiveTablePositions);
+          positionsForStrip.set(tableId, { row, col });
+          const strip = getMergeGroupStripCells(
+            group.tableIds,
+            positionsForStrip,
+            next.gridColumns,
+            next.gridRows
+          );
+          if (!strip) {
+            continue;
+          }
+          if (row !== strip.plugRow || col !== strip.plugCol) {
+            continue;
+          }
+          const pendingMergeRemoves = next.pendingMergeRemoves.filter(
+            (item) => !(item.groupId === group.id && item.tableId === tableId)
+          );
+          const alreadyPending = next.pendingMergeAdds.some(
+            (item) => item.groupId === group.id && item.tableId === tableId
+          );
+          const pendingMergeAdds = alreadyPending
+            ? next.pendingMergeAdds
+            : [...next.pendingMergeAdds, { groupId: group.id, tableId }];
+          next = { ...next, pendingMergeAdds, pendingMergeRemoves };
+          const memberIds = mergeMemberIdsForEdit(group, pendingMergeAdds, pendingMergeRemoves);
+          const preferredAnchor =
+            findMergeStripAnchorForPlug(
+              row,
+              col,
+              memberIds.length + 1,
+              next.gridColumns,
+              next.gridRows
+            ) ?? undefined;
+          next = applyMergePackToEditLayout(
+            next,
+            memberIds,
+            tablesInArea,
+            preferredAnchor
+          );
+          break;
+        }
+        return next;
+      }
+
+      const currentGroup = effectiveMergeGroups.find((group) => group.id === currentGroupId);
+      if (!currentGroup) {
+        return next;
+      }
+      const positionsForStrip = new Map(effectiveTablePositions);
+      positionsForStrip.set(tableId, { row, col });
+      const strip = getMergeGroupStripCells(
+        currentGroup.tableIds,
+        positionsForStrip,
+        next.gridColumns,
+        next.gridRows
+      );
+      if (!strip) {
+        return next;
+      }
+      const stillOnStrip =
+        strip.memberCells.has(dropKey) || (row === strip.plugRow && col === strip.plugCol);
+      if (stillOnStrip) {
+        return next;
+      }
+
+      const pendingMergeAdds = next.pendingMergeAdds.filter(
+        (item) => !(item.groupId === currentGroupId && item.tableId === tableId)
+      );
+      const alreadyPending = next.pendingMergeRemoves.some(
+        (item) => item.groupId === currentGroupId && item.tableId === tableId
+      );
+      const pendingMergeRemoves = alreadyPending
+        ? next.pendingMergeRemoves
+        : [...next.pendingMergeRemoves, { groupId: currentGroupId, tableId }];
+      next = { ...next, pendingMergeAdds, pendingMergeRemoves };
+      const memberIds = mergeMemberIdsForEdit(
+        currentGroup,
+        pendingMergeAdds,
+        pendingMergeRemoves
+      );
+      if (memberIds.length >= 2) {
+        next = applyMergePackToEditLayout(next, memberIds, tablesInArea);
+      }
+      return next;
     });
     setDragState(null);
   };
@@ -1245,8 +1647,38 @@ export default function FloorMapPage() {
         floorNodeSpacing: editLayout.nodeSpacing,
         tablePositions,
       });
+
+      for (const remove of editLayout.pendingMergeRemoves) {
+        const result = await removeTableFromMergeGroup({
+          groupId: remove.groupId,
+          tableId: remove.tableId,
+          repackFloor: false,
+        });
+        if (!result.ok) {
+          throw new Error(result.message);
+        }
+      }
+      for (const add of editLayout.pendingMergeAdds) {
+        const result = await addTableToMergeGroup({
+          groupId: add.groupId,
+          tableId: add.tableId,
+          repackFloor: false,
+        });
+        if (!result.ok) {
+          throw new Error(result.message);
+        }
+      }
+
       resyncEditLayoutAfterSaveRef.current = true;
-      notifications.show({ color: "green", message: "Đã lưu sơ đồ xuống máy chủ." });
+      const mergeChangeCount =
+        editLayout.pendingMergeAdds.length + editLayout.pendingMergeRemoves.length;
+      notifications.show({
+        color: "green",
+        message:
+          mergeChangeCount > 0
+            ? "Đã lưu sơ đồ và thay đổi bàn gộp xuống máy chủ."
+            : "Đã lưu sơ đồ xuống máy chủ.",
+      });
     } catch (error) {
       notifications.show({
         color: "red",
@@ -1609,7 +2041,7 @@ export default function FloorMapPage() {
     }
   };
 
-  const handleCreateMergeGroup = async () => {
+  const handleCreateMergeGroup = async (tableIds: string[]) => {
     if (!hasSupabase) {
       notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
       return;
@@ -1618,21 +2050,17 @@ export default function FloorMapPage() {
       notifications.show({ color: "red", message: "Vui lòng chọn khu vực trước khi gộp bàn." });
       return;
     }
-    const tableIds = [mergePrimaryTableId, mergeSecondaryTableId].filter(
-      (value): value is string => Boolean(value)
-    );
-    if (tableIds.length < 2 || tableIds[0] === tableIds[1]) {
-      notifications.show({ color: "red", message: "Cần chọn 2 bàn khác nhau để gộp." });
+    const uniqueIds = Array.from(new Set(tableIds)).filter(Boolean);
+    if (uniqueIds.length < 2) {
+      notifications.show({ color: "red", message: "Cần chọn ít nhất 2 bàn để gộp." });
       return;
     }
     setMergeSaving(true);
     try {
-      const result = await createTableMergeGroupInSupabase({
+      const result = await createTableMergeGroup({
         branchId: activeAreaBranchId,
         areaId,
-        mergedName: mergeName.trim() || `Cụm ${tableIds.join("-")}`,
-        tableIds,
-        createdByUserId: currentUser?.id,
+        tableIds: uniqueIds,
       });
       notifications.show({
         color: result.ok ? "green" : "red",
@@ -1640,10 +2068,31 @@ export default function FloorMapPage() {
       });
       if (result.ok) {
         setMergeModalOpen(false);
-        setMergeName("");
-        setMergePrimaryTableId(null);
-        setMergeSecondaryTableId(null);
-        await reload();
+        setMergeSelectedTableIds([]);
+        setEditSelectedTableIds([]);
+      }
+    } finally {
+      setMergeSaving(false);
+    }
+  };
+
+  const handleReleaseMergeGroup = async (groupId: string) => {
+    if (!hasSupabase) {
+      notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
+      return;
+    }
+    setMergeSaving(true);
+    try {
+      const result = await releaseTableMergeGroup({ groupId });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        setReleaseMergeGroupId(null);
+        if (openedMergeGroupId === groupId) {
+          setOpenedMergeGroupId(null);
+        }
       }
     } finally {
       setMergeSaving(false);
@@ -2250,6 +2699,17 @@ export default function FloorMapPage() {
                 Chưa lưu
               </Badge>
             ) : null}
+            <Button
+              size={isCompact ? "sm" : "compact-sm"}
+              variant="light"
+              onClick={() => {
+                setMergeSelectedTableIds(editSelectedTableIds);
+                setMergeModalOpen(true);
+              }}
+              disabled={!activeAreaBranchId}
+            >
+              Thêm bàn gộp
+            </Button>
           </Group>
         ) : !isEmployee ? (
           <Button
@@ -2348,6 +2808,80 @@ export default function FloorMapPage() {
                   );
                 })}
               </svg>
+              {mergeBBoxes.map((bbox) => (
+                <div
+                  key={`merge-group-${bbox.groupId}`}
+                  className={`${classes.mergeGroupContainer} ${
+                    openedMergeGroupId === bbox.groupId ? classes.mergeGroupContainerActive : ""
+                  }`}
+                  style={{
+                    left: bbox.x,
+                    top: bbox.y,
+                    width: bbox.width,
+                    height: bbox.height,
+                  }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                >
+                  <div
+                    className={classes.mergeGroupContainerHeader}
+                    style={{ height: bbox.headerHeight }}
+                  >
+                    <button
+                      type="button"
+                      className={classes.mergeGroupContainerTitle}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setOpenedMergeGroupId(bbox.groupId);
+                      }}
+                    >
+                      {bbox.mergedName}
+                    </button>
+                    <Group gap={6} wrap="nowrap">
+                      <span className={classes.mergeGroupContainerCapacity}>
+                        Tổng: {bbox.totalCapacity} chỗ
+                      </span>
+                      <Tooltip label="Bỏ gộp" withArrow>
+                        <ActionIcon
+                          type="button"
+                          size="sm"
+                          variant="subtle"
+                          color="red"
+                          className={classes.mergeGroupReleaseBtn}
+                          aria-label={`Bỏ gộp ${bbox.mergedName}`}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setReleaseMergeGroupId(bbox.groupId);
+                          }}
+                        >
+                          <X size={14} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Group>
+                  </div>
+                  <div
+                    className={classes.mergeGroupContainerBody}
+                    style={{ top: bbox.headerHeight }}
+                  />
+                </div>
+              ))}
+              {mergeBBoxes.map((bbox) =>
+                bbox.plugSlot && isEditMode ? (
+                  <div
+                    key={`merge-plug-${bbox.groupId}`}
+                    className={classes.mergeGroupPlugSlot}
+                    style={{
+                      left: bbox.plugSlot.left,
+                      top: bbox.plugSlot.top,
+                      transform: "translate(-50%, -50%)",
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    title="Kéo bàn vào đây để gộp"
+                  >
+                    <Plus size={28} strokeWidth={2} />
+                  </div>
+                ) : null
+              )}
               {gridNodes.map((node) => {
                 const key = `${node.row}-${node.col}`;
                 const tables = tableByNode.get(key) ?? [];
@@ -2360,11 +2894,14 @@ export default function FloorMapPage() {
                     top: y + stackIndex * FLOOR_TABLE_STACK_OFFSET_PX,
                     transform: "translate(-50%, -50%)",
                   };
+                  const isMergeMember = tableToMergeGroupId.has(table.id);
                   if (!isEditMode) {
                     return (
                       <div
                         key={stackKey}
-                        className={classes.tableFloorAnchor}
+                        className={`${classes.tableFloorAnchor} ${
+                          isMergeMember ? classes.tableBlockMergeMember : ""
+                        }`}
                         style={style}
                       >
                         <div
@@ -2450,15 +2987,38 @@ export default function FloorMapPage() {
                       </div>
                     );
                   }
+                  const isMergeSelected = editSelectedTableIds.includes(table.id);
                   return (
                     <div
                       key={stackKey}
                       data-table-block="true"
                       data-table-status={table.status}
                       className={`${classes.tableBlock} ${TABLE_STATUS_SURFACE_CLASS[table.status]} ${dragState?.tableId === table.id ? classes.tableBlockDragging : ""
+                        } ${isMergeMember ? classes.tableBlockMergeMember : ""} ${
+                          isMergeSelected ? classes.tableBlockMergeSelected : ""
                         }`}
                       style={style}
-                      onPointerDown={(event) => handleTablePointerDown(event, table)}
+                      onPointerDown={(event) => {
+                        // Shift-click toggles a merge-pick selection without starting a drag.
+                        if (event.shiftKey) {
+                          event.stopPropagation();
+                          event.preventDefault();
+                          if (allActiveMergedTableIds.has(table.id)) {
+                            notifications.show({
+                              color: "yellow",
+                              message: `${table.name} đã thuộc một cụm gộp khác.`,
+                            });
+                            return;
+                          }
+                          setEditSelectedTableIds((prev) =>
+                            prev.includes(table.id)
+                              ? prev.filter((id) => id !== table.id)
+                              : [...prev, table.id]
+                          );
+                          return;
+                        }
+                        handleTablePointerDown(event, table);
+                      }}
                     >
                       <ActionIcon
                         type="button"
@@ -2489,6 +3049,30 @@ export default function FloorMapPage() {
               })}
             </div>
           </div>
+          {isEditMode && editSelectedTableIds.length >= 2 ? (
+            <div className={classes.mergeSelectionDock}>
+              <Text size="sm" fw={600}>
+                Đã chọn {editSelectedTableIds.length} bàn
+              </Text>
+              <Group gap="xs">
+                <Button
+                  variant="default"
+                  size="xs"
+                  onClick={() => setEditSelectedTableIds([])}
+                  disabled={mergeSaving}
+                >
+                  Xoá chọn
+                </Button>
+                <Button
+                  size="xs"
+                  loading={mergeSaving}
+                  onClick={() => void handleCreateMergeGroup(editSelectedTableIds)}
+                >
+                  Gộp đã chọn ({editSelectedTableIds.length})
+                </Button>
+              </Group>
+            </div>
+          ) : null}
           <div className={classes.canvasOverlay}>
             {isTopToolbarOpen ? (
               <div className={classes.canvasTopToolbar}>
@@ -3194,38 +3778,41 @@ export default function FloorMapPage() {
       <Modal
         opened={mergeModalOpen}
         onClose={() => setMergeModalOpen(false)}
-        title="Gộp bàn vật lý"
+        title="Gộp bàn"
         size="md"
       >
         <Stack gap="sm">
           <Text size="sm" c="dimmed">
-            Gộp 2 bàn trong cùng khu vực thành một cụm để phục vụ booking đông người.
+            Chọn ít nhất 2 bàn trong cùng khu vực. Hệ thống tự đặt tên là &quot;Bàn gộp N&quot; theo
+            thứ tự nhỏ nhất chưa dùng trong khu vực.
           </Text>
-          <TextInput
-            label="Tên cụm bàn"
-            placeholder="Ví dụ: Cụm VIP A1-A2"
-            value={mergeName}
-            onChange={(event) => setMergeName(event.currentTarget.value)}
-          />
-          <Select
-            label="Bàn thứ nhất"
+          <MultiSelect
+            label="Bàn thành viên"
             data={mergeTableOptions}
-            value={mergePrimaryTableId}
-            onChange={setMergePrimaryTableId}
+            value={mergeSelectedTableIds}
+            onChange={setMergeSelectedTableIds}
             searchable
+            hidePickedOptions
+            placeholder="Chọn từ 2 bàn trở lên"
           />
-          <Select
-            label="Bàn thứ hai"
-            data={mergeTableOptions}
-            value={mergeSecondaryTableId}
-            onChange={setMergeSecondaryTableId}
-            searchable
-          />
+          {mergeSelectedTableIds.length > 0 ? (
+            <Text size="xs" c="dimmed">
+              Tổng sức chứa dự kiến:{" "}
+              {mergeCandidateTables
+                .filter((table) => mergeSelectedTableIds.includes(table.id))
+                .reduce((sum, table) => sum + table.seats, 0)}{" "}
+              chỗ.
+            </Text>
+          ) : null}
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setMergeModalOpen(false)}>
               Hủy
             </Button>
-            <Button loading={mergeSaving} onClick={() => void handleCreateMergeGroup()}>
+            <Button
+              loading={mergeSaving}
+              disabled={mergeSelectedTableIds.length < 2}
+              onClick={() => void handleCreateMergeGroup(mergeSelectedTableIds)}
+            >
               Tạo cụm gộp
             </Button>
           </Group>
@@ -3288,6 +3875,289 @@ export default function FloorMapPage() {
           </Group>
         </Stack>
       </Modal>
+
+      <MergeGroupDetailModal
+        groupId={openedMergeGroupId}
+        mergeGroups={effectiveMergeGroups}
+        tables={state.tables}
+        bookings={state.bookings}
+        customers={state.customers}
+        pendingBookings={pendingBookings}
+        currentUserId={currentUser?.id}
+        onClose={() => setOpenedMergeGroupId(null)}
+        onRequestRelease={(groupId) => setReleaseMergeGroupId(groupId)}
+        onRequestRemoveMember={async (groupId, tableId) => {
+          const result = await removeTableFromMergeGroup({ groupId, tableId });
+          notifications.show({
+            color: result.ok ? "green" : "red",
+            message: result.message,
+          });
+        }}
+        onAssignPendingBooking={async (booking, group) => {
+          const result = await assignBookingToTable({
+            bookingId: booking.id,
+            areaId: group.areaId,
+            tableId: null,
+            mergeGroupId: group.id,
+            guestCount: booking.guestCount,
+          });
+          notifications.show({
+            color: result.ok ? "green" : "red",
+            message: result.message,
+          });
+        }}
+      />
+
+      <Modal
+        opened={releaseMergeGroupId !== null}
+        onClose={() => setReleaseMergeGroupId(null)}
+        title="Bỏ gộp bàn"
+        size="sm"
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Hệ thống sẽ cố gắng chuyển các booking đang giữ cụm này về bàn lẻ phù hợp. Nếu có booking
+            vượt quá sức chứa của mọi bàn thành viên (over-exceed) và chưa kết thúc / huỷ / no-show,
+            thao tác sẽ bị chặn.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setReleaseMergeGroupId(null)}>
+              Huỷ
+            </Button>
+            <Button
+              color="red"
+              loading={mergeSaving}
+              onClick={() => {
+                if (releaseMergeGroupId) {
+                  void handleReleaseMergeGroup(releaseMergeGroupId);
+                }
+              }}
+            >
+              Bỏ gộp
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
+  );
+}
+
+interface MergeGroupDetailModalProps {
+  groupId: string | null;
+  mergeGroups: TableMergeGroup[];
+  tables: DiningTable[];
+  bookings: Booking[];
+  customers: Customer[];
+  pendingBookings: Booking[];
+  currentUserId?: string | null;
+  onClose: () => void;
+  onRequestRelease: (groupId: string) => void;
+  onRequestRemoveMember: (groupId: string, tableId: string) => Promise<void>;
+  onAssignPendingBooking: (booking: Booking, group: TableMergeGroup) => Promise<void>;
+}
+
+function MergeGroupDetailModal({
+  groupId,
+  mergeGroups,
+  tables,
+  bookings,
+  customers,
+  pendingBookings,
+  currentUserId: _currentUserId,
+  onClose,
+  onRequestRelease,
+  onRequestRemoveMember,
+  onAssignPendingBooking,
+}: MergeGroupDetailModalProps) {
+  const group = useMemo(
+    () => mergeGroups.find((candidate) => candidate.id === groupId) ?? null,
+    [mergeGroups, groupId]
+  );
+  const memberTables = useMemo(() => {
+    if (!group) {
+      return [];
+    }
+    return group.tableIds
+      .map((tableId) => tables.find((table) => table.id === tableId))
+      .filter((table): table is DiningTable => Boolean(table));
+  }, [group, tables]);
+  const groupBookings = useMemo(() => {
+    if (!group) {
+      return [];
+    }
+    return bookings
+      .filter(
+        (booking) =>
+          booking.mergeGroupId === group.id &&
+          !["completed", "cancelled", "no_show"].includes(booking.status)
+      )
+      .sort((a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf());
+  }, [bookings, group]);
+  const customerMap = useMemo(() => {
+    const map = new Map<string, Customer>();
+    for (const customer of customers) {
+      map.set(customer.id, customer);
+    }
+    return map;
+  }, [customers]);
+  const [removingTableId, setRemovingTableId] = useState<string | null>(null);
+  if (!group) {
+    return null;
+  }
+  return (
+    <Modal opened={Boolean(groupId)} onClose={onClose} title={group.mergedName} size="md">
+      <Stack gap="md">
+        <Group justify="space-between" align="flex-end">
+          <Stack gap={2}>
+            <Text size="sm" c="dimmed">
+              Tổng sức chứa
+            </Text>
+            <Text fw={600}>{group.totalCapacity} chỗ</Text>
+          </Stack>
+          <Button color="red" variant="light" onClick={() => onRequestRelease(group.id)}>
+            Bỏ gộp
+          </Button>
+        </Group>
+        <Divider label="Bàn thành viên" labelPosition="left" />
+        <Stack gap="xs">
+          {memberTables.map((table) => (
+            <Group key={table.id} justify="space-between" wrap="nowrap">
+              <Stack gap={0}>
+                <Text size="sm" fw={500}>
+                  {table.name}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {table.seats} ghế
+                </Text>
+              </Stack>
+              <Tooltip
+                label={
+                  memberTables.length <= 2
+                    ? "Cụm cần ít nhất 2 bàn — bỏ tiếp sẽ tự huỷ cụm."
+                    : "Tách bàn khỏi cụm"
+                }
+              >
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  loading={removingTableId === table.id}
+                  onClick={async () => {
+                    setRemovingTableId(table.id);
+                    try {
+                      await onRequestRemoveMember(group.id, table.id);
+                    } finally {
+                      setRemovingTableId(null);
+                    }
+                  }}
+                >
+                  <X size={16} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+          ))}
+        </Stack>
+        <Divider label={`Booking đang giữ (${groupBookings.length})`} labelPosition="left" />
+        {groupBookings.length === 0 ? (
+          <Text size="sm" c="dimmed">
+            Hiện không có booking nào đang dùng cụm này.
+          </Text>
+        ) : (
+          <Stack gap="xs">
+            {groupBookings.map((booking) => {
+              const customer = booking.customerId ? customerMap.get(booking.customerId) : undefined;
+              return (
+                <Group key={booking.id} justify="space-between" wrap="nowrap">
+                  <Stack gap={0}>
+                    <Text size="sm" fw={500}>
+                      {customer?.fullName ?? "Khách lẻ"}
+                    </Text>
+                    <Text size="xs" c="dimmed">
+                      {dayjs(booking.bookingAt).format("DD/MM HH:mm")} · {booking.guestCount} khách
+                    </Text>
+                  </Stack>
+                  <Badge variant="light">{booking.status}</Badge>
+                </Group>
+              );
+            })}
+          </Stack>
+        )}
+        <MergeGroupAssignablePending
+          group={group}
+          pendingBookings={pendingBookings}
+          customers={customers}
+          onAssign={onAssignPendingBooking}
+        />
+      </Stack>
+    </Modal>
+  );
+}
+
+function MergeGroupAssignablePending({
+  group,
+  pendingBookings,
+  customers,
+  onAssign,
+}: {
+  group: TableMergeGroup;
+  pendingBookings: Booking[];
+  customers: Customer[];
+  onAssign: (booking: Booking, group: TableMergeGroup) => Promise<void>;
+}) {
+  const candidates = useMemo(
+    () =>
+      pendingBookings
+        .filter(
+          (booking) =>
+            booking.branchId === group.branchId &&
+            (booking.areaId === group.areaId || !booking.areaId) &&
+            booking.guestCount <= group.totalCapacity
+        )
+        .slice(0, 8),
+    [group, pendingBookings]
+  );
+  const [busyId, setBusyId] = useState<string | null>(null);
+  if (candidates.length === 0) {
+    return null;
+  }
+  const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
+  return (
+    <>
+      <Divider
+        label={`Booking pending phù hợp (${candidates.length})`}
+        labelPosition="left"
+      />
+      <Stack gap="xs">
+        {candidates.map((booking) => {
+          const customer = booking.customerId ? customerMap.get(booking.customerId) : undefined;
+          return (
+            <Group key={booking.id} justify="space-between" wrap="nowrap">
+              <Stack gap={0}>
+                <Text size="sm" fw={500}>
+                  {customer?.fullName ?? "Khách lẻ"}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {dayjs(booking.bookingAt).format("DD/MM HH:mm")} · {booking.guestCount} khách
+                </Text>
+              </Stack>
+              <Button
+                size="xs"
+                variant="light"
+                loading={busyId === booking.id}
+                onClick={async () => {
+                  setBusyId(booking.id);
+                  try {
+                    await onAssign(booking, group);
+                  } finally {
+                    setBusyId(null);
+                  }
+                }}
+              >
+                Gán vào cụm
+              </Button>
+            </Group>
+          );
+        })}
+      </Stack>
+    </>
   );
 }

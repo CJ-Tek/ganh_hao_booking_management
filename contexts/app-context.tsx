@@ -29,8 +29,11 @@ import {
 import { clampFloorNodeSpacing } from "@/lib/floor-map-layout";
 import {
   addAreaInSupabase,
+  addTableToMergeGroupInSupabase,
   addUserInSupabase,
   assignBookingToTableInSupabase,
+  type CreateTableMergeGroupResult,
+  createTableMergeGroupInSupabase,
   deleteAreaInSupabase,
   deleteUserInSupabase,
   updateUserInSupabase,
@@ -45,6 +48,8 @@ import {
   deleteTableInSupabase,
   deleteTablesInSupabase,
   deleteCustomersInSupabase,
+  releaseTableMergeGroupInSupabase,
+  removeTableFromMergeGroupInSupabase,
   renewFloorLayoutLockInSupabase,
   releaseFloorLayoutLockInSupabase,
   type SaveFloorLayoutInput,
@@ -99,6 +104,8 @@ type CreateBookingInput = {
   branchId: string;
   areaId?: string | null;
   tableId?: string | null;
+  /** Assign the booking to a merge group (Bàn gộp) instead of a single table. */
+  mergeGroupId?: string | null;
   guestCount?: number;
   bookingAt: string;
   note?: string;
@@ -132,7 +139,8 @@ interface AppContextValue {
   assignBookingToTable: (input: {
     bookingId: string;
     areaId: string;
-    tableId: string;
+    tableId?: string | null;
+    mergeGroupId?: string | null;
     guestCount?: number;
   }) => Promise<ActionResult>;
   updateBookingGuestCount: (bookingId: string, guestCount: number) => Promise<ActionResult>;
@@ -143,8 +151,25 @@ interface AppContextValue {
     customerPhone?: string;
     areaId: string | null;
     tableId: string | null;
+    mergeGroupId?: string | null;
     allowDuplicate?: boolean;
   }) => Promise<ActionResult>;
+  createTableMergeGroup: (input: {
+    branchId: string;
+    areaId: string;
+    tableIds: string[];
+  }) => Promise<CreateTableMergeGroupResult>;
+  addTableToMergeGroup: (input: {
+    groupId: string;
+    tableId: string;
+    repackFloor?: boolean;
+  }) => Promise<ActionResult>;
+  removeTableFromMergeGroup: (input: {
+    groupId: string;
+    tableId: string;
+    repackFloor?: boolean;
+  }) => Promise<ActionResult>;
+  releaseTableMergeGroup: (input: { groupId: string }) => Promise<ActionResult>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   checkInBooking: (bookingId: string) => Promise<void>;
   deleteCustomers: (customerIds: string[]) => Promise<ActionResult>;
@@ -408,6 +433,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       const branchId = row.branch_id;
       const areaId = row.area_id;
       const tableId = row.table_id;
+      const mergeGroupId = row.merge_group_id;
       const guestCount = row.guest_count;
       const bookingAt = row.booking_at;
       const startTime = row.start_time;
@@ -440,6 +466,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       if (tableId !== null && typeof tableId !== "string") {
         return null;
       }
+      if (mergeGroupId !== null && mergeGroupId !== undefined && typeof mergeGroupId !== "string") {
+        return null;
+      }
       if (checkedInAt !== null && typeof checkedInAt !== "string") {
         return null;
       }
@@ -462,6 +491,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         branchId,
         areaId,
         tableId,
+        mergeGroupId: (mergeGroupId as string | null | undefined) ?? null,
         guestCount,
         bookingAt,
         startTime,
@@ -835,8 +865,20 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return false;
     };
 
-    const globalRealtimeTables = ["app_users", "booking_runtime_settings", "branches"] as const;
-    const branchScopedRealtimeTables = ["areas", "tables", "customers", "bookings"] as const;
+    const globalRealtimeTables = [
+      "app_users",
+      "booking_runtime_settings",
+      "branches",
+      // table_merge_members has no branch_id; rely on global subscription + snapshot reload.
+      "table_merge_members",
+    ] as const;
+    const branchScopedRealtimeTables = [
+      "areas",
+      "tables",
+      "customers",
+      "bookings",
+      "table_merge_groups",
+    ] as const;
     const scopedBranchIds = filteredBranchIds;
     const bindTableChange = (
       channel: ReturnType<NonNullable<typeof realtime>["channel"]>,
@@ -1085,7 +1127,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const assignBookingToTable = async (input: {
     bookingId: string;
     areaId: string;
-    tableId: string;
+    tableId?: string | null;
+    mergeGroupId?: string | null;
     guestCount?: number;
   }) => {
     if (isEmployeeUser(currentUser)) {
@@ -1138,6 +1181,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     customerPhone?: string;
     areaId: string | null;
     tableId: string | null;
+    mergeGroupId?: string | null;
     allowDuplicate?: boolean;
   }) => {
     if (isEmployeeUser(currentUser)) {
@@ -1747,6 +1791,80 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     return getFloorLayoutLockInfoInSupabase(areaId);
   }, [hasSupabase]);
 
+  const createTableMergeGroup = useCallback(
+    async (input: { branchId: string; areaId: string; tableIds: string[] }) => {
+      if (isEmployeeUser(currentUser)) {
+        return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+      }
+      if (!hasSupabase) {
+        return { ok: false, message: "Chưa kết nối Supabase." };
+      }
+      if (!currentUser) {
+        return { ok: false, message: "Chưa đăng nhập." };
+      }
+      const result = await createTableMergeGroupInSupabase({
+        ...input,
+        createdByUserId: currentUser.id,
+      });
+      if (result.ok) {
+        await reload();
+      }
+      return result;
+    },
+    [currentUser, hasSupabase, reload]
+  );
+
+  const addTableToMergeGroup = useCallback(
+    async (input: { groupId: string; tableId: string; repackFloor?: boolean }) => {
+      if (isEmployeeUser(currentUser)) {
+        return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+      }
+      if (!hasSupabase) {
+        return { ok: false, message: "Chưa kết nối Supabase." };
+      }
+      const result = await addTableToMergeGroupInSupabase(input);
+      if (result.ok) {
+        await reload();
+      }
+      return result;
+    },
+    [currentUser, hasSupabase, reload]
+  );
+
+  const removeTableFromMergeGroup = useCallback(
+    async (input: { groupId: string; tableId: string; repackFloor?: boolean }) => {
+      if (isEmployeeUser(currentUser)) {
+        return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+      }
+      if (!hasSupabase) {
+        return { ok: false, message: "Chưa kết nối Supabase." };
+      }
+      const result = await removeTableFromMergeGroupInSupabase(input);
+      if (result.ok) {
+        await reload();
+      }
+      return result;
+    },
+    [currentUser, hasSupabase, reload]
+  );
+
+  const releaseTableMergeGroup = useCallback(
+    async (input: { groupId: string }) => {
+      if (isEmployeeUser(currentUser)) {
+        return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+      }
+      if (!hasSupabase) {
+        return { ok: false, message: "Chưa kết nối Supabase." };
+      }
+      const result = await releaseTableMergeGroupInSupabase(input);
+      if (result.ok) {
+        await reload();
+      }
+      return result;
+    },
+    [currentUser, hasSupabase, reload]
+  );
+
   const value: AppContextValue = {
     state,
     currentUser,
@@ -1763,6 +1881,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     assignBookingToTable,
     updateBookingGuestCount,
     updateBookingOrder,
+    createTableMergeGroup,
+    addTableToMergeGroup,
+    removeTableFromMergeGroup,
+    releaseTableMergeGroup,
     updateBookingStatus,
     checkInBooking,
     deleteCustomers,

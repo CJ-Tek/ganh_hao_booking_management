@@ -12,6 +12,7 @@ export const initialState: AppStateSnapshot = {
   tables: [],
   customers: [],
   bookings: [],
+  mergeGroups: [],
   notifications: [],
   bookingRuntimeSettings: DEFAULT_BOOKING_RUNTIME_SETTINGS,
   activeBranchId: undefined,

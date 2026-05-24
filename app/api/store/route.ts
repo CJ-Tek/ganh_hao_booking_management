@@ -58,6 +58,16 @@ const handlers: Record<string, StoreHandler> = {
     store.confirmWaitlistOfferInSupabase(payload as string),
   createTableMergeGroup: (payload) =>
     store.createTableMergeGroupInSupabase(payload as Parameters<typeof store.createTableMergeGroupInSupabase>[0]),
+  addTableToMergeGroup: (payload) =>
+    store.addTableToMergeGroupInSupabase(payload as Parameters<typeof store.addTableToMergeGroupInSupabase>[0]),
+  removeTableFromMergeGroup: (payload) =>
+    store.removeTableFromMergeGroupInSupabase(
+      payload as Parameters<typeof store.removeTableFromMergeGroupInSupabase>[0]
+    ),
+  releaseTableMergeGroup: (payload) =>
+    store.releaseTableMergeGroupInSupabase(
+      payload as Parameters<typeof store.releaseTableMergeGroupInSupabase>[0]
+    ),
   listTableMergeGroups: (payload) =>
     store.listTableMergeGroupsInSupabase(payload as string),
   runBookingMaintenance: () => store.runBookingMaintenanceInSupabase(),

@@ -58,7 +58,11 @@ import {
   inferGuestTypeLabel,
   isGuestCountSpecified,
   isSyntheticPhoneValue,
+  getAssignableMergeGroups,
+  hasAssignableSlotConflictAtMergeGroup,
+  recommendMergeGroups,
   stripUnknownGuestTag,
+  type MergeRecommendation,
 } from "@/lib/booking-meta";
 import { bookingCardBusyProps, bookingListRowStyle } from "@/lib/busy-row-style";
 import { useBusyId } from "@/lib/use-busy-id";
@@ -270,6 +274,7 @@ function BookingsPageContent() {
     checkInBooking,
     setActiveBranchId,
     hasSupabase,
+    createTableMergeGroup,
   } = useAppContext();
 
   const isCompact = usePortalCompact();
@@ -311,6 +316,7 @@ function BookingsPageContent() {
   const [editCustomerPhone, setEditCustomerPhone] = useState("");
   const [editAreaId, setEditAreaId] = useState<string | null>(null);
   const [editTableId, setEditTableId] = useState<string | null>(null);
+  const [editMergeGroupId, setEditMergeGroupId] = useState<string | null>(null);
   const [isEditSaving, setIsEditSaving] = useState(false);
   const [mobileDetailBooking, setMobileDetailBooking] = useState<Booking | null>(null);
   const [mobileDetailSource, setMobileDetailSource] = useState<"list" | "today">("list");
@@ -323,6 +329,8 @@ function BookingsPageContent() {
     "all" | "assigned" | "unassigned"
   >("all");
   const [assignFormBooking, setAssignFormBooking] = useState<Booking | null>(null);
+  /** Tracks which merge-recommendation is being applied so we can show a button-level loader. */
+  const [recommendationBusyKey, setRecommendationBusyKey] = useState<string | null>(null);
   const [assignManualGuestCount, setAssignManualGuestCount] = useState<number | undefined>(undefined);
   const [assignAreaId, setAssignAreaId] = useState<string | null>(null);
   const [assignTableId, setAssignTableId] = useState<string | null>(null);
@@ -609,11 +617,13 @@ function BookingsPageContent() {
       endTime: endIso,
       areaId: editAreaId,
       tableId: editTableId,
+      mergeGroupId: editMergeGroupId,
     };
   }, [
     editAreaId,
     editBooking,
     editBookingAt,
+    editMergeGroupId,
     editTableId,
     state.bookingRuntimeSettings.standardTurnaroundMinutes,
   ]);
@@ -629,7 +639,25 @@ function BookingsPageContent() {
     );
   }, [branchBookings, editAssignCandidate]);
 
+  const editMergeGroupSlotBlocked = useMemo(() => {
+    if (!editAssignCandidate?.mergeGroupId) {
+      return false;
+    }
+    const group = state.mergeGroups.find(
+      (item) => item.id === editAssignCandidate.mergeGroupId
+    );
+    if (!group) {
+      return false;
+    }
+    return hasAssignableSlotConflictAtMergeGroup(editAssignCandidate, group, branchBookings);
+  }, [branchBookings, editAssignCandidate, state.mergeGroups]);
+
   const editTableConflictMessage = useMemo(() => {
+    if (editMergeGroupId && editMergeGroupSlotBlocked) {
+      const groupName =
+        state.mergeGroups.find((item) => item.id === editMergeGroupId)?.mergedName ?? "cụm gộp";
+      return `Khung giờ mới trùng với booking khác trên ${groupName}.`;
+    }
     if (!editTableId || editTableSlotConflicts.length === 0) {
       return null;
     }
@@ -641,7 +669,15 @@ function BookingsPageContent() {
       tableName,
       customerName: conflictCustomer,
     });
-  }, [editTableId, editTableSlotConflicts, state.customers, state.tables]);
+  }, [
+    editMergeGroupId,
+    editMergeGroupSlotBlocked,
+    editTableId,
+    editTableSlotConflicts,
+    state.customers,
+    state.mergeGroups,
+    state.tables,
+  ]);
 
   const bookingStatusFilterOptions = useMemo(
     () =>
@@ -708,6 +744,108 @@ function BookingsPageContent() {
     }
   };
 
+  /** Assign a booking to an existing merge group (Dùng cụm có sẵn). */
+  const runAssignToMergeGroup = async (
+    booking: Booking,
+    target: { areaId: string; groupId: string; guestCount?: number }
+  ) => {
+    setIsAssignSaving(true);
+    try {
+      const result = await assignBookingToTable({
+        bookingId: booking.id,
+        areaId: target.areaId,
+        tableId: null,
+        mergeGroupId: target.groupId,
+        guestCount: target.guestCount,
+      });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        setAssignFormBooking(null);
+      }
+    } finally {
+      setIsAssignSaving(false);
+    }
+  };
+
+  /** Create a new merge group from suggested tables, then assign the booking to it. */
+  const runMergeAndAssign = async (
+    booking: Booking,
+    target: { areaId: string; tableIds: string[]; guestCount?: number }
+  ) => {
+    setIsAssignSaving(true);
+    try {
+      const createResult = await createTableMergeGroup({
+        branchId: booking.branchId,
+        areaId: target.areaId,
+        tableIds: target.tableIds,
+      });
+      if (!createResult.ok || !createResult.groupId) {
+        notifications.show({ color: "red", message: createResult.message });
+        return;
+      }
+      const assignResult = await assignBookingToTable({
+        bookingId: booking.id,
+        areaId: target.areaId,
+        tableId: null,
+        mergeGroupId: createResult.groupId,
+        guestCount: target.guestCount,
+      });
+      notifications.show({
+        color: assignResult.ok ? "green" : "red",
+        message: assignResult.ok
+          ? `${createResult.message}. ${assignResult.message}`
+          : assignResult.message,
+      });
+      if (assignResult.ok) {
+        setAssignFormBooking(null);
+      }
+    } finally {
+      setIsAssignSaving(false);
+    }
+  };
+
+  /** Create merge group from edit modal recommendation, then save booking onto it. */
+  const runEditMergeAndAssign = async (
+    booking: Booking,
+    target: { areaId: string; tableIds: string[]; guestCount?: number }
+  ) => {
+    setIsEditSaving(true);
+    try {
+      const createResult = await createTableMergeGroup({
+        branchId: booking.branchId,
+        areaId: target.areaId,
+        tableIds: target.tableIds,
+      });
+      if (!createResult.ok || !createResult.groupId) {
+        notifications.show({ color: "red", message: createResult.message });
+        return;
+      }
+      const result = await updateBookingOrder({
+        bookingId: booking.id,
+        bookingAt: dayjs(editBookingAt).toISOString(),
+        guestCount: target.guestCount,
+        customerPhone: editCustomerPhone,
+        areaId: target.areaId,
+        tableId: null,
+        mergeGroupId: createResult.groupId,
+      });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.ok
+          ? `${createResult.message}. ${result.message}`
+          : result.message,
+      });
+      if (result.ok) {
+        closeEditBookingModal();
+      }
+    } finally {
+      setIsEditSaving(false);
+    }
+  };
+
   const openManualAssignModal = (booking: Booking, guestForAssign?: number) => {
     setAssignFormBooking(booking);
     const initialGuestCount =
@@ -733,6 +871,7 @@ function BookingsPageContent() {
     setEditCustomerPhone(phone);
     setEditAreaId(booking.areaId);
     setEditTableId(booking.tableId);
+    setEditMergeGroupId(booking.mergeGroupId ?? null);
   };
 
   const closeEditBookingModal = () => {
@@ -742,6 +881,7 @@ function BookingsPageContent() {
     setEditCustomerPhone("");
     setEditAreaId(null);
     setEditTableId(null);
+    setEditMergeGroupId(null);
   };
 
   const submitEditBooking = async (options?: { allowDuplicate?: boolean }) => {
@@ -758,14 +898,21 @@ function BookingsPageContent() {
       });
       return;
     }
-    if ((editAreaId && !editTableId) || (!editAreaId && editTableId)) {
+    const hasTable = Boolean(editTableId);
+    const hasMergeGroup = Boolean(editMergeGroupId);
+    if (
+      (editAreaId && !hasTable && !hasMergeGroup) ||
+      (!editAreaId && (hasTable || hasMergeGroup)) ||
+      (hasTable && hasMergeGroup)
+    ) {
       notifications.show({
         color: "red",
-        message: "Vui lòng chọn cả khu vực và bàn, hoặc để trống để chờ xếp bàn.",
+        message:
+          "Vui lòng chọn khu vực kèm một bàn hoặc một cụm gộp, hoặc để trống cả hai để chờ xếp bàn.",
       });
       return;
     }
-    if (editTableSlotConflicts.length > 0) {
+    if (editTableSlotConflicts.length > 0 || editMergeGroupSlotBlocked) {
       notifications.show({
         color: "red",
         message:
@@ -785,7 +932,8 @@ function BookingsPageContent() {
             : undefined,
         customerPhone: editCustomerPhone,
         areaId: editAreaId,
-        tableId: editTableId,
+        tableId: editMergeGroupId ? null : editTableId,
+        mergeGroupId: editMergeGroupId,
         allowDuplicate: options?.allowDuplicate,
       });
       if (!result.ok && result.code === DUPLICATE_BOOKING_CODE && result.duplicates?.length) {
@@ -1447,6 +1595,51 @@ function BookingsPageContent() {
     );
   };
 
+  /**
+   * Recommendations for the create form. We don't have an area yet, so we treat the entire branch
+   * as the search space and constrain combinations to a single area (handled inside recommendMergeGroups).
+   * Visible only when the guest count exceeds the largest single table in the branch.
+   */
+  const createFormMergeRecommendations = useMemo<MergeRecommendation[]>(() => {
+    if (!createBranchId || typeof guestCount !== "number" || guestCount < 1) {
+      return [];
+    }
+    const branchTables = state.tables.filter(
+      (table) => table.branchId === createBranchId && table.status !== "locked"
+    );
+    if (branchTables.length === 0) {
+      return [];
+    }
+    const maxSingleSeats = branchTables.reduce((acc, table) => Math.max(acc, table.seats), 0);
+    if (guestCount <= maxSingleSeats) {
+      return [];
+    }
+    const nowIso = new Date().toISOString();
+    const startIso = bookingAt ? dayjs(bookingAt).toISOString() : nowIso;
+    const endIso = bookingAt ? dayjs(bookingAt).add(2, "hour").toISOString() : nowIso;
+    const pseudoBooking: Booking = {
+      id: "__create-form__",
+      customerId: "",
+      branchId: createBranchId,
+      areaId: null,
+      tableId: null,
+      mergeGroupId: null,
+      bookingAt: startIso,
+      startTime: startIso,
+      endTime: endIso,
+      status: "pending",
+      guestCount,
+      createdByUserId: currentUser?.id ?? "",
+    };
+    return recommendMergeGroups(pseudoBooking, {
+      areaTables: branchTables,
+      mergeGroups: state.mergeGroups,
+      allBookings: state.bookings,
+      targetSeats: guestCount,
+      areaId: null,
+    });
+  }, [bookingAt, createBranchId, guestCount, state.bookings, state.mergeGroups, state.tables]);
+
   const createFormDisabled = isCreating;
 
   const createForm = (
@@ -1510,6 +1703,50 @@ function BookingsPageContent() {
           <Alert color="orange" variant="light" title="Cảnh báo trùng booking">
             {duplicateWarningMessage}
           </Alert>
+        ) : null}
+        {createFormMergeRecommendations.length > 0 && typeof guestCount === "number" ? (
+          <MergeRecommendationCard
+            recommendations={createFormMergeRecommendations}
+            tables={state.tables.filter((table) => table.branchId === createBranchId)}
+            targetSeats={guestCount}
+            busyKey={recommendationBusyKey}
+            maxItems={3}
+            onUseExisting={async (rec) => {
+              if (!rec.existingGroup) {
+                return;
+              }
+              notifications.show({
+                color: "blue",
+                message: `Sau khi tạo booking, dùng "Gán" trên danh sách rồi chọn ${rec.existingGroup.mergedName}.`,
+              });
+            }}
+            onMergeAndApply={async (rec) => {
+              const firstTable = state.tables.find((table) => table.id === rec.tableIds[0]);
+              if (!firstTable || !firstTable.areaId) {
+                notifications.show({
+                  color: "red",
+                  message: "Không xác định được khu vực để gộp bàn.",
+                });
+                return;
+              }
+              setRecommendationBusyKey(`combo:${rec.tableIds.join(",")}`);
+              try {
+                const result = await createTableMergeGroup({
+                  branchId: createBranchId!,
+                  areaId: firstTable.areaId,
+                  tableIds: rec.tableIds,
+                });
+                notifications.show({
+                  color: result.ok ? "green" : "red",
+                  message: result.ok
+                    ? `${result.message}. Tạo booking xong, hệ thống sẽ ưu tiên gán vào cụm này.`
+                    : result.message,
+                });
+              } finally {
+                setRecommendationBusyKey(null);
+              }
+            }}
+          />
         ) : null}
         <Text size="sm" c="dimmed">
           Khu vực, trạng thái bàn và bàn gán sẽ được cấu hình ở mục <strong>Sơ đồ</strong>.
@@ -2435,6 +2672,47 @@ function BookingsPageContent() {
       }));
   }, [assignAreaId, assignFormBooking, assignManualGuestCount, state.bookings, state.tables]);
 
+  /** Merge-group suggestions for the assign modal — surfaces only when no single table fits the required seats. */
+  const assignModalMergeRecommendations = useMemo<MergeRecommendation[]>(() => {
+    if (!assignFormBooking) {
+      return [];
+    }
+    const requiredSeats =
+      typeof assignManualGuestCount === "number" && Number.isFinite(assignManualGuestCount)
+        ? assignManualGuestCount
+        : isGuestCountSpecified(assignFormBooking)
+          ? assignFormBooking.guestCount
+          : undefined;
+    if (!requiredSeats || requiredSeats < 1) {
+      return [];
+    }
+    const candidateTables = getCandidateTables(assignFormBooking, requiredSeats).filter((table) =>
+      assignAreaId ? table.areaId === assignAreaId : true
+    );
+    if (candidateTables.length > 0) {
+      return [];
+    }
+    const branchAreaTables = state.tables.filter(
+      (table) =>
+        table.branchId === assignFormBooking.branchId &&
+        (assignAreaId ? table.areaId === assignAreaId : true)
+    );
+    return recommendMergeGroups(assignFormBooking, {
+      areaTables: branchAreaTables,
+      mergeGroups: state.mergeGroups,
+      allBookings: state.bookings,
+      targetSeats: requiredSeats,
+      areaId: assignAreaId ?? null,
+    });
+  }, [
+    assignAreaId,
+    assignFormBooking,
+    assignManualGuestCount,
+    state.bookings,
+    state.mergeGroups,
+    state.tables,
+  ]);
+
   /** When the table list is empty only because no table in scope has enough seats (vs conflicts / no tables). */
   const assignModalTableCapacityHint = useMemo(() => {
     if (!assignFormBooking) {
@@ -2533,6 +2811,88 @@ function BookingsPageContent() {
     editGuestCount,
     editTableId,
     state.bookings,
+    state.tables,
+  ]);
+
+  const editModalMergeGroupOptions = useMemo(() => {
+    if (!editAssignCandidate || !editAreaId) {
+      return [];
+    }
+    const requiredSeats =
+      typeof editGuestCount === "number" && Number.isFinite(editGuestCount)
+        ? editGuestCount
+        : isGuestCountSpecified(editAssignCandidate)
+          ? editAssignCandidate.guestCount
+          : undefined;
+    const groups = getAssignableMergeGroups(
+      editAssignCandidate,
+      state.mergeGroups.filter((group) => group.areaId === editAreaId),
+      state.bookings,
+      requiredSeats
+    );
+    const options = groups.map((group) => ({
+      value: group.id,
+      label: `${group.mergedName} · ${group.totalCapacity} chỗ`,
+    }));
+    if (
+      editMergeGroupId &&
+      !options.some((item) => item.value === editMergeGroupId)
+    ) {
+      const current = state.mergeGroups.find((group) => group.id === editMergeGroupId);
+      if (current) {
+        options.unshift({
+          value: current.id,
+          label: `${current.mergedName} · ${current.totalCapacity} chỗ`,
+        });
+      }
+    }
+    return options;
+  }, [
+    editAreaId,
+    editAssignCandidate,
+    editGuestCount,
+    editMergeGroupId,
+    state.bookings,
+    state.mergeGroups,
+  ]);
+
+  const editModalMergeRecommendations = useMemo<MergeRecommendation[]>(() => {
+    if (!editAssignCandidate) {
+      return [];
+    }
+    const requiredSeats =
+      typeof editGuestCount === "number" && Number.isFinite(editGuestCount)
+        ? editGuestCount
+        : isGuestCountSpecified(editAssignCandidate)
+          ? editAssignCandidate.guestCount
+          : undefined;
+    if (!requiredSeats || requiredSeats < 1) {
+      return [];
+    }
+    const candidateTables = getCandidateTables(editAssignCandidate, requiredSeats).filter((table) =>
+      editAreaId ? table.areaId === editAreaId : true
+    );
+    if (candidateTables.length > 0) {
+      return [];
+    }
+    const branchAreaTables = state.tables.filter(
+      (table) =>
+        table.branchId === editAssignCandidate.branchId &&
+        (editAreaId ? table.areaId === editAreaId : true)
+    );
+    return recommendMergeGroups(editAssignCandidate, {
+      areaTables: branchAreaTables,
+      mergeGroups: state.mergeGroups,
+      allBookings: state.bookings,
+      targetSeats: requiredSeats,
+      areaId: editAreaId ?? null,
+    });
+  }, [
+    editAreaId,
+    editAssignCandidate,
+    editGuestCount,
+    state.bookings,
+    state.mergeGroups,
     state.tables,
   ]);
 
@@ -2891,6 +3251,7 @@ function BookingsPageContent() {
                 onChange={(value) => {
                   setEditAreaId(value);
                   setEditTableId(null);
+                  setEditMergeGroupId(null);
                 }}
                 searchable
                 clearable
@@ -2902,21 +3263,100 @@ function BookingsPageContent() {
                 placeholder={editAreaId ? "Chọn bàn" : "Chọn khu vực trước"}
                 data={editModalTableOptions}
                 value={editTableId}
-                onChange={setEditTableId}
+                onChange={(value) => {
+                  setEditTableId(value);
+                  if (value) {
+                    setEditMergeGroupId(null);
+                  }
+                }}
                 searchable
                 clearable
-                disabled={!editAreaId}
+                disabled={!editAreaId || Boolean(editMergeGroupId)}
                 size={isCompact ? "md" : "sm"}
                 comboboxProps={{ zIndex: portalModalOverlayPopoverProps.zIndex }}
               />
             </Group>
+            {editAreaId && editModalMergeGroupOptions.length > 0 ? (
+              <Select
+                label="Cụm gộp (Bàn gộp)"
+                placeholder="Chọn cụm gộp thay cho bàn lẻ"
+                data={editModalMergeGroupOptions}
+                value={editMergeGroupId}
+                onChange={(value) => {
+                  setEditMergeGroupId(value);
+                  if (value) {
+                    setEditTableId(null);
+                  }
+                }}
+                searchable
+                clearable
+                size={isCompact ? "md" : "sm"}
+                comboboxProps={{ zIndex: portalModalOverlayPopoverProps.zIndex }}
+              />
+            ) : null}
             {editModalTableCapacityHint ? (
               <Text size="xs" c="dimmed">
                 {editModalTableCapacityHint}
               </Text>
             ) : null}
+            {editBooking && editModalMergeRecommendations.length > 0 ? (
+              <MergeRecommendationCard
+                recommendations={editModalMergeRecommendations}
+                tables={state.tables.filter(
+                  (table) => table.branchId === editBooking.branchId
+                )}
+                targetSeats={
+                  typeof editGuestCount === "number"
+                    ? editGuestCount
+                    : editBooking.guestCount
+                }
+                areaName={
+                  editAreaId
+                    ? state.areas.find((area) => area.id === editAreaId)?.name ?? null
+                    : null
+                }
+                busyKey={recommendationBusyKey}
+                onUseExisting={async (rec) => {
+                  if (!rec.existingGroup) {
+                    return;
+                  }
+                  setEditAreaId(rec.existingGroup.areaId);
+                  setEditMergeGroupId(rec.existingGroup.id);
+                  setEditTableId(null);
+                  notifications.show({
+                    color: "blue",
+                    message: `Đã chọn ${rec.existingGroup.mergedName}. Bấm Lưu để áp dụng.`,
+                  });
+                }}
+                onMergeAndApply={async (rec) => {
+                  const firstTable = state.tables.find(
+                    (table) => table.id === rec.tableIds[0]
+                  );
+                  if (!firstTable?.areaId) {
+                    notifications.show({
+                      color: "red",
+                      message: "Không xác định được khu vực để gộp bàn.",
+                    });
+                    return;
+                  }
+                  setRecommendationBusyKey(`combo:${rec.tableIds.join(",")}`);
+                  try {
+                    await runEditMergeAndAssign(editBooking, {
+                      areaId: firstTable.areaId,
+                      tableIds: rec.tableIds,
+                      guestCount:
+                        typeof editGuestCount === "number"
+                          ? editGuestCount
+                          : undefined,
+                    });
+                  } finally {
+                    setRecommendationBusyKey(null);
+                  }
+                }}
+              />
+            ) : null}
             <Text size="xs" c="dimmed">
-              Để trống khu vực và bàn nếu booking vẫn chờ xếp bàn.
+              Để trống khu vực, bàn và cụm gộp nếu booking vẫn chờ xếp bàn.
             </Text>
             <Group justify="flex-end" gap="sm">
               <Button variant="default" onClick={closeEditBookingModal}>
@@ -2924,7 +3364,7 @@ function BookingsPageContent() {
               </Button>
               <Button
                 loading={isEditSaving}
-                disabled={editTableSlotConflicts.length > 0}
+                disabled={editTableSlotConflicts.length > 0 || editMergeGroupSlotBlocked}
                 onClick={() => void submitEditBooking()}
               >
                 Lưu
@@ -3004,6 +3444,68 @@ function BookingsPageContent() {
                 {assignModalTableCapacityHint}
               </Text>
             ) : null}
+            {assignFormBooking && assignModalMergeRecommendations.length > 0 ? (
+              <MergeRecommendationCard
+                recommendations={assignModalMergeRecommendations}
+                tables={state.tables.filter(
+                  (table) => table.branchId === assignFormBooking.branchId
+                )}
+                targetSeats={
+                  typeof assignManualGuestCount === "number"
+                    ? assignManualGuestCount
+                    : assignFormBooking.guestCount
+                }
+                areaName={
+                  assignAreaId
+                    ? state.areas.find((area) => area.id === assignAreaId)?.name ?? null
+                    : null
+                }
+                busyKey={recommendationBusyKey}
+                onUseExisting={async (rec) => {
+                  if (!rec.existingGroup) {
+                    return;
+                  }
+                  setRecommendationBusyKey(`existing:${rec.existingGroup.id}`);
+                  try {
+                    await runAssignToMergeGroup(assignFormBooking, {
+                      areaId: rec.existingGroup.areaId,
+                      groupId: rec.existingGroup.id,
+                      guestCount:
+                        typeof assignManualGuestCount === "number"
+                          ? assignManualGuestCount
+                          : undefined,
+                    });
+                  } finally {
+                    setRecommendationBusyKey(null);
+                  }
+                }}
+                onMergeAndApply={async (rec) => {
+                  const firstTable = state.tables.find(
+                    (table) => table.id === rec.tableIds[0]
+                  );
+                  if (!firstTable || !firstTable.areaId) {
+                    notifications.show({
+                      color: "red",
+                      message: "Không xác định được khu vực để gộp bàn.",
+                    });
+                    return;
+                  }
+                  setRecommendationBusyKey(`combo:${rec.tableIds.join(",")}`);
+                  try {
+                    await runMergeAndAssign(assignFormBooking, {
+                      areaId: firstTable.areaId,
+                      tableIds: rec.tableIds,
+                      guestCount:
+                        typeof assignManualGuestCount === "number"
+                          ? assignManualGuestCount
+                          : undefined,
+                    });
+                  } finally {
+                    setRecommendationBusyKey(null);
+                  }
+                }}
+              />
+            ) : null}
             <Group justify="flex-end">
               <Button variant="default" onClick={() => setAssignFormBooking(null)}>
                 Đóng
@@ -3033,5 +3535,97 @@ function BookingsPageContent() {
         </Modal>
       ) : null}
     </Stack>
+  );
+}
+
+interface MergeRecommendationCardProps {
+  recommendations: MergeRecommendation[];
+  tables: { id: string; name: string; seats: number }[];
+  targetSeats: number;
+  /** Optional area name for context in the heading. */
+  areaName?: string | null;
+  /** Limit how many suggestions to render (UI conciseness). */
+  maxItems?: number;
+  /** When set, label the action button as "Dùng cụm" instead of just "Áp dụng". */
+  applyLabel?: string;
+  busyKey?: string | null;
+  onUseExisting: (group: MergeRecommendation) => void | Promise<void>;
+  onMergeAndApply: (combo: MergeRecommendation) => void | Promise<void>;
+}
+
+function MergeRecommendationCard({
+  recommendations,
+  tables,
+  targetSeats,
+  areaName,
+  maxItems = 3,
+  busyKey,
+  onUseExisting,
+  onMergeAndApply,
+}: MergeRecommendationCardProps) {
+  const tableMap = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; seats: number }>();
+    for (const table of tables) {
+      map.set(table.id, table);
+    }
+    return map;
+  }, [tables]);
+  if (recommendations.length === 0) {
+    return null;
+  }
+  const items = recommendations.slice(0, maxItems);
+  return (
+    <Alert
+      color="blue"
+      variant="light"
+      title={`Gợi ý gộp bàn cho ${targetSeats} khách${areaName ? ` · ${areaName}` : ""}`}
+    >
+      <Stack gap="xs">
+        <Text size="xs" c="dimmed">
+          Không có bàn lẻ nào đủ chỗ. Áp dụng một trong các gợi ý dưới đây để gộp bàn và gán booking ngay.
+        </Text>
+        {items.map((rec) => {
+          const labelTables = rec.tableIds
+            .map((id) => tableMap.get(id)?.name ?? "?")
+            .join(" + ");
+          const isExisting = rec.kind === "existing-group";
+          const ctaLabel = isExisting
+            ? `Dùng ${rec.existingGroup?.mergedName ?? "cụm có sẵn"}`
+            : `Gộp & gán: ${labelTables}`;
+          const subtitle = isExisting
+            ? `${labelTables} · ${rec.totalCapacity} chỗ`
+            : `Tổng ${rec.totalCapacity} chỗ`;
+          const itemKey = isExisting
+            ? `existing:${rec.existingGroup?.id ?? rec.key}`
+            : `combo:${rec.tableIds.join(",")}`;
+          return (
+            <Group key={rec.key} justify="space-between" wrap="nowrap" gap="xs">
+              <Stack gap={0} style={{ minWidth: 0 }}>
+                <Text size="sm" fw={600} lineClamp={1}>
+                  {ctaLabel}
+                </Text>
+                <Text size="xs" c="dimmed" lineClamp={1}>
+                  {subtitle}
+                </Text>
+              </Stack>
+              <Button
+                size="xs"
+                variant={isExisting ? "filled" : "light"}
+                loading={busyKey === itemKey}
+                onClick={() => {
+                  if (isExisting) {
+                    void onUseExisting(rec);
+                  } else {
+                    void onMergeAndApply(rec);
+                  }
+                }}
+              >
+                {isExisting ? "Dùng cụm" : "Gộp & gán"}
+              </Button>
+            </Group>
+          );
+        })}
+      </Stack>
+    </Alert>
   );
 }

@@ -33,6 +33,7 @@ import {
 import {
   FLOOR_DEFAULT_NODE_SPACING_PX,
 } from "./floor-map-layout";
+import { packMergeGroupTablePositions } from "./floor-map-merge-layout";
 import {
   AppStateSnapshot,
   AppUser,
@@ -41,6 +42,7 @@ import {
   BookingWaitlistEntry,
   Role,
   TableBlockState,
+  TableMergeGroup,
   TableStatus,
 } from "./types";
 
@@ -59,6 +61,8 @@ type CreateBookingInput = {
   branchId: string;
   areaId?: string | null;
   tableId?: string | null;
+  /** When set, the booking is held by a Bàn gộp group instead of a single table (`tableId` is ignored). */
+  mergeGroupId?: string | null;
   guestCount?: number;
   bookingAt: string;
   note?: string;
@@ -395,6 +399,89 @@ function duplicateBookingResult(
   };
 }
 
+type MergeGroupAssignContext =
+  | {
+      ok: true;
+      mergedName: string;
+      areaId: string;
+      branchId: string;
+      totalCapacity: number;
+      memberTableIds: string[];
+      /** Largest seat table inside the group — used to satisfy NOT NULL on RPC p_table_id (still nullified in SQL). */
+      fallbackTableId: string;
+    }
+  | { ok: false; message: string };
+
+async function assertMergeGroupBookingAllowed(
+  client: ReturnType<typeof ensureClient>,
+  input: {
+    mergeGroupId: string;
+    branchId: string;
+    areaId?: string | null;
+    guestCount: number;
+  }
+): Promise<MergeGroupAssignContext> {
+  const { data: groupRow, error: groupErr } = await (client as any)
+    .from("table_merge_groups")
+    .select("id, branch_id, area_id, status, merged_name, total_capacity")
+    .eq("id", input.mergeGroupId)
+    .maybeSingle();
+  if (groupErr) {
+    return { ok: false, message: groupErr.message };
+  }
+  if (!groupRow) {
+    return { ok: false, message: "Cụm bàn gộp không tồn tại." };
+  }
+  if (groupRow.status !== "active") {
+    return { ok: false, message: "Cụm bàn gộp đã được giải tán." };
+  }
+  if (groupRow.branch_id !== input.branchId) {
+    return { ok: false, message: "Cụm bàn gộp không thuộc cùng chi nhánh với booking." };
+  }
+  if (input.areaId && groupRow.area_id !== input.areaId) {
+    return { ok: false, message: "Cụm bàn gộp không thuộc khu vực đã chọn." };
+  }
+  if (input.guestCount > groupRow.total_capacity) {
+    return {
+      ok: false,
+      message: `Số khách vượt sức chứa cụm bàn gộp (${groupRow.total_capacity} ghế).`,
+    };
+  }
+
+  const { data: members, error: membersErr } = await (client as any)
+    .from("table_merge_members")
+    .select("table_id, tables(id, seats)")
+    .eq("group_id", input.mergeGroupId);
+  if (membersErr) {
+    return { ok: false, message: membersErr.message };
+  }
+  const memberRows = (members ?? []) as Array<{
+    table_id: string;
+    tables: { id: string; seats: number } | { id: string; seats: number }[] | null;
+  }>;
+  if (memberRows.length === 0) {
+    return { ok: false, message: "Cụm bàn gộp không còn bàn thành viên." };
+  }
+  const memberSeats = memberRows.map((row) => {
+    const join = Array.isArray(row.tables) ? row.tables[0] : row.tables;
+    return { id: row.table_id, seats: join?.seats ?? 0 };
+  });
+  const fallback = memberSeats.reduce(
+    (best, current) => (current.seats > best.seats ? current : best),
+    memberSeats[0]
+  );
+
+  return {
+    ok: true,
+    mergedName: groupRow.merged_name,
+    areaId: groupRow.area_id,
+    branchId: groupRow.branch_id,
+    totalCapacity: groupRow.total_capacity,
+    memberTableIds: memberSeats.map((row) => row.id),
+    fallbackTableId: fallback.id,
+  };
+}
+
 async function refreshTableAvailabilityForBooking(
   client: ReturnType<typeof ensureClient>,
   tableId: string
@@ -481,6 +568,8 @@ export async function fetchSnapshot(options?: {
     customersResult,
     bookingsResult,
     notificationsResult,
+    mergeGroupsResult,
+    mergeMembersResult,
     bookingRuntimeSettings,
   ] = await Promise.all([
     usersPromise,
@@ -493,6 +582,15 @@ export async function fetchSnapshot(options?: {
       .from("internal_notifications")
       .select("*")
       .order("created_at", { ascending: false }),
+    client
+      .from("table_merge_groups")
+      .select("*")
+      .eq("status", "active")
+      .order("auto_number", { ascending: true }),
+    client
+      .from("table_merge_members")
+      .select("group_id, table_id, order_index")
+      .order("order_index", { ascending: true }),
     getBookingRuntimeSettings(client),
   ]);
 
@@ -503,6 +601,8 @@ export async function fetchSnapshot(options?: {
     customersResult.error,
     bookingsResult.error,
     notificationsResult.error,
+    mergeGroupsResult.error,
+    mergeMembersResult.error,
   ].filter(Boolean);
 
   if (errors.length > 0) {
@@ -516,6 +616,7 @@ export async function fetchSnapshot(options?: {
       branchId: item.branch_id,
       areaId: item.area_id,
       tableId: item.table_id,
+      mergeGroupId: item.merge_group_id ?? null,
       guestCount: item.guest_count,
       bookingAt: item.booking_at,
       startTime: item.start_time ?? item.booking_at,
@@ -532,6 +633,41 @@ export async function fetchSnapshot(options?: {
       lastEditedByUserId: item.last_edited_by_user_id ?? undefined,
       status: item.status as BookingStatus,
     }));
+
+  const mergeGroupRows = (mergeGroupsResult.data ?? []) as Array<{
+    id: string;
+    branch_id: string;
+    area_id: string;
+    auto_number: number | null;
+    merged_name: string;
+    total_capacity: number;
+    status: string;
+    created_at: string;
+    released_at: string | null;
+  }>;
+  const mergeMemberRows = (mergeMembersResult.data ?? []) as Array<{
+    group_id: string;
+    table_id: string;
+    order_index: number;
+  }>;
+  const membersByGroup = new Map<string, string[]>();
+  for (const member of mergeMemberRows) {
+    const bucket = membersByGroup.get(member.group_id) ?? [];
+    bucket.push(member.table_id);
+    membersByGroup.set(member.group_id, bucket);
+  }
+  const mergeGroups: TableMergeGroup[] = mergeGroupRows.map((row) => ({
+    id: row.id,
+    branchId: row.branch_id,
+    areaId: row.area_id,
+    autoNumber: row.auto_number ?? 0,
+    mergedName: row.merged_name,
+    totalCapacity: row.total_capacity ?? 0,
+    tableIds: membersByGroup.get(row.id) ?? [],
+    status: row.status === "released" ? "released" : "active",
+    createdAt: row.created_at,
+    releasedAt: row.released_at,
+  }));
 
   let tablesRowList = tablesResult.data ?? [];
   const orphanTableIds = tablesRowList
@@ -596,6 +732,7 @@ export async function fetchSnapshot(options?: {
         note: item.note ?? undefined,
       })) ?? [],
     bookings,
+    mergeGroups,
     notifications:
       notificationsResult.data?.map((item) => ({
         id: item.id,
@@ -630,6 +767,7 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     guestType: input.guestType,
   });
   const hasAssignedTable = Boolean(input.areaId && input.tableId);
+  const hasAssignedMergeGroup = Boolean(input.mergeGroupId);
 
   const customerResult = await upsertCustomerForBooking(client, {
     customerName: input.customerName,
@@ -651,6 +789,53 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     if (duplicates.length > 0) {
       return duplicateBookingResult(duplicates, normalizedAt);
     }
+  }
+
+  if (hasAssignedMergeGroup) {
+    const groupCheck = await assertMergeGroupBookingAllowed(client, {
+      mergeGroupId: input.mergeGroupId!,
+      branchId: input.branchId,
+      areaId: input.areaId ?? null,
+      guestCount: normalizedGuestCount,
+    });
+    if (!groupCheck.ok) {
+      return { ok: false, message: groupCheck.message };
+    }
+
+    const { data: createData, error: createError } = await (client as any).rpc(
+      "create_or_queue_booking",
+      {
+        p_customer_id: customerId,
+        p_branch_id: input.branchId,
+        p_area_id: groupCheck.areaId,
+        p_table_id: groupCheck.fallbackTableId,
+        p_guest_count: normalizedGuestCount,
+        p_start_time: normalizedAt,
+        p_end_time: slotEnd,
+        p_note: bookingNote,
+        p_created_by_user_id: input.createdByUserId,
+        p_merge_group_id: input.mergeGroupId,
+      }
+    );
+    if (createError) {
+      return { ok: false, message: createError.message };
+    }
+    const outcome = Array.isArray(createData) ? createData[0] : createData;
+    if (!outcome || typeof outcome !== "object") {
+      return { ok: false, message: "Không nhận được phản hồi khi tạo booking cụm bàn gộp." };
+    }
+
+    await client.from("internal_notifications").insert({
+      title: "Đặt bàn mới",
+      message: `Đã xác nhận booking cho ${input.customerName} trên cụm ${groupCheck.mergedName} lúc ${dayjs(
+        normalizedAt
+      ).format("HH:mm DD/MM/YYYY")}.`,
+      created_at: dayjs().toISOString(),
+      is_read: false,
+      branch_id: input.branchId,
+    });
+
+    return { ok: true, message: `Đã tạo booking trên cụm ${groupCheck.mergedName}.` };
   }
 
   if (hasAssignedTable) {
@@ -779,11 +964,13 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
 export async function assignBookingToTableInSupabase(input: {
   bookingId: string;
   areaId: string;
-  tableId: string;
+  tableId?: string | null;
+  /** When set, assign the booking to a merge group instead of a single table. */
+  mergeGroupId?: string | null;
   guestCount?: number;
 }): Promise<Result> {
   const client = ensureClient();
-  const { bookingId, areaId, tableId, guestCount } = input;
+  const { bookingId, areaId, tableId, mergeGroupId, guestCount } = input;
   const { data: booking, error: bookingErr } = await (client as any)
     .from("bookings")
     .select("id, branch_id, guest_count, booking_at, start_time, end_time, status, note, customer_id, created_by_user_id")
@@ -801,6 +988,49 @@ export async function assignBookingToTableInSupabase(input: {
       ? Math.max(1, Math.round(guestCount))
       : booking.guest_count;
   const runtimeSettings = await getBookingRuntimeSettings(client);
+  const normalizedStart = dayjs(booking.start_time ?? booking.booking_at).toISOString();
+  const normalizedEnd = dayjs(
+    booking.end_time ??
+      dayjs(normalizedStart).add(runtimeSettings.standardTurnaroundMinutes, "minute").toISOString()
+  ).toISOString();
+
+  if (mergeGroupId) {
+    const groupCheck = await assertMergeGroupBookingAllowed(client, {
+      mergeGroupId,
+      branchId: booking.branch_id,
+      areaId,
+      guestCount: nextGuestCount,
+    });
+    if (!groupCheck.ok) {
+      return { ok: false, message: groupCheck.message };
+    }
+
+    const { data: assignData, error: assignErr } = await (client as any).rpc(
+      "assign_or_queue_pending_booking",
+      {
+        p_booking_id: bookingId,
+        p_table_id: groupCheck.fallbackTableId,
+        p_area_id: groupCheck.areaId,
+        p_guest_count: nextGuestCount,
+        p_start_time: normalizedStart,
+        p_end_time: normalizedEnd,
+        p_merge_group_id: mergeGroupId,
+      }
+    );
+    if (assignErr) {
+      return { ok: false, message: assignErr.message };
+    }
+    const outcome = Array.isArray(assignData) ? assignData[0] : assignData;
+    if (!outcome || typeof outcome !== "object") {
+      return { ok: false, message: "Không nhận được phản hồi khi gán cụm bàn gộp." };
+    }
+
+    return { ok: true, message: `Đã gán booking vào cụm ${groupCheck.mergedName}.` };
+  }
+
+  if (!tableId) {
+    return { ok: false, message: "Vui lòng chọn bàn hoặc cụm bàn gộp." };
+  }
 
   const { data: table, error: tableErr } = await client
     .from("tables")
@@ -819,12 +1049,6 @@ export async function assignBookingToTableInSupabase(input: {
       message: `Số khách không được vượt quá sức chứa bàn (${table.seats} ghế).`,
     };
   }
-
-  const normalizedStart = dayjs(booking.start_time ?? booking.booking_at).toISOString();
-  const normalizedEnd = dayjs(
-    booking.end_time ??
-      dayjs(normalizedStart).add(runtimeSettings.standardTurnaroundMinutes, "minute").toISOString()
-  ).toISOString();
 
   const { data: assignData, error: assignErr } = await (client as any).rpc(
     "assign_or_queue_pending_booking",
@@ -920,6 +1144,8 @@ export async function updateBookingOrderInSupabase(input: {
   customerPhone?: string;
   areaId: string | null;
   tableId: string | null;
+  /** When set, retarget the booking onto a merge group (clears table_id). */
+  mergeGroupId?: string | null;
   editedByUserId: string;
   allowDuplicate?: boolean;
 }): Promise<Result> {
@@ -927,7 +1153,7 @@ export async function updateBookingOrderInSupabase(input: {
   const { data: booking, error: loadErr } = await (client as any)
     .from("bookings")
     .select(
-      "id, status, note, branch_id, area_id, table_id, guest_count, customer_id, booking_at, start_time, end_time"
+      "id, status, note, branch_id, area_id, table_id, merge_group_id, guest_count, customer_id, booking_at, start_time, end_time"
     )
     .eq("id", input.bookingId)
     .maybeSingle();
@@ -957,10 +1183,18 @@ export async function updateBookingOrderInSupabase(input: {
 
   const nextAreaId = input.areaId;
   const nextTableId = input.tableId;
-  if (Boolean(nextAreaId) !== Boolean(nextTableId)) {
+  const nextMergeGroupId = input.mergeGroupId ?? null;
+  const hasNextTarget = Boolean(nextTableId) || Boolean(nextMergeGroupId);
+  if (Boolean(nextAreaId) !== hasNextTarget) {
     return {
       ok: false,
-      message: "Vui lòng chọn cả khu vực và bàn, hoặc để trống để chờ xếp bàn.",
+      message: "Vui lòng chọn cả khu vực và bàn (hoặc cụm bàn gộp), hoặc để trống để chờ xếp bàn.",
+    };
+  }
+  if (nextTableId && nextMergeGroupId) {
+    return {
+      ok: false,
+      message: "Chỉ chọn một trong hai: bàn lẻ hoặc cụm bàn gộp.",
     };
   }
 
@@ -1060,13 +1294,28 @@ export async function updateBookingOrderInSupabase(input: {
   const previousStartIso = dayjs(booking.start_time ?? booking.booking_at).toISOString();
   const timeChanged = previousStartIso !== normalizedAt;
   const assignmentChanged =
-    (booking.area_id ?? null) !== nextAreaId || (booking.table_id ?? null) !== nextTableId;
+    (booking.area_id ?? null) !== nextAreaId ||
+    (booking.table_id ?? null) !== nextTableId ||
+    (booking.merge_group_id ?? null) !== nextMergeGroupId;
 
   const guestCountSpecified =
     typeof input.guestCount === "number" && Number.isFinite(input.guestCount);
   const effectiveGuestCount = guestCountSpecified
     ? Math.max(1, Math.round(input.guestCount!))
     : Math.max(1, Math.round(booking.guest_count));
+
+  let mergeGroupContext: MergeGroupAssignContext | null = null;
+  if (nextMergeGroupId) {
+    mergeGroupContext = await assertMergeGroupBookingAllowed(client, {
+      mergeGroupId: nextMergeGroupId,
+      branchId: booking.branch_id,
+      areaId: nextAreaId,
+      guestCount: effectiveGuestCount,
+    });
+    if (!mergeGroupContext.ok) {
+      return { ok: false, message: mergeGroupContext.message };
+    }
+  }
 
   if (nextTableId) {
     const { data: table, error: tableErr } = await client
@@ -1132,6 +1381,47 @@ export async function updateBookingOrderInSupabase(input: {
     refreshTableIds.add(nextTableId);
   }
 
+  if (status === "pending" && mergeGroupContext && mergeGroupContext.ok && nextAreaId) {
+    const { data: assignData, error: assignErr } = await (client as any).rpc(
+      "assign_or_queue_pending_booking",
+      {
+        p_booking_id: input.bookingId,
+        p_table_id: mergeGroupContext.fallbackTableId,
+        p_area_id: mergeGroupContext.areaId,
+        p_guest_count: effectiveGuestCount,
+        p_start_time: normalizedAt,
+        p_end_time: slotEnd,
+        p_merge_group_id: nextMergeGroupId,
+      }
+    );
+    if (assignErr) {
+      return { ok: false, message: assignErr.message };
+    }
+    const outcome = Array.isArray(assignData) ? assignData[0] : assignData;
+    if (!outcome || typeof outcome !== "object") {
+      return { ok: false, message: "Không nhận được phản hồi khi gán cụm bàn gộp." };
+    }
+
+    const clearedNote = guestCountSpecified
+      ? stripUnknownGuestTag(booking.note as string | undefined) ?? null
+      : undefined;
+    const { error: metaErr } = await (client as any)
+      .from("bookings")
+      .update({
+        ...lastEditedPatch,
+        ...(clearedNote !== undefined ? { note: clearedNote } : {}),
+      })
+      .eq("id", input.bookingId);
+    if (metaErr) {
+      return { ok: false, message: metaErr.message };
+    }
+
+    return {
+      ok: true,
+      message: `Đã cập nhật booking và gán vào cụm ${mergeGroupContext.mergedName}.`,
+    };
+  }
+
   if (status === "pending" && nextTableId && nextAreaId) {
     const { data: assignData, error: assignErr } = await (client as any).rpc(
       "assign_or_queue_pending_booking",
@@ -1195,11 +1485,12 @@ export async function updateBookingOrderInSupabase(input: {
     start_time: normalizedAt,
     end_time: slotEnd,
     area_id: nextAreaId,
-    table_id: nextTableId,
+    table_id: nextMergeGroupId ? null : nextTableId,
+    merge_group_id: nextMergeGroupId,
     ...lastEditedPatch,
   };
 
-  if (!nextTableId) {
+  if (!hasNextTarget) {
     updatePayload.status = "pending";
     updatePayload.checked_in_at = null;
   } else if (status === "pending") {
@@ -1495,13 +1786,136 @@ export async function confirmWaitlistOfferInSupabase(waitlistEntryId: string): P
   };
 }
 
-export async function createTableMergeGroupInSupabase(input: {
+type MergeGroupCreateInput = {
   branchId: string;
   areaId: string;
-  mergedName: string;
   tableIds: string[];
   createdByUserId?: string;
-}): Promise<Result> {
+};
+
+type MergeGroupCreateResult = Result & { groupId?: string; mergedName?: string };
+
+/**
+ * Pick the lowest unused positive integer among active merge groups of an area
+ * (so released numbers can be reused — per user spec).
+ */
+async function pickNextMergeGroupNumberForArea(
+  client: ReturnType<typeof ensureClient>,
+  areaId: string
+): Promise<number> {
+  const { data, error } = await (client as any)
+    .from("table_merge_groups")
+    .select("auto_number")
+    .eq("area_id", areaId)
+    .eq("status", "active");
+  if (error) {
+    throw new Error(error.message);
+  }
+  const used = new Set<number>(
+    ((data ?? []) as Array<{ auto_number: number | null }>)
+      .map((row) => row.auto_number)
+      .filter((n): n is number => typeof n === "number" && n > 0)
+  );
+  let candidate = 1;
+  while (used.has(candidate)) {
+    candidate += 1;
+  }
+  return candidate;
+}
+
+async function ensureTablesAreFreeToMerge(
+  client: ReturnType<typeof ensureClient>,
+  tableIds: string[]
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (tableIds.length === 0) {
+    return { ok: true };
+  }
+  const { data, error } = await (client as any)
+    .from("table_merge_members")
+    .select("table_id, table_merge_groups!inner(status)")
+    .in("table_id", tableIds)
+    .eq("table_merge_groups.status", "active");
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  const busyIds = new Set(
+    ((data ?? []) as Array<{ table_id: string }>).map((row) => row.table_id)
+  );
+  if (busyIds.size === 0) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    message: `Có bàn đã thuộc cụm gộp khác (${busyIds.size} bàn). Vui lòng bỏ gộp trước khi gộp mới.`,
+  };
+}
+
+/** Snap active merge members into one adjacent row on the area floor grid (+ one empty plug cell). */
+async function packMergeGroupTablesOnFloor(
+  client: ReturnType<typeof ensureClient>,
+  areaId: string,
+  memberTableIds: string[],
+  preferredAnchor?: { row: number; col: number }
+): Promise<{ packed: boolean }> {
+  if (memberTableIds.length === 0) {
+    return { packed: false };
+  }
+  const { data: area, error: areaErr } = await client
+    .from("areas")
+    .select("floor_grid_columns, floor_grid_rows, floor_node_spacing")
+    .eq("id", areaId)
+    .maybeSingle();
+  if (areaErr || !area) {
+    return { packed: false };
+  }
+  const gridColumns =
+    typeof area.floor_grid_columns === "number" ? area.floor_grid_columns : 12;
+  const gridRows = typeof area.floor_grid_rows === "number" ? area.floor_grid_rows : 8;
+  const nodeSpacing =
+    typeof area.floor_node_spacing === "number" ? area.floor_node_spacing : 168;
+
+  const { data: areaTables, error: tablesErr } = await client
+    .from("tables")
+    .select("id, position_x, position_y")
+    .eq("area_id", areaId);
+  if (tablesErr) {
+    return { packed: false };
+  }
+
+  const packResult = packMergeGroupTablePositions({
+    memberTableIds,
+    areaTables: (areaTables ?? []).map((row) => ({
+      id: row.id,
+      positionX: row.position_x,
+      positionY: row.position_y,
+    })),
+    gridColumns,
+    gridRows,
+    preferredAnchor,
+  });
+  if (!packResult) {
+    return { packed: false };
+  }
+
+  if (packResult.gridRows > gridRows) {
+    await updateAreaFloorLayoutInSupabase(areaId, {
+      floorGridColumns: gridColumns,
+      floorGridRows: packResult.gridRows,
+      floorNodeSpacing: nodeSpacing,
+    });
+  }
+
+  await Promise.all(
+    [...packResult.positionUpdates.entries()].map(([tableId, pos]) =>
+      updateTablePositionInSupabase(tableId, pos.col, pos.row)
+    )
+  );
+  return { packed: true };
+}
+
+export async function createTableMergeGroupInSupabase(
+  input: MergeGroupCreateInput
+): Promise<MergeGroupCreateResult> {
   const client = ensureClient();
   const tableIds = [...new Set(input.tableIds)].filter(Boolean);
   if (tableIds.length < 2) {
@@ -1510,7 +1924,7 @@ export async function createTableMergeGroupInSupabase(input: {
 
   const { data: tables, error: loadErr } = await client
     .from("tables")
-    .select("id, seats, branch_id, area_id")
+    .select("id, name, seats, status, branch_id, area_id")
     .in("id", tableIds);
   if (loadErr) {
     return { ok: false, message: loadErr.message };
@@ -1521,12 +1935,17 @@ export async function createTableMergeGroupInSupabase(input: {
   if (tables.some((table) => table.branch_id !== input.branchId || table.area_id !== input.areaId)) {
     return { ok: false, message: "Các bàn phải cùng chi nhánh và cùng khu vực." };
   }
+  if (tables.some((table) => (table.status as TableStatus) === "locked")) {
+    return { ok: false, message: "Không gộp được bàn đang khóa." };
+  }
+  const lockCheck = await ensureTablesAreFreeToMerge(client, tableIds);
+  if (!lockCheck.ok) {
+    return { ok: false, message: lockCheck.message };
+  }
 
   const totalCapacity = tables.reduce((acc, table) => acc + Math.max(1, table.seats ?? 1), 0);
-  const groupName = input.mergedName.trim();
-  if (!groupName) {
-    return { ok: false, message: "Vui lòng nhập tên cụm bàn gộp." };
-  }
+  const nextNumber = await pickNextMergeGroupNumberForArea(client, input.areaId);
+  const groupName = `Bàn gộp ${nextNumber}`;
 
   const { data: groupRow, error: groupErr } = await (client as any)
     .from("table_merge_groups")
@@ -1534,6 +1953,7 @@ export async function createTableMergeGroupInSupabase(input: {
       branch_id: input.branchId,
       area_id: input.areaId,
       merged_name: groupName,
+      auto_number: nextNumber,
       total_capacity: totalCapacity,
       created_by_user_id: input.createdByUserId ?? null,
       status: "active",
@@ -1553,37 +1973,341 @@ export async function createTableMergeGroupInSupabase(input: {
     .from("table_merge_members")
     .insert(membersPayload);
   if (membersErr) {
+    // Rollback: drop the group so we don't leave a phantom record.
+    await (client as any).from("table_merge_groups").delete().eq("id", groupRow.id);
     return { ok: false, message: membersErr.message };
   }
 
-  return { ok: true, message: `Đã gộp ${tableIds.length} bàn thành cụm "${groupName}".` };
+  const packResult = await packMergeGroupTablesOnFloor(client, input.areaId, tableIds);
+  let message = `Đã gộp ${tableIds.length} bàn thành "${groupName}".`;
+  if (!packResult.packed) {
+    message +=
+      " Chưa xếp được cụm trên sơ đồ tự động — vào Sơ đồ (chỉnh sửa) để kéo các bàn sát nhau.";
+  }
+
+  return {
+    ok: true,
+    groupId: groupRow.id,
+    mergedName: groupName,
+    message,
+  };
 }
 
-export async function listTableMergeGroupsInSupabase(branchId: string): Promise<
-  Array<{
+export async function addTableToMergeGroupInSupabase(input: {
+  groupId: string;
+  tableId: string;
+  /** When false, membership is updated but floor positions are left unchanged (caller saved layout). */
+  repackFloor?: boolean;
+}): Promise<Result> {
+  const client = ensureClient();
+  const { data: group, error: groupErr } = await (client as any)
+    .from("table_merge_groups")
+    .select("id, branch_id, area_id, status, merged_name, total_capacity")
+    .eq("id", input.groupId)
+    .maybeSingle();
+  if (groupErr || !group) {
+    return { ok: false, message: groupErr?.message ?? "Không tìm thấy cụm bàn gộp." };
+  }
+  if (group.status !== "active") {
+    return { ok: false, message: "Cụm bàn gộp đã được giải tán, không thể thêm bàn." };
+  }
+
+  const { data: table, error: tableErr } = await client
+    .from("tables")
+    .select("id, name, seats, status, branch_id, area_id")
+    .eq("id", input.tableId)
+    .maybeSingle();
+  if (tableErr || !table) {
+    return { ok: false, message: tableErr?.message ?? "Không tìm thấy bàn." };
+  }
+  if (table.branch_id !== group.branch_id || table.area_id !== group.area_id) {
+    return { ok: false, message: "Bàn không cùng chi nhánh hoặc khu vực với cụm bàn gộp." };
+  }
+  if ((table.status as TableStatus) === "locked") {
+    return { ok: false, message: "Không gộp được bàn đang khóa." };
+  }
+  const lockCheck = await ensureTablesAreFreeToMerge(client, [input.tableId]);
+  if (!lockCheck.ok) {
+    return { ok: false, message: lockCheck.message };
+  }
+
+  const { data: existingMembers, error: membersErr } = await (client as any)
+    .from("table_merge_members")
+    .select("table_id, order_index")
+    .eq("group_id", group.id)
+    .order("order_index", { ascending: true });
+  if (membersErr) {
+    return { ok: false, message: membersErr.message };
+  }
+  if ((existingMembers ?? []).some((m: { table_id: string }) => m.table_id === input.tableId)) {
+    return { ok: true, message: "Bàn đã thuộc cụm bàn gộp này." };
+  }
+  const nextOrder =
+    ((existingMembers ?? []) as Array<{ order_index: number }>).reduce(
+      (max, row) => (row.order_index > max ? row.order_index : max),
+      -1
+    ) + 1;
+
+  const { error: insertErr } = await (client as any).from("table_merge_members").insert({
+    group_id: group.id,
+    table_id: input.tableId,
+    order_index: nextOrder,
+  });
+  if (insertErr) {
+    return { ok: false, message: insertErr.message };
+  }
+
+  const { error: updateErr } = await (client as any)
+    .from("table_merge_groups")
+    .update({
+      total_capacity: (group.total_capacity ?? 0) + Math.max(1, table.seats ?? 1),
+      updated_at: dayjs().toISOString(),
+    })
+    .eq("id", group.id);
+  if (updateErr) {
+    return { ok: false, message: updateErr.message };
+  }
+
+  const repackFloor = input.repackFloor !== false;
+  if (repackFloor) {
+    const allMemberIds = [
+      ...((existingMembers ?? []) as Array<{ table_id: string }>).map((row) => row.table_id),
+      input.tableId,
+    ];
+    const packResult = await packMergeGroupTablesOnFloor(client, group.area_id, allMemberIds);
+    let message = `Đã thêm bàn ${table.name} vào ${group.merged_name}.`;
+    if (!packResult.packed) {
+      message +=
+        " Chưa xếp được cụm trên sơ đồ — kéo bàn vào ô \"+\" trong chế độ chỉnh sửa.";
+    }
+    return { ok: true, message };
+  }
+
+  return { ok: true, message: `Đã thêm bàn ${table.name} vào ${group.merged_name}.` };
+}
+
+export async function removeTableFromMergeGroupInSupabase(input: {
+  groupId: string;
+  tableId: string;
+  repackFloor?: boolean;
+}): Promise<Result> {
+  const client = ensureClient();
+  const { data: group, error: groupErr } = await (client as any)
+    .from("table_merge_groups")
+    .select("id, status, merged_name, total_capacity, area_id")
+    .eq("id", input.groupId)
+    .maybeSingle();
+  if (groupErr || !group) {
+    return { ok: false, message: groupErr?.message ?? "Không tìm thấy cụm bàn gộp." };
+  }
+  if (group.status !== "active") {
+    return { ok: false, message: "Cụm bàn gộp đã được giải tán." };
+  }
+
+  const { data: members, error: membersErr } = await (client as any)
+    .from("table_merge_members")
+    .select("table_id, tables(id, name, seats)")
+    .eq("group_id", group.id);
+  if (membersErr) {
+    return { ok: false, message: membersErr.message };
+  }
+  const memberRows = (members ?? []) as Array<{
+    table_id: string;
+    tables: { id: string; name: string; seats: number } | { id: string; name: string; seats: number }[] | null;
+  }>;
+  const target = memberRows.find((row) => row.table_id === input.tableId);
+  if (!target) {
+    return { ok: false, message: "Bàn không thuộc cụm bàn gộp này." };
+  }
+  if (memberRows.length <= 2) {
+    // Removing one of the last two members effectively dissolves the group.
+    return await releaseTableMergeGroupInSupabase({ groupId: group.id });
+  }
+
+  const targetJoin = Array.isArray(target.tables) ? target.tables[0] : target.tables;
+  const removedSeats = targetJoin?.seats ?? 0;
+
+  const { error: delErr } = await (client as any)
+    .from("table_merge_members")
+    .delete()
+    .eq("group_id", group.id)
+    .eq("table_id", input.tableId);
+  if (delErr) {
+    return { ok: false, message: delErr.message };
+  }
+
+  const { error: updateErr } = await (client as any)
+    .from("table_merge_groups")
+    .update({
+      total_capacity: Math.max(0, (group.total_capacity ?? 0) - removedSeats),
+      updated_at: dayjs().toISOString(),
+    })
+    .eq("id", group.id);
+  if (updateErr) {
+    return { ok: false, message: updateErr.message };
+  }
+
+  const remainingIds = memberRows
+    .filter((row) => row.table_id !== input.tableId)
+    .map((row) => row.table_id);
+  const repackFloor = input.repackFloor !== false;
+  let message = `Đã tách bàn khỏi ${group.merged_name}.`;
+  if (repackFloor && remainingIds.length >= 2) {
+    const packResult = await packMergeGroupTablesOnFloor(client, group.area_id, remainingIds);
+    if (!packResult.packed) {
+      message += " Cụm còn lại chưa được xếp lại trên sơ đồ tự động.";
+    }
+  }
+
+  return { ok: true, message };
+}
+
+const RELEASE_BLOCKING_BOOKING_STATUSES: BookingStatus[] = [
+  "pending",
+  "confirmed",
+  "seated",
+  "checked_in",
+];
+
+export async function releaseTableMergeGroupInSupabase(input: {
+  groupId: string;
+}): Promise<Result> {
+  const client = ensureClient();
+  const { data: group, error: groupErr } = await (client as any)
+    .from("table_merge_groups")
+    .select("id, branch_id, area_id, status, merged_name")
+    .eq("id", input.groupId)
+    .maybeSingle();
+  if (groupErr || !group) {
+    return { ok: false, message: groupErr?.message ?? "Không tìm thấy cụm bàn gộp." };
+  }
+  if (group.status !== "active") {
+    return { ok: true, message: "Cụm bàn gộp đã được giải tán trước đó." };
+  }
+
+  const { data: memberRows, error: membersErr } = await (client as any)
+    .from("table_merge_members")
+    .select("table_id, tables(id, seats)")
+    .eq("group_id", group.id);
+  if (membersErr) {
+    return { ok: false, message: membersErr.message };
+  }
+  const members = (memberRows ?? []) as Array<{
+    table_id: string;
+    tables: { id: string; seats: number } | { id: string; seats: number }[] | null;
+  }>;
+  const memberSeats = members.map((row) => {
+    const join = Array.isArray(row.tables) ? row.tables[0] : row.tables;
+    return { id: row.table_id, seats: join?.seats ?? 0 };
+  });
+  const largestMemberSeats = memberSeats.reduce((max, row) => Math.max(max, row.seats), 0);
+
+  const { data: activeBookings, error: bookingsErr } = await (client as any)
+    .from("bookings")
+    .select("id, guest_count, status, start_time, end_time")
+    .eq("merge_group_id", group.id)
+    .in("status", RELEASE_BLOCKING_BOOKING_STATUSES);
+  if (bookingsErr) {
+    return { ok: false, message: bookingsErr.message };
+  }
+  const activeRows = (activeBookings ?? []) as Array<{
     id: string;
-    areaId: string;
-    mergedName: string;
-    totalCapacity: number;
-    tableIds: string[];
-  }>
-> {
+    guest_count: number;
+    status: BookingStatus;
+    start_time: string;
+    end_time: string;
+  }>;
+  const overflowBookings = activeRows.filter(
+    (row) => row.guest_count > largestMemberSeats
+  );
+  if (overflowBookings.length > 0) {
+    return {
+      ok: false,
+      message:
+        `Không thể giải tán ${group.merged_name}: vẫn còn ${overflowBookings.length} booking dùng sức chứa vượt 1 bàn lẻ. ` +
+        `Vui lòng đợi khách hoàn tất hoặc đổi sang hủy / no-show trước.`,
+    };
+  }
+
+  // For remaining bookings (guest_count <= largestMemberSeats), try fall back to a member table
+  // that can fit them without slot conflicts. Otherwise revert to pending.
+  for (const booking of activeRows) {
+    const candidates = [...memberSeats]
+      .filter((row) => row.seats >= booking.guest_count)
+      .sort((a, b) => b.seats - a.seats);
+    let assignedTableId: string | null = null;
+    for (const candidate of candidates) {
+      const conflicts = await findTableBookingSlotConflictsInSupabase(client, {
+        bookingId: booking.id,
+        tableId: candidate.id,
+        startTime: booking.start_time,
+        endTime: booking.end_time,
+      });
+      if (conflicts.length === 0) {
+        assignedTableId = candidate.id;
+        break;
+      }
+    }
+    const patch: Record<string, unknown> = {
+      merge_group_id: null,
+    };
+    if (assignedTableId) {
+      patch.table_id = assignedTableId;
+    } else {
+      patch.table_id = null;
+      patch.area_id = null;
+      patch.status = "pending";
+      patch.checked_in_at = null;
+    }
+    const { error: bookingUpdateErr } = await (client as any)
+      .from("bookings")
+      .update(patch)
+      .eq("id", booking.id);
+    if (bookingUpdateErr) {
+      return { ok: false, message: bookingUpdateErr.message };
+    }
+    if (assignedTableId) {
+      await refreshTableAvailabilityForBooking(client, assignedTableId);
+    }
+  }
+
+  const { error: releaseErr } = await (client as any)
+    .from("table_merge_groups")
+    .update({
+      status: "released",
+      released_at: dayjs().toISOString(),
+      updated_at: dayjs().toISOString(),
+    })
+    .eq("id", group.id);
+  if (releaseErr) {
+    return { ok: false, message: releaseErr.message };
+  }
+
+  return { ok: true, message: `Đã giải tán ${group.merged_name}.` };
+}
+
+export async function listTableMergeGroupsInSupabase(branchId: string): Promise<TableMergeGroup[]> {
   const client = ensureClient();
   const { data: groups, error: groupsErr } = await (client as any)
     .from("table_merge_groups")
-    .select("id, area_id, merged_name, total_capacity")
+    .select("id, branch_id, area_id, auto_number, merged_name, total_capacity, status, created_at, released_at")
     .eq("branch_id", branchId)
     .eq("status", "active")
-    .order("created_at", { ascending: false });
+    .order("auto_number", { ascending: true });
   if (groupsErr || !groups) {
     return [];
   }
 
   const typedGroups = (groups ?? []) as Array<{
     id: string;
+    branch_id: string;
     area_id: string;
+    auto_number: number | null;
     merged_name: string;
     total_capacity: number;
+    status: string;
+    created_at: string;
+    released_at: string | null;
   }>;
   const groupIds = typedGroups.map((group) => group.id);
   if (groupIds.length === 0) {
@@ -1594,16 +2318,24 @@ export async function listTableMergeGroupsInSupabase(branchId: string): Promise<
     .select("group_id, table_id, order_index")
     .in("group_id", groupIds)
     .order("order_index", { ascending: true });
-
-  const typedMembers = (members ?? []) as Array<{ group_id: string; table_id: string; order_index: number }>;
+  const typedMembers = (members ?? []) as Array<{
+    group_id: string;
+    table_id: string;
+    order_index: number;
+  }>;
   return typedGroups.map((group) => ({
     id: group.id,
+    branchId: group.branch_id,
     areaId: group.area_id,
+    autoNumber: group.auto_number ?? 0,
     mergedName: group.merged_name,
     totalCapacity: group.total_capacity ?? 0,
     tableIds: typedMembers
       .filter((member) => member.group_id === group.id)
       .map((member) => member.table_id),
+    status: group.status === "released" ? "released" : "active",
+    createdAt: group.created_at,
+    releasedAt: group.released_at,
   }));
 }
 

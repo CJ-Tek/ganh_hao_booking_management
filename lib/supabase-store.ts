@@ -6,6 +6,7 @@ import type {
   BookingStatus,
   Role,
   TableBlockState,
+  TableMergeGroup,
   TableStatus,
 } from "./types";
 
@@ -123,24 +124,43 @@ export async function confirmWaitlistOfferInSupabase(waitlistEntryId: string): P
   return callStore("confirmWaitlistOffer", waitlistEntryId);
 }
 
+export type CreateTableMergeGroupResult = Result & {
+  groupId?: string;
+  mergedName?: string;
+};
+
 export async function createTableMergeGroupInSupabase(
   input: Parameters<typeof import("./supabase-store-server").createTableMergeGroupInSupabase>[0]
-): Promise<Result> {
-  return callStore("createTableMergeGroup", input);
+): Promise<CreateTableMergeGroupResult> {
+  return callStore<CreateTableMergeGroupResult>("createTableMergeGroup", input);
 }
 
-export type TableMergeGroupSummary = {
-  id: string;
-  areaId: string;
-  mergedName: string;
-  totalCapacity: number;
-  tableIds: string[];
-};
+export async function addTableToMergeGroupInSupabase(input: {
+  groupId: string;
+  tableId: string;
+  repackFloor?: boolean;
+}): Promise<Result> {
+  return callStore("addTableToMergeGroup", input);
+}
+
+export async function removeTableFromMergeGroupInSupabase(input: {
+  groupId: string;
+  tableId: string;
+  repackFloor?: boolean;
+}): Promise<Result> {
+  return callStore("removeTableFromMergeGroup", input);
+}
+
+export async function releaseTableMergeGroupInSupabase(input: {
+  groupId: string;
+}): Promise<Result> {
+  return callStore("releaseTableMergeGroup", input);
+}
 
 export async function listTableMergeGroupsInSupabase(
   branchId: string
-): Promise<TableMergeGroupSummary[]> {
-  return callStore<TableMergeGroupSummary[]>("listTableMergeGroups", branchId);
+): Promise<TableMergeGroup[]> {
+  return callStore<TableMergeGroup[]>("listTableMergeGroups", branchId);
 }
 
 export async function runBookingMaintenanceInSupabase(): Promise<Result> {

@@ -13,7 +13,7 @@ export type Database = {
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.5"
-  },
+  }
   public: {
     Tables: {
       app_users: {
@@ -77,116 +77,6 @@ export type Database = {
             columns: ["branch_id"]
             isOneToOne: false
             referencedRelation: "branches"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      bookings: {
-        Row: {
-          area_id: string | null
-          booking_at: string
-          branch_id: string
-          checked_in_at: string | null
-          created_by_user_id: string
-          customer_id: string
-          end_time: string
-          guest_count: number
-          id: string
-          last_edited_at: string | null
-          last_edited_by_user_id: string | null
-          no_show_marked_at: string | null
-          note: string | null
-          start_time: string
-          status: string
-          table_id: string | null
-          merge_group_id: string | null
-        }
-        Insert: {
-          area_id?: string | null
-          booking_at: string
-          branch_id: string
-          checked_in_at?: string | null
-          created_by_user_id: string
-          customer_id: string
-          end_time?: string
-          guest_count?: number
-          id?: string
-          last_edited_at?: string | null
-          last_edited_by_user_id?: string | null
-          no_show_marked_at?: string | null
-          note?: string | null
-          start_time?: string
-          status?: string
-          table_id?: string | null
-          merge_group_id?: string | null
-        }
-        Update: {
-          area_id?: string | null
-          booking_at?: string
-          branch_id?: string
-          checked_in_at?: string | null
-          created_by_user_id?: string
-          customer_id?: string
-          end_time?: string
-          guest_count?: number
-          id?: string
-          last_edited_at?: string | null
-          last_edited_by_user_id?: string | null
-          no_show_marked_at?: string | null
-          note?: string | null
-          start_time?: string
-          status?: string
-          table_id?: string | null
-          merge_group_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "bookings_area_id_fkey"
-            columns: ["area_id"]
-            isOneToOne: false
-            referencedRelation: "areas"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "bookings_branch_id_fkey"
-            columns: ["branch_id"]
-            isOneToOne: false
-            referencedRelation: "branches"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "bookings_created_by_user_id_fkey"
-            columns: ["created_by_user_id"]
-            isOneToOne: false
-            referencedRelation: "app_users"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "bookings_last_edited_by_user_id_fkey"
-            columns: ["last_edited_by_user_id"]
-            isOneToOne: false
-            referencedRelation: "app_users"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "bookings_customer_id_fkey"
-            columns: ["customer_id"]
-            isOneToOne: false
-            referencedRelation: "customers"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "bookings_table_id_fkey"
-            columns: ["table_id"]
-            isOneToOne: false
-            referencedRelation: "tables"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "bookings_merge_group_id_fkey"
-            columns: ["merge_group_id"]
-            isOneToOne: false
-            referencedRelation: "table_merge_groups"
             referencedColumns: ["id"]
           },
         ]
@@ -327,6 +217,116 @@ export type Database = {
           },
           {
             foreignKeyName: "booking_waitlist_entries_table_id_fkey"
+            columns: ["table_id"]
+            isOneToOne: false
+            referencedRelation: "tables"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bookings: {
+        Row: {
+          area_id: string | null
+          booking_at: string
+          branch_id: string
+          checked_in_at: string | null
+          created_by_user_id: string
+          customer_id: string
+          end_time: string
+          guest_count: number
+          id: string
+          last_edited_at: string | null
+          last_edited_by_user_id: string | null
+          merge_group_id: string | null
+          no_show_marked_at: string | null
+          note: string | null
+          start_time: string
+          status: string
+          table_id: string | null
+        }
+        Insert: {
+          area_id?: string | null
+          booking_at: string
+          branch_id: string
+          checked_in_at?: string | null
+          created_by_user_id: string
+          customer_id: string
+          end_time: string
+          guest_count?: number
+          id?: string
+          last_edited_at?: string | null
+          last_edited_by_user_id?: string | null
+          merge_group_id?: string | null
+          no_show_marked_at?: string | null
+          note?: string | null
+          start_time: string
+          status?: string
+          table_id?: string | null
+        }
+        Update: {
+          area_id?: string | null
+          booking_at?: string
+          branch_id?: string
+          checked_in_at?: string | null
+          created_by_user_id?: string
+          customer_id?: string
+          end_time?: string
+          guest_count?: number
+          id?: string
+          last_edited_at?: string | null
+          last_edited_by_user_id?: string | null
+          merge_group_id?: string | null
+          no_show_marked_at?: string | null
+          note?: string | null
+          start_time?: string
+          status?: string
+          table_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bookings_area_id_fkey"
+            columns: ["area_id"]
+            isOneToOne: false
+            referencedRelation: "areas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_created_by_user_id_fkey"
+            columns: ["created_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_last_edited_by_user_id_fkey"
+            columns: ["last_edited_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_merge_group_id_fkey"
+            columns: ["merge_group_id"]
+            isOneToOne: false
+            referencedRelation: "table_merge_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bookings_table_id_fkey"
             columns: ["table_id"]
             isOneToOne: false
             referencedRelation: "tables"
@@ -552,33 +552,39 @@ export type Database = {
       table_merge_groups: {
         Row: {
           area_id: string
+          auto_number: number | null
           branch_id: string
           created_at: string
           created_by_user_id: string | null
           id: string
           merged_name: string
+          released_at: string | null
           status: string
           total_capacity: number
           updated_at: string
         }
         Insert: {
           area_id: string
+          auto_number?: number | null
           branch_id: string
           created_at?: string
           created_by_user_id?: string | null
           id?: string
           merged_name: string
+          released_at?: string | null
           status?: string
           total_capacity?: number
           updated_at?: string
         }
         Update: {
           area_id?: string
+          auto_number?: number | null
           branch_id?: string
           created_at?: string
           created_by_user_id?: string | null
           id?: string
           merged_name?: string
+          released_at?: string | null
           status?: string
           total_capacity?: number
           updated_at?: string
@@ -705,39 +711,22 @@ export type Database = {
           p_booking_id: string
           p_end_time: string
           p_guest_count: number
+          p_merge_group_id?: string
           p_start_time: string
           p_table_id: string
         }
         Returns: {
-          booking_id: string | null
+          booking_id: string
           end_time: string
-          message: string | null
+          message: string
           outcome: string
           start_time: string
-          waitlist_id: string | null
+          waitlist_id: string
         }[]
       }
       confirm_waitlist_offer: {
         Args: { p_waitlist_entry_id: string }
         Returns: Json
-      }
-      find_booking_duplicates_by_phone_slot: {
-        Args: {
-          p_booking_at: string
-          p_branch_id: string
-          p_phone: string
-        }
-        Returns: {
-          booking_at: string
-          booking_id: string
-          guest_count: number
-          receiver_full_name: string
-          receiver_user_id: string
-        }[]
-      }
-      normalize_vietnam_phone: {
-        Args: { raw: string }
-        Returns: string
       }
       create_or_queue_booking: {
         Args: {
@@ -747,26 +736,38 @@ export type Database = {
           p_customer_id: string
           p_end_time: string
           p_guest_count: number
-          p_note: string | null
+          p_merge_group_id?: string
+          p_note: string
           p_start_time: string
           p_table_id: string
         }
         Returns: {
-          booking_id: string | null
+          booking_id: string
           end_time: string
-          message: string | null
+          message: string
           outcome: string
           start_time: string
-          waitlist_id: string | null
+          waitlist_id: string
         }[]
       }
       expire_waitlist_offers: {
-        Args: Record<PropertyKey, never>
+        Args: never
         Returns: {
           expired_offer_count: number
           promoted_count: number
         }[]
       }
+      find_booking_duplicates_by_phone_slot: {
+        Args: { p_booking_at: string; p_branch_id: string; p_phone: string }
+        Returns: {
+          booking_at: string
+          booking_id: string
+          guest_count: number
+          receiver_full_name: string
+          receiver_user_id: string
+        }[]
+      }
+      normalize_vietnam_phone: { Args: { raw: string }; Returns: string }
       promote_waitlist_for_booking_slot: {
         Args: {
           p_branch_id: string
@@ -777,7 +778,7 @@ export type Database = {
         Returns: number
       }
       run_booking_maintenance: {
-        Args: Record<PropertyKey, never>
+        Args: never
         Returns: {
           expired_offer_count: number
           no_show_count: number

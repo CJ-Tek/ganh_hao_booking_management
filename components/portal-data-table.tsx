@@ -48,6 +48,18 @@ function defaultSortRecords<T>(records: T[], sortStatus: DataTableSortStatus<T>)
   });
 }
 
+/** mantine-datatable branch that uses flat `columns` (not column `groups`). */
+type DataTableWithColumnsProps<T> = Extract<
+  DataTableProps<T>,
+  { columns: DataTableColumn<T>[] }
+>;
+
+/** Builtin Mantine loader branch (not `customLoader`). */
+type DataTableWithBuiltinLoaderProps<T> = Extract<
+  DataTableWithColumnsProps<T>,
+  { customLoader?: never }
+>;
+
 export type PortalDataTableProps<T> = {
   records: T[];
   columns: DataTableColumn<T>[];
@@ -80,7 +92,7 @@ export type PortalDataTableProps<T> = {
   withToolbar?: boolean;
   hideSearch?: boolean;
 } & Omit<
-  DataTableProps<T>,
+  DataTableWithBuiltinLoaderProps<T>,
   | "records"
   | "columns"
   | "scrollAreaProps"
@@ -193,6 +205,40 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
 
   const showToolbar = withToolbar && (!hideSearch || filters);
 
+  const dataTableElementProps = {
+    minHeight,
+    scrollAreaProps: portalDataTableScrollAreaProps,
+    withTableBorder,
+    records: pagedRecords,
+    columns,
+    totalRecords: sortedRecords.length,
+    recordsPerPage,
+    recordsPerPageOptions: [...recordsPerPageOptions],
+    recordsPerPageLabel: PORTAL_DATA_TABLE_RECORDS_PER_PAGE_LABEL,
+    onRecordsPerPageChange: (next: number) => {
+      setRecordsPerPage(next);
+      if (controlledPage === undefined) {
+        setPage(1);
+      } else {
+        onPageChange?.(1);
+      }
+    },
+    page: pageSafe,
+    onPageChange: setPage,
+    sortStatus,
+    onSortStatusChange: (next: DataTableSortStatus<T>) => {
+      setSortStatus(next);
+      setMobilePage(1);
+      if (controlledPage === undefined) {
+        setPage(1);
+      } else {
+        onPageChange?.(1);
+      }
+    },
+    noRecordsText,
+    ...dataTableProps,
+  } as DataTableWithColumnsProps<T>;
+
   return (
     <Stack gap="sm">
       {showToolbar ? (
@@ -292,39 +338,7 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
           ) : null}
         </Stack>
       ) : (
-        <DataTable
-          minHeight={minHeight}
-          scrollAreaProps={portalDataTableScrollAreaProps}
-          withTableBorder={withTableBorder}
-          records={pagedRecords}
-          columns={columns}
-          totalRecords={sortedRecords.length}
-          recordsPerPage={recordsPerPage}
-          recordsPerPageOptions={[...recordsPerPageOptions]}
-          recordsPerPageLabel={PORTAL_DATA_TABLE_RECORDS_PER_PAGE_LABEL}
-          onRecordsPerPageChange={(next) => {
-            setRecordsPerPage(next);
-            if (controlledPage === undefined) {
-              setPage(1);
-            } else {
-              onPageChange?.(1);
-            }
-          }}
-          page={pageSafe}
-          onPageChange={setPage}
-          sortStatus={sortStatus}
-          onSortStatusChange={(next) => {
-            setSortStatus(next);
-            setMobilePage(1);
-            if (controlledPage === undefined) {
-              setPage(1);
-            } else {
-              onPageChange?.(1);
-            }
-          }}
-          noRecordsText={noRecordsText}
-          {...dataTableProps}
-        />
+        <DataTable {...dataTableElementProps} />
       )}
     </Stack>
   );

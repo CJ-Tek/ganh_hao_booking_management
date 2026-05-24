@@ -1,0 +1,527 @@
+import type { DiningTable } from "@/lib/types";
+
+export const MAX_FLOOR_GRID_ROWS = 18;
+export const MIN_FLOOR_GRID_ROWS = 4;
+
+export function isTableOnFloorGrid(
+  table: Pick<DiningTable, "positionX" | "positionY">,
+  gridColumns: number,
+  gridRows: number
+): boolean {
+  return (
+    Number.isInteger(table.positionX) &&
+    Number.isInteger(table.positionY) &&
+    table.positionX >= 0 &&
+    table.positionX < gridColumns &&
+    table.positionY >= 0 &&
+    table.positionY < gridRows
+  );
+}
+
+function cellKey(row: number, col: number) {
+  return `${row}-${col}`;
+}
+
+function parseCellKey(key: string): { row: number; col: number } | null {
+  const parts = key.split("-");
+  if (parts.length !== 2) {
+    return null;
+  }
+  const row = Number(parts[0]);
+  const col = Number(parts[1]);
+  if (!Number.isInteger(row) || !Number.isInteger(col)) {
+    return null;
+  }
+  return { row, col };
+}
+
+/**
+ * Place `cellCount` consecutive grid cells starting at (startRow, startCol), wrapping to the
+ * next row at column 0 when a row runs out of columns — stays inside the floor grid.
+ */
+export function layoutWrappedMergeCells(
+  startRow: number,
+  startCol: number,
+  cellCount: number,
+  gridColumns: number,
+  gridRows: number
+): Array<{ row: number; col: number }> | null {
+  if (cellCount <= 0 || startRow < 0 || startCol < 0) {
+    return null;
+  }
+  const cells: Array<{ row: number; col: number }> = [];
+  let row = startRow;
+  let col = startCol;
+  for (let index = 0; index < cellCount; index++) {
+    if (row >= gridRows) {
+      return null;
+    }
+    if (col >= gridColumns) {
+      row += 1;
+      col = 0;
+      if (row >= gridRows) {
+        return null;
+      }
+    }
+    cells.push({ row, col });
+    col += 1;
+  }
+  return cells;
+}
+
+function layoutWrappedMergeCellsWithRowGrowth(
+  startRow: number,
+  startCol: number,
+  cellCount: number,
+  gridColumns: number,
+  startGridRows: number
+): { layout: Array<{ row: number; col: number }>; gridRows: number } | null {
+  for (let gridRows = startGridRows; gridRows <= MAX_FLOOR_GRID_ROWS; gridRows++) {
+    const layout = layoutWrappedMergeCells(
+      startRow,
+      startCol,
+      cellCount,
+      gridColumns,
+      gridRows
+    );
+    if (layout) {
+      return { layout, gridRows };
+    }
+  }
+  return null;
+}
+
+function findTableAtCell(
+  positions: Map<string, { row: number; col: number }>,
+  row: number,
+  col: number,
+  exceptId?: string
+): string | null {
+  const key = cellKey(row, col);
+  for (const [tableId, pos] of positions) {
+    if (tableId === exceptId) {
+      continue;
+    }
+    if (cellKey(pos.row, pos.col) === key) {
+      return tableId;
+    }
+  }
+  return null;
+}
+
+/**
+ * Move a non-member table down (same column) until it clears reserved merge-strip cells.
+ * Cascades to any table blocking the destination.
+ */
+function pushTableDownForMergeStrip(
+  tableId: string,
+  positions: Map<string, { row: number; col: number }>,
+  reservedCells: Set<string>,
+  memberIds: Set<string>,
+): number {
+  const pos = positions.get(tableId);
+  if (!pos) {
+    return MIN_FLOOR_GRID_ROWS;
+  }
+
+  let targetRow = pos.row + 1;
+  const col = pos.col;
+
+  for (let guard = 0; guard < MAX_FLOOR_GRID_ROWS * 2; guard++) {
+    const targetKey = cellKey(targetRow, col);
+
+    if (reservedCells.has(targetKey)) {
+      targetRow += 1;
+      continue;
+    }
+
+    const blockerId = findTableAtCell(positions, targetRow, col, tableId);
+    if (blockerId && !memberIds.has(blockerId)) {
+      const blockerRequired = pushTableDownForMergeStrip(
+        blockerId,
+        positions,
+        reservedCells,
+        memberIds
+      );
+      targetRow = Math.max(targetRow, blockerRequired);
+      continue;
+    }
+
+    positions.set(tableId, { row: targetRow, col });
+    return targetRow + 1;
+  }
+
+  positions.set(tableId, { row: MAX_FLOOR_GRID_ROWS - 1, col });
+  return MAX_FLOOR_GRID_ROWS;
+}
+
+function resolveMergeStripCollisions(input: {
+  memberTableIds: string[];
+  memberPositions: Map<string, { row: number; col: number }>;
+  reservedCells: Set<string>;
+  areaTables: Array<Pick<DiningTable, "id" | "positionX" | "positionY">>;
+  gridColumns: number;
+  gridRows: number;
+}): { ok: boolean; positions: Map<string, { row: number; col: number }>; gridRows: number } {
+  const memberIds = new Set(input.memberTableIds);
+  const positions = new Map<string, { row: number; col: number }>();
+
+  for (const table of input.areaTables) {
+    if (!isTableOnFloorGrid(table, input.gridColumns, input.gridRows)) {
+      continue;
+    }
+    positions.set(table.id, { row: table.positionY, col: table.positionX });
+  }
+
+  for (const [tableId, pos] of input.memberPositions) {
+    positions.set(tableId, pos);
+  }
+
+  let requiredRows = input.gridRows;
+  let changed = true;
+  let iterations = 0;
+
+  while (changed && iterations < MAX_FLOOR_GRID_ROWS * positions.size) {
+    changed = false;
+    iterations += 1;
+
+    for (const key of input.reservedCells) {
+      const parsed = parseCellKey(key);
+      if (!parsed) {
+        continue;
+      }
+      const occupantId = findTableAtCell(positions, parsed.row, parsed.col);
+      if (!occupantId || memberIds.has(occupantId)) {
+        continue;
+      }
+      const nextRequired = pushTableDownForMergeStrip(
+        occupantId,
+        positions,
+        input.reservedCells,
+        memberIds
+      );
+      requiredRows = Math.max(requiredRows, nextRequired);
+      changed = true;
+    }
+  }
+
+  let stripMinRow = Number.POSITIVE_INFINITY;
+  let stripMaxRow = Number.NEGATIVE_INFINITY;
+  let stripMinCol = Number.POSITIVE_INFINITY;
+  let stripMaxCol = Number.NEGATIVE_INFINITY;
+  for (const key of input.reservedCells) {
+    const parsed = parseCellKey(key);
+    if (!parsed) {
+      continue;
+    }
+    stripMinRow = Math.min(stripMinRow, parsed.row);
+    stripMaxRow = Math.max(stripMaxRow, parsed.row);
+    stripMinCol = Math.min(stripMinCol, parsed.col);
+    stripMaxCol = Math.max(stripMaxCol, parsed.col);
+  }
+
+  if (Number.isFinite(stripMinRow)) {
+    let footprintChanged = true;
+    let footprintIterations = 0;
+    while (footprintChanged && footprintIterations < MAX_FLOOR_GRID_ROWS * positions.size) {
+      footprintIterations += 1;
+      footprintChanged = false;
+      for (const [tableId, pos] of positions) {
+        if (memberIds.has(tableId)) {
+          continue;
+        }
+        if (
+          pos.row < stripMinRow ||
+          pos.row > stripMaxRow ||
+          pos.col < stripMinCol ||
+          pos.col > stripMaxCol
+        ) {
+          continue;
+        }
+        const key = cellKey(pos.row, pos.col);
+        if (input.reservedCells.has(key)) {
+          continue;
+        }
+        const nextRequired = pushTableDownForMergeStrip(
+          tableId,
+          positions,
+          input.reservedCells,
+          memberIds
+        );
+        requiredRows = Math.max(requiredRows, nextRequired);
+        footprintChanged = true;
+      }
+    }
+  }
+
+  for (const pos of positions.values()) {
+    requiredRows = Math.max(requiredRows, pos.row + 1);
+  }
+
+  requiredRows = Math.min(MAX_FLOOR_GRID_ROWS, Math.max(MIN_FLOOR_GRID_ROWS, requiredRows));
+
+  if (requiredRows > MAX_FLOOR_GRID_ROWS) {
+    return { ok: false, positions, gridRows: requiredRows };
+  }
+
+  for (const pos of positions.values()) {
+    if (pos.row >= requiredRows || pos.col < 0 || pos.col >= input.gridColumns) {
+      return { ok: false, positions, gridRows: requiredRows };
+    }
+  }
+
+  return { ok: true, positions, gridRows: requiredRows };
+}
+
+/** Anchor (strip start) so the "+" plug cell lands on `(plugRow, plugCol)`. */
+export function findMergeStripAnchorForPlug(
+  plugRow: number,
+  plugCol: number,
+  slotCount: number,
+  gridColumns: number,
+  gridRows: number
+): { row: number; col: number } | null {
+  for (let anchorRow = 0; anchorRow < gridRows; anchorRow++) {
+    for (let anchorCol = 0; anchorCol < gridColumns; anchorCol++) {
+      const wrapped = layoutWrappedMergeCellsWithRowGrowth(
+        anchorRow,
+        anchorCol,
+        slotCount,
+        gridColumns,
+        gridRows
+      );
+      if (!wrapped) {
+        continue;
+      }
+      const plug = wrapped.layout[slotCount - 1];
+      if (plug && plug.row === plugRow && plug.col === plugCol) {
+        return { row: anchorRow, col: anchorCol };
+      }
+    }
+  }
+  for (let rows = gridRows + 1; rows <= MAX_FLOOR_GRID_ROWS; rows++) {
+    for (let anchorRow = 0; anchorRow < rows; anchorRow++) {
+      for (let anchorCol = 0; anchorCol < gridColumns; anchorCol++) {
+        const wrapped = layoutWrappedMergeCellsWithRowGrowth(
+          anchorRow,
+          anchorCol,
+          slotCount,
+          gridColumns,
+          rows
+        );
+        if (!wrapped) {
+          continue;
+        }
+        const plug = wrapped.layout[slotCount - 1];
+        if (plug && plug.row === plugRow && plug.col === plugCol) {
+          return { row: anchorRow, col: anchorCol };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+export type MergeGroupPackResult = {
+  /** Merge members and any tables pushed to make room for the strip. */
+  positionUpdates: Map<string, { row: number; col: number }>;
+  gridRows: number;
+};
+
+/**
+ * Pack merge members plus one trailing "+" plug cell. Rows wrap at the grid edge.
+ * Non-member tables in the strip path are pushed down; grid rows grow when needed (up to 18).
+ */
+export function packMergeGroupTablePositions(input: {
+  memberTableIds: string[];
+  areaTables: Array<Pick<DiningTable, "id" | "positionX" | "positionY">>;
+  gridColumns: number;
+  gridRows: number;
+  preferredAnchor?: { row: number; col: number };
+}): MergeGroupPackResult | null {
+  if (input.memberTableIds.length === 0) {
+    return null;
+  }
+  const memberSet = new Set(input.memberTableIds);
+  const slotCount = input.memberTableIds.length + 1;
+
+  const memberCells = new Map<string, { row: number; col: number }>();
+  for (const table of input.areaTables) {
+    if (!isTableOnFloorGrid(table, input.gridColumns, input.gridRows)) {
+      continue;
+    }
+    if (memberSet.has(table.id)) {
+      memberCells.set(table.id, { row: table.positionY, col: table.positionX });
+    }
+  }
+
+  let prefRow = 0;
+  let prefCol = 0;
+  if (input.preferredAnchor) {
+    prefRow = input.preferredAnchor.row;
+    prefCol = input.preferredAnchor.col;
+  } else if (memberCells.size > 0) {
+    let sumR = 0;
+    let sumC = 0;
+    for (const pos of memberCells.values()) {
+      sumR += pos.row;
+      sumC += pos.col;
+    }
+    prefRow = Math.round(sumR / memberCells.size);
+    prefCol = Math.round(sumC / memberCells.size);
+  }
+
+  const initialSnapshot = new Map<string, { row: number; col: number }>();
+  for (const table of input.areaTables) {
+    if (isTableOnFloorGrid(table, input.gridColumns, input.gridRows)) {
+      initialSnapshot.set(table.id, { row: table.positionY, col: table.positionX });
+    }
+  }
+
+  type Candidate = {
+    score: number;
+    positionUpdates: Map<string, { row: number; col: number }>;
+    gridRows: number;
+  };
+  const candidates: Candidate[] = [];
+
+  for (let row = 0; row < input.gridRows; row++) {
+    for (let col = 0; col < input.gridColumns; col++) {
+      const wrapped = layoutWrappedMergeCellsWithRowGrowth(
+        row,
+        col,
+        slotCount,
+        input.gridColumns,
+        input.gridRows
+      );
+      if (!wrapped) {
+        continue;
+      }
+
+      const memberPositions = new Map<string, { row: number; col: number }>();
+      input.memberTableIds.forEach((tableId, index) => {
+        const cell = wrapped.layout[index];
+        if (cell) {
+          memberPositions.set(tableId, cell);
+        }
+      });
+
+      const reservedCells = new Set(
+        wrapped.layout.map((cell) => cellKey(cell.row, cell.col))
+      );
+
+      const resolved = resolveMergeStripCollisions({
+        memberTableIds: input.memberTableIds,
+        memberPositions,
+        reservedCells,
+        areaTables: input.areaTables,
+        gridColumns: input.gridColumns,
+        gridRows: Math.max(input.gridRows, wrapped.gridRows),
+      });
+
+      if (!resolved.ok) {
+        continue;
+      }
+
+      const positionUpdates = new Map<string, { row: number; col: number }>();
+      let displacementCount = 0;
+      for (const [tableId, pos] of resolved.positions) {
+        const before = initialSnapshot.get(tableId);
+        if (!before || before.row !== pos.row || before.col !== pos.col) {
+          positionUpdates.set(tableId, pos);
+          if (!memberSet.has(tableId)) {
+            displacementCount += 1;
+          }
+        }
+      }
+
+      const rowGrowth = resolved.gridRows - input.gridRows;
+      const score =
+        Math.abs(row - prefRow) * 10 +
+        Math.abs(col - prefCol) +
+        rowGrowth * 100 +
+        displacementCount * 8;
+
+      candidates.push({
+        score,
+        positionUpdates,
+        gridRows: resolved.gridRows,
+      });
+    }
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  candidates.sort((a, b) => a.score - b.score);
+  const best = candidates[0]!;
+  return {
+    positionUpdates: best.positionUpdates,
+    gridRows: best.gridRows,
+  };
+}
+
+/** Member cells and the "+" plug cell derived from packed/wrapped layout. */
+export function getMergeGroupStripCells(
+  memberTableIds: string[],
+  positions: Map<string, { row: number; col: number }>,
+  gridColumns: number,
+  gridRows: number
+): { memberCells: Set<string>; plugRow: number; plugCol: number } | null {
+  const memberCells = new Set<string>();
+  for (const tableId of memberTableIds) {
+    const pos = positions.get(tableId);
+    if (!pos) {
+      continue;
+    }
+    memberCells.add(cellKey(pos.row, pos.col));
+  }
+  if (memberCells.size === 0) {
+    return null;
+  }
+
+  const slotCount = memberTableIds.length + 1;
+  let bestPlug: { row: number; col: number } | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  for (let anchorRow = 0; anchorRow < gridRows; anchorRow++) {
+    for (let anchorCol = 0; anchorCol < gridColumns; anchorCol++) {
+      const wrapped = layoutWrappedMergeCellsWithRowGrowth(
+        anchorRow,
+        anchorCol,
+        slotCount,
+        gridColumns,
+        gridRows
+      );
+      if (!wrapped) {
+        continue;
+      }
+      const stripKeys = new Set(
+        wrapped.layout
+          .slice(0, memberTableIds.length)
+          .map((cell) => cellKey(cell.row, cell.col))
+      );
+      let matches = true;
+      for (const key of memberCells) {
+        if (!stripKeys.has(key)) {
+          matches = false;
+          break;
+        }
+      }
+      if (!matches) {
+        continue;
+      }
+      const score = anchorRow * 1000 + anchorCol;
+      if (score < bestScore) {
+        bestScore = score;
+        bestPlug = wrapped.layout[slotCount - 1]!;
+      }
+    }
+  }
+
+  if (!bestPlug) {
+    return null;
+  }
+  return { memberCells, plugRow: bestPlug.row, plugCol: bestPlug.col };
+}

@@ -32,7 +32,7 @@ import { FLOOR_TABLE_PALETTE_SENTINEL } from "@/lib/floor-map-layout";
 import { bookingCardBusyProps, bookingRowBusyStyle } from "@/lib/busy-row-style";
 import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
-import { type DiningTable, TableStatus } from "@/lib/types";
+import { type Booking, type DiningTable, type TableMergeGroup, TableStatus } from "@/lib/types";
 
 type BatchSeatGroup = { count: number; seats: number };
 
@@ -53,7 +53,11 @@ function TablesPageContent() {
     upsertTablesBatch,
     deleteTables,
     updateTableStatus,
+    releaseTableMergeGroup,
   } = useAppContext();
+  const [mainTab, setMainTab] = useState<string | null>("single");
+  const [mergeGroupBusyId, setMergeGroupBusyId] = useState<string | null>(null);
+  const [mergeGroupReleaseTarget, setMergeGroupReleaseTarget] = useState<string | null>(null);
 
   const isCompact = usePortalCompact();
   const { isBusy: isTableRowBusy, run: runTableRowAction } = useBusyId();
@@ -660,12 +664,24 @@ function TablesPageContent() {
     </Tabs>
   );
 
-  return (
-    <Stack>
-      <PortalPageTitle order={isCompact ? 3 : 2}>
-        {isCompact ? "Bàn" : "Quản lý bàn"}
-      </PortalPageTitle>
+  const handleReleaseMergeGroup = async (groupId: string) => {
+    setMergeGroupBusyId(groupId);
+    try {
+      const result = await releaseTableMergeGroup({ groupId });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        setMergeGroupReleaseTarget(null);
+      }
+    } finally {
+      setMergeGroupBusyId(null);
+    }
+  };
 
+  const singleTablesPanel = (
+    <Stack>
       <PortalStickyPanel>
         <Stack gap="md">
           <Group align="flex-end" gap="sm" wrap="nowrap">
@@ -916,6 +932,308 @@ function TablesPageContent() {
         ) : (
           tableCards
         )}
+      </PortalSectionCard>
+    </Stack>
+  );
+
+  return (
+    <Stack>
+      <PortalPageTitle order={isCompact ? 3 : 2}>
+        {isCompact ? "Bàn" : "Quản lý bàn"}
+      </PortalPageTitle>
+
+      <Tabs value={mainTab} onChange={setMainTab} keepMounted={false}>
+        <Tabs.List>
+          <Tabs.Tab value="single">Bàn lẻ</Tabs.Tab>
+          <Tabs.Tab value="merge">Bàn gộp</Tabs.Tab>
+        </Tabs.List>
+
+        <Tabs.Panel value="single" pt="md">
+          {singleTablesPanel}
+        </Tabs.Panel>
+
+        <Tabs.Panel value="merge" pt="md">
+          <MergeGroupsPanel
+            mergeGroups={state.mergeGroups}
+            tables={state.tables}
+            areas={state.areas}
+            branches={state.branches}
+            bookings={state.bookings}
+            filteredBranchIds={filteredBranchIds}
+            busyGroupId={mergeGroupBusyId}
+            onRequestRelease={(groupId) => setMergeGroupReleaseTarget(groupId)}
+          />
+        </Tabs.Panel>
+      </Tabs>
+
+      <Modal
+        opened={mergeGroupReleaseTarget !== null}
+        onClose={() => setMergeGroupReleaseTarget(null)}
+        title="Bỏ gộp bàn"
+        size="sm"
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Hệ thống sẽ cố gắng chuyển các booking đang giữ cụm này về bàn lẻ phù hợp. Nếu có booking
+            vượt quá sức chứa của mọi bàn thành viên (over-exceed) và chưa kết thúc / huỷ / no-show,
+            thao tác sẽ bị chặn.
+          </Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setMergeGroupReleaseTarget(null)}>
+              Huỷ
+            </Button>
+            <Button
+              color="red"
+              loading={mergeGroupBusyId === mergeGroupReleaseTarget}
+              onClick={() => {
+                if (mergeGroupReleaseTarget) {
+                  void handleReleaseMergeGroup(mergeGroupReleaseTarget);
+                }
+              }}
+            >
+              Bỏ gộp
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+    </Stack>
+  );
+}
+
+interface MergeGroupsPanelProps {
+  mergeGroups: TableMergeGroup[];
+  tables: DiningTable[];
+  areas: { id: string; name: string; branchId: string }[];
+  branches: { id: string; name: string }[];
+  bookings: Booking[];
+  filteredBranchIds: string[];
+  busyGroupId: string | null;
+  onRequestRelease: (groupId: string) => void;
+}
+
+function MergeGroupsPanel({
+  mergeGroups,
+  tables,
+  areas,
+  branches,
+  bookings,
+  filteredBranchIds,
+  busyGroupId,
+  onRequestRelease,
+}: MergeGroupsPanelProps) {
+  const [search, setSearch] = useState("");
+  const [areaFilter, setAreaFilter] = useState<string | null>(null);
+  const [sortStatus, setSortStatus] = useState<DataTableSortStatus<TableMergeGroup>>({
+    columnAccessor: "mergedName",
+    direction: "asc",
+  });
+
+  const tableNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const table of tables) {
+      map.set(table.id, table.name);
+    }
+    return map;
+  }, [tables]);
+  const areaNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const area of areas) {
+      map.set(area.id, area.name);
+    }
+    return map;
+  }, [areas]);
+  const branchNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const branch of branches) {
+      map.set(branch.id, branch.name);
+    }
+    return map;
+  }, [branches]);
+  const activeBookingCountByGroup = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const booking of bookings) {
+      if (
+        booking.mergeGroupId &&
+        !["completed", "cancelled", "no_show"].includes(booking.status)
+      ) {
+        map.set(booking.mergeGroupId, (map.get(booking.mergeGroupId) ?? 0) + 1);
+      }
+    }
+    return map;
+  }, [bookings]);
+
+  const visibleGroups = useMemo(
+    () =>
+      mergeGroups.filter(
+        (group) =>
+          group.status === "active" &&
+          filteredBranchIds.includes(group.branchId) &&
+          (!areaFilter || group.areaId === areaFilter)
+      ),
+    [areaFilter, filteredBranchIds, mergeGroups]
+  );
+
+  const areaOptions = useMemo(
+    () =>
+      areas
+        .filter((area) => filteredBranchIds.includes(area.branchId))
+        .map((area) => ({ value: area.id, label: area.name })),
+    [areas, filteredBranchIds]
+  );
+
+  const searchedGroups = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) {
+      return visibleGroups;
+    }
+    return visibleGroups.filter((group) => {
+      const memberLabel = group.tableIds
+        .map((id) => tableNameById.get(id) ?? "")
+        .join(" ")
+        .toLowerCase();
+      return (
+        group.mergedName.toLowerCase().includes(keyword) ||
+        (areaNameById.get(group.areaId) ?? "").toLowerCase().includes(keyword) ||
+        (branchNameById.get(group.branchId) ?? "").toLowerCase().includes(keyword) ||
+        memberLabel.includes(keyword)
+      );
+    });
+  }, [areaNameById, branchNameById, search, tableNameById, visibleGroups]);
+
+  const sortGroups = useCallback(
+    (records: TableMergeGroup[], status: DataTableSortStatus<TableMergeGroup>) => {
+      const getValue = (group: TableMergeGroup): string | number => {
+        if (status.columnAccessor === "areaId") {
+          return areaNameById.get(group.areaId) ?? "";
+        }
+        if (status.columnAccessor === "memberCount") {
+          return group.tableIds.length;
+        }
+        if (status.columnAccessor === "totalCapacity") {
+          return group.totalCapacity;
+        }
+        if (status.columnAccessor === "activeBookings") {
+          return activeBookingCountByGroup.get(group.id) ?? 0;
+        }
+        return group.mergedName;
+      };
+      return [...records].sort((a, b) => {
+        const left = getValue(a);
+        const right = getValue(b);
+        const compare =
+          typeof left === "number" && typeof right === "number"
+            ? left - right
+            : String(left).localeCompare(String(right), "vi");
+        return status.direction === "asc" ? compare : -compare;
+      });
+    },
+    [activeBookingCountByGroup, areaNameById]
+  );
+
+  return (
+    <Stack>
+      <PortalSectionCard>
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm" mb="md">
+          <TextInputWithVoice
+            label="Tìm cụm gộp"
+            placeholder="Tên cụm, khu vực, bàn thành viên..."
+            value={search}
+            onChange={(event) => setSearch(event.currentTarget.value)}
+          />
+          <Select
+            label="Khu vực"
+            placeholder="Tất cả"
+            data={areaOptions}
+            value={areaFilter}
+            onChange={setAreaFilter}
+            clearable
+          />
+        </SimpleGrid>
+        <PortalDataTable<TableMergeGroup>
+          records={searchedGroups}
+          hideSearch
+          withToolbar={false}
+          sortRecords={sortGroups}
+          sortStatus={sortStatus}
+          onSortStatusChange={setSortStatus}
+          idAccessor="id"
+          minHeight={260}
+          noRecordsText="Chưa có cụm gộp nào trong phạm vi đang chọn."
+          columns={[
+            {
+              accessor: "mergedName",
+              title: "Tên cụm",
+              sortable: true,
+              render: (group) => (
+                <Stack gap={2}>
+                  <Text fw={600} size="sm">
+                    {group.mergedName}
+                  </Text>
+                  <Text size="xs" c="dimmed">
+                    {branchNameById.get(group.branchId) ?? "—"}
+                  </Text>
+                </Stack>
+              ),
+            },
+            {
+              accessor: "areaId",
+              title: "Khu vực",
+              sortable: true,
+              render: (group) => areaNameById.get(group.areaId) ?? "—",
+            },
+            {
+              accessor: "memberCount",
+              title: "Bàn thành viên",
+              sortable: true,
+              render: (group) => (
+                <Stack gap={2}>
+                  <Text size="sm">{group.tableIds.length} bàn</Text>
+                  <Text size="xs" c="dimmed" lineClamp={2}>
+                    {group.tableIds
+                      .map((id) => tableNameById.get(id) ?? "—")
+                      .join(" + ")}
+                  </Text>
+                </Stack>
+              ),
+            },
+            {
+              accessor: "totalCapacity",
+              title: "Tổng chỗ",
+              sortable: true,
+              render: (group) => `${group.totalCapacity} chỗ`,
+            },
+            {
+              accessor: "activeBookings",
+              title: "Booking đang giữ",
+              sortable: true,
+              render: (group) => activeBookingCountByGroup.get(group.id) ?? 0,
+            },
+            {
+              accessor: "status",
+              title: "Trạng thái",
+              render: () => (
+                <Badge color="blue" variant="light">
+                  Đang gộp
+                </Badge>
+              ),
+            },
+            {
+              accessor: "actions",
+              title: "",
+              render: (group) => (
+                <Button
+                  color="red"
+                  variant="light"
+                  size="compact-sm"
+                  loading={busyGroupId === group.id}
+                  onClick={() => onRequestRelease(group.id)}
+                >
+                  Bỏ gộp
+                </Button>
+              ),
+            },
+          ]}
+        />
       </PortalSectionCard>
     </Stack>
   );

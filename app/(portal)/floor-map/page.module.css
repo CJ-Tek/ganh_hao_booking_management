@@ -488,3 +488,154 @@
     min-width: 122px;
   }
 }
+
+/* ---- Merge group placeholder container (Sơ đồ) ---- */
+.mergeGroupContainer {
+  position: absolute;
+  z-index: 2;
+  border: 2px dashed rgba(12, 97, 164, 0.65);
+  border-radius: 16px;
+  background: rgba(245, 237, 220, 0.72);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+  pointer-events: none;
+  overflow: visible;
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupContainer {
+  background: rgba(38, 45, 56, 0.88);
+  border-color: rgba(116, 192, 252, 0.55);
+}
+
+.mergeGroupContainerActive {
+  border-style: solid;
+  border-color: rgba(12, 97, 164, 0.9);
+  box-shadow: 0 10px 24px rgba(12, 97, 164, 0.2);
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupContainerActive {
+  border-color: rgba(116, 192, 252, 0.85);
+}
+
+.mergeGroupContainerHeader {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid rgba(12, 97, 164, 0.2);
+  background: rgba(255, 252, 245, 0.95);
+  border-radius: 14px 14px 0 0;
+  pointer-events: auto;
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupContainerHeader {
+  background: rgba(30, 38, 50, 0.96);
+  border-bottom-color: rgba(116, 192, 252, 0.25);
+}
+
+.mergeGroupContainerTitle {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #0c61a4;
+  cursor: pointer;
+  text-align: left;
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupContainerTitle {
+  color: #74c0fc;
+}
+
+.mergeGroupContainerTitle:hover {
+  text-decoration: underline;
+}
+
+.mergeGroupContainerCapacity {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #334155;
+  white-space: nowrap;
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupContainerCapacity {
+  color: #cbd5e1;
+}
+
+.mergeGroupReleaseBtn {
+  color: #c92a2a !important;
+}
+
+.mergeGroupContainerBody {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 0 0 14px 14px;
+  pointer-events: none;
+}
+
+.mergeGroupPlugSlot {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 152px;
+  height: 168px;
+  border: 2px dashed rgba(12, 97, 164, 0.55);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
+  color: rgba(12, 97, 164, 0.75);
+  pointer-events: auto;
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupPlugSlot {
+  background: rgba(20, 28, 40, 0.65);
+  border-color: rgba(116, 192, 252, 0.5);
+  color: rgba(116, 192, 252, 0.85);
+}
+
+.tableBlockInMergeGroup {
+  z-index: 5;
+}
+
+/* ---- Edit-mode multi-select highlight for merge picking ---- */
+.tableBlockMergeSelected {
+  outline: 3px solid rgba(12, 97, 164, 0.85);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.5);
+}
+
+:global([data-mantine-color-scheme="dark"]) .tableBlockMergeSelected {
+  outline-color: rgba(116, 192, 252, 0.95);
+}
+
+/* Member of an active merge group — render above the container backdrop */
+.tableBlockMergeMember {
+  z-index: 5;
+}
+
+/* Floating action bar for "Gộp đã chọn (N)" */
+.mergeSelectionDock {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--mantine-color-body, #fff);
+  border: 1px solid var(--mantine-color-default-border, #d0d7de);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+}
+

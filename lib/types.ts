@@ -63,6 +63,8 @@ export interface Booking {
   branchId: string;
   areaId: string | null;
   tableId: string | null;
+  /** Set when the booking is held by a merged-tables group (Bàn gộp). `tableId` is null in that case. */
+  mergeGroupId?: string | null;
   guestCount: number;
   bookingAt: string;
   startTime: string;
@@ -128,6 +130,27 @@ export interface InternalNotification {
   branchId?: string;
 }
 
+/**
+ * Merged-tables group (Bàn gộp N): a logical container in `Sơ đồ` that bundles 2+ tables
+ * so a booking can occupy the combined capacity. Numbered per area, reusable after release.
+ */
+export interface TableMergeGroup {
+  id: string;
+  branchId: string;
+  areaId: string;
+  /** Auto-incremented number within the area; displayed as `Bàn gộp {autoNumber}`. */
+  autoNumber: number;
+  /** Always `Bàn gộp {autoNumber}` for active groups (server keeps this in sync). */
+  mergedName: string;
+  /** Sum of member table seats at the time of the latest membership change. */
+  totalCapacity: number;
+  /** Member table ids in `order_index` order. */
+  tableIds: string[];
+  status: "active" | "released";
+  createdAt: string;
+  releasedAt?: string | null;
+}
+
 export interface AppStateSnapshot {
   users: AppUser[];
   branches: Branch[];
@@ -135,6 +158,8 @@ export interface AppStateSnapshot {
   tables: DiningTable[];
   customers: Customer[];
   bookings: Booking[];
+  /** Active table merge groups across all branches. */
+  mergeGroups: TableMergeGroup[];
   notifications: InternalNotification[];
   bookingRuntimeSettings: BookingRuntimeSettings;
   activeBranchId?: string;
