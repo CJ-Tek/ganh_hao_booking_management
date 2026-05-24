@@ -1,8 +1,9 @@
 "use client";
 
-import { Alert, Button, NumberInput, Stack, Text } from "@mantine/core";
+import { Alert, Button, Stack, Text } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useState } from "react";
+import { EditableNumberInput } from "@/components/editable-number-input";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { RouteGuard } from "@/components/route-guard";
 import { useAppContext } from "@/contexts/app-context";
@@ -75,57 +76,42 @@ export default function BookingRulesSettingsPage() {
         ) : null}
         <PortalSectionCard>
           <Stack gap="md">
-            <NumberInput
+            <EditableNumberInput
               label="Ngưỡng Đoàn (số khách)"
               description="Từ số khách này trở lên, tự gắn loại Đoàn nếu ghi chú không nói rõ."
-              min={1}
-              allowDecimal={false}
-              clampBehavior="strict"
+              required
               disabled={saving}
               value={draft.groupPartyGuestThreshold}
               onChange={(value) =>
                 setDraft((prev) => ({
                   ...prev,
-                  groupPartyGuestThreshold: parsePositiveInt(
-                    value,
-                    prev.groupPartyGuestThreshold
-                  ),
+                  groupPartyGuestThreshold: value ?? prev.groupPartyGuestThreshold,
                 }))
               }
             />
-            <NumberInput
+            <EditableNumberInput
               label="Ngưỡng Khách quen (số booking hoàn thành)"
               description="Khách đã hoàn thành ít nhất N lần tại chi nhánh đang xem."
-              min={1}
-              allowDecimal={false}
-              clampBehavior="strict"
+              required
               disabled={saving}
               value={draft.repeatCustomerMinCompleted}
               onChange={(value) =>
                 setDraft((prev) => ({
                   ...prev,
-                  repeatCustomerMinCompleted: parsePositiveInt(
-                    value,
-                    prev.repeatCustomerMinCompleted
-                  ),
+                  repeatCustomerMinCompleted: value ?? prev.repeatCustomerMinCompleted,
                 }))
               }
             />
-            <NumberInput
+            <EditableNumberInput
               label="Cửa sổ Chờ đến (phút)"
               description="Trước/sau giờ đến bao nhiêu phút vẫn hiện trạng thái Chờ đến."
-              min={1}
-              allowDecimal={false}
-              clampBehavior="strict"
+              required
               disabled={saving}
               value={draft.receptionArrivalGraceMinutes}
               onChange={(value) =>
                 setDraft((prev) => ({
                   ...prev,
-                  receptionArrivalGraceMinutes: parsePositiveInt(
-                    value,
-                    prev.receptionArrivalGraceMinutes
-                  ),
+                  receptionArrivalGraceMinutes: value ?? prev.receptionArrivalGraceMinutes,
                 }))
               }
             />

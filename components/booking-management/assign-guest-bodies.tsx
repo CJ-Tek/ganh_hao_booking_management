@@ -1,13 +1,11 @@
 "use client";
 
-import { Button, Group, NumberInput, Stack, Text } from "@mantine/core";
+import { Button, Group, Stack, Text } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { useEffect, useState } from "react";
-import {
-  MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS,
-  parseGuestCountFromNumberInput,
-} from "@/components/booking-management/shared";
+import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
+import { MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS } from "@/components/booking-management/shared";
 import { type Booking } from "@/lib/types";
 
 export function AssignGuestCountPromptBody(props: {
@@ -23,13 +21,11 @@ export function AssignGuestCountPromptBody(props: {
           ← Quay lại
         </Button>
       ) : null}
-      <NumberInput
+      <GuestCountNumberInput
         label="Số khách"
-        min={1}
-        allowDecimal={false}
-        clampBehavior="strict"
+        required
         value={guestCount}
-        onChange={(value) => setGuestCount(parseGuestCountFromNumberInput(value))}
+        onChange={setGuestCount}
       />
       <Button
         onClick={() => {
@@ -100,16 +96,18 @@ export function AssignGuestSpecifiedOptionsBody(props: {
     <Stack gap="sm">
       <Group gap="xs" align="flex-end" wrap="wrap">
         {editingGuest ? (
-          <NumberInput
+          <GuestCountNumberInput
             label="Số khách"
-            min={1}
+            required
             miw={160}
             style={{ flex: "1 1 12rem" }}
-            allowDecimal={false}
-            clampBehavior="strict"
             disabled={persistingGuest}
             value={guestDraft}
-            onChange={(v) => setGuestDraft(parseGuestCountFromNumberInput(v) ?? guestDraft)}
+            onChange={(v) => {
+              if (v !== undefined) {
+                setGuestDraft(v);
+              }
+            }}
           />
         ) : (
           <Text size="sm" c="dimmed">

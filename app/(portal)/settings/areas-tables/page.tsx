@@ -7,7 +7,6 @@ import {
   Card,
   Group,
   Modal,
-  NumberInput,
   Select,
   SimpleGrid,
   Stack,
@@ -19,6 +18,7 @@ import { type DataTableSortStatus } from "mantine-datatable";
 import { Pencil, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
+import { EditableNumberInput } from "@/components/editable-number-input";
 import {
   PortalPageTitle,
   PortalSectionCard,
@@ -229,11 +229,11 @@ export default function AreasTablesSettingsPage() {
             disabled={isAddAreaSaving}
             size={isCompact ? "md" : "sm"}
           />
-          <NumberInput
+          <EditableNumberInput
             label="Sức chứa"
+            required
             value={capacity}
-            onChange={(value) => setCapacity(Number(value || 1))}
-            min={1}
+            onChange={(value) => setCapacity(value ?? 1)}
             disabled={isAddAreaSaving}
             size={isCompact ? "md" : "sm"}
           />
@@ -447,11 +447,11 @@ export default function AreasTablesSettingsPage() {
             onChange={(event) => setEditName(event.currentTarget.value)}
             disabled={editSaving}
           />
-          <NumberInput
+          <EditableNumberInput
             label="Sức chứa"
+            required
             value={editCapacity}
-            onChange={(value) => setEditCapacity(Number(value || 1))}
-            min={1}
+            onChange={(value) => setEditCapacity(value ?? 1)}
             disabled={editSaving}
           />
           <Group justify="flex-end" mt="md">

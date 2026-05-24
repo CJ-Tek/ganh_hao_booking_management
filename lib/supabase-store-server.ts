@@ -35,6 +35,12 @@ import {
 } from "./floor-map-layout";
 import { packMergeGroupTablePositions } from "./floor-map-merge-layout";
 import {
+  formatTableGuestCapacityHint,
+  getMergeGroupEffectiveGuestCapacity,
+  getTableEffectiveGuestCapacity,
+  tableFitsGuestCount,
+} from "./table-capacity";
+import {
   AppStateSnapshot,
   AppUser,
   BookingRuntimeSettings,
@@ -441,10 +447,11 @@ async function assertMergeGroupBookingAllowed(
   if (input.areaId && groupRow.area_id !== input.areaId) {
     return { ok: false, message: "Cụm bàn gộp không thuộc khu vực đã chọn." };
   }
-  if (input.guestCount > groupRow.total_capacity) {
+  const groupMaxGuests = getMergeGroupEffectiveGuestCapacity(groupRow.total_capacity);
+  if (input.guestCount > groupMaxGuests) {
     return {
       ok: false,
-      message: `Số khách vượt sức chứa cụm bàn gộp (${groupRow.total_capacity} ghế).`,
+      message: `Số khách vượt sức chứa cụm bàn gộp (${formatTableGuestCapacityHint(groupRow.total_capacity)}).`,
     };
   }
 
@@ -850,10 +857,10 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
         message: tableInfoError?.message ?? "Không tìm thấy bàn.",
       };
     }
-    if (normalizedGuestCount > tableInfo.seats) {
+    if (!tableFitsGuestCount(tableInfo.seats, normalizedGuestCount)) {
       return {
         ok: false,
-        message: `Số khách không được vượt quá sức chứa bàn (${tableInfo.seats} ghế).`,
+        message: `Số khách không được vượt quá sức chứa bàn (${formatTableGuestCapacityHint(tableInfo.seats)}).`,
       };
     }
     if (tableInfo.branch_id !== input.branchId) {
@@ -1043,10 +1050,10 @@ export async function assignBookingToTableInSupabase(input: {
   if (table.branch_id !== booking.branch_id) {
     return { ok: false, message: "Bàn không thuộc cùng chi nhánh với booking." };
   }
-  if (nextGuestCount > table.seats) {
+  if (!tableFitsGuestCount(table.seats, nextGuestCount)) {
     return {
       ok: false,
-      message: `Số khách không được vượt quá sức chứa bàn (${table.seats} ghế).`,
+      message: `Số khách không được vượt quá sức chứa bàn (${formatTableGuestCapacityHint(table.seats)}).`,
     };
   }
 
@@ -1335,10 +1342,10 @@ export async function updateBookingOrderInSupabase(input: {
     if ((table.status as TableStatus) === "locked") {
       return { ok: false, message: "Bàn đang khóa, không thể gán booking." };
     }
-    if (effectiveGuestCount > table.seats) {
+    if (!tableFitsGuestCount(table.seats, effectiveGuestCount)) {
       return {
         ok: false,
-        message: `Số khách không được vượt quá sức chứa bàn (${table.seats} ghế).`,
+        message: `Số khách không được vượt quá sức chứa bàn (${formatTableGuestCapacityHint(table.seats)}).`,
       };
     }
 
@@ -2201,6 +2208,7 @@ export async function releaseTableMergeGroupInSupabase(input: {
     return { id: row.table_id, seats: join?.seats ?? 0 };
   });
   const largestMemberSeats = memberSeats.reduce((max, row) => Math.max(max, row.seats), 0);
+  const largestMemberGuestCapacity = getTableEffectiveGuestCapacity(largestMemberSeats);
 
   const { data: activeBookings, error: bookingsErr } = await (client as any)
     .from("bookings")
@@ -2218,7 +2226,7 @@ export async function releaseTableMergeGroupInSupabase(input: {
     end_time: string;
   }>;
   const overflowBookings = activeRows.filter(
-    (row) => row.guest_count > largestMemberSeats
+    (row) => row.guest_count > largestMemberGuestCapacity
   );
   if (overflowBookings.length > 0) {
     return {
@@ -2233,7 +2241,7 @@ export async function releaseTableMergeGroupInSupabase(input: {
   // that can fit them without slot conflicts. Otherwise revert to pending.
   for (const booking of activeRows) {
     const candidates = [...memberSeats]
-      .filter((row) => row.seats >= booking.guest_count)
+      .filter((row) => tableFitsGuestCount(row.seats, booking.guest_count))
       .sort((a, b) => b.seats - a.seats);
     let assignedTableId: string | null = null;
     for (const candidate of candidates) {

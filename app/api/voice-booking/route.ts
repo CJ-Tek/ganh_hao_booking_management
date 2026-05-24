@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { generateObject } from "ai";
+import { generateObject, NoObjectGeneratedError } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { BOOKING_GUEST_TYPE_OPTIONS } from "@/lib/booking-meta";
+import { normalizeGuestTypeHint } from "@/lib/voice-booking/guest-type";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +31,8 @@ const RequestSchema = z.object({
   ),
 });
 
-const DraftSchema = z.object({
+/** Flat schema for the LLM — strict enums/nested shapes often fail first-try validation. */
+const LlmOutputSchema = z.object({
   customerName: z.string().optional(),
   customerPhone: z.string().optional(),
   guestCount: z.number().int().positive().optional(),
@@ -42,18 +44,51 @@ const DraftSchema = z.object({
   tableNameHint: z.string().optional(),
   note: z.string().optional(),
   guestType: z
-    .enum(BOOKING_GUEST_TYPE_OPTIONS)
+    .string()
     .optional()
     .describe(
-      `Loại khách khi được nói rõ. Chỉ dùng một trong: ${BOOKING_GUEST_TYPE_OPTIONS.join(", ")}.`
+      `Loại khách khi được nói rõ (vd: VIP, sinh nhật). Gợi ý: ${BOOKING_GUEST_TYPE_OPTIONS.join(", ")}.`
     ),
+  clarificationQuestion: z
+    .string()
+    .optional()
+    .describe("One short Vietnamese question when a required field is missing or ambiguous."),
 });
 
-const ResponseSchema = z.object({
-  draft: DraftSchema,
-  missing: z.array(z.enum(["customerName", "bookingAtLocal"])),
-  clarificationQuestion: z.string().optional(),
-});
+type VoiceBookingApiResponse = {
+  draft: {
+    customerName?: string;
+    customerPhone?: string;
+    guestCount?: number;
+    bookingAtLocal?: string;
+    areaNameHint?: string;
+    tableNameHint?: string;
+    note?: string;
+    guestType?: string;
+  };
+  missing: Array<"customerName" | "bookingAtLocal">;
+  clarificationQuestion?: string;
+};
+
+function buildVoiceBookingResponse(
+  raw: z.infer<typeof LlmOutputSchema>
+): VoiceBookingApiResponse {
+  const { clarificationQuestion, guestType: guestTypeHint, ...draftFields } = raw;
+  const guestType = normalizeGuestTypeHint(guestTypeHint) ?? undefined;
+  const draft = { ...draftFields, ...(guestType ? { guestType } : {}) };
+
+  const missing: VoiceBookingApiResponse["missing"] = [];
+  if (!draft.customerName?.trim()) missing.push("customerName");
+  if (!draft.bookingAtLocal?.trim()) missing.push("bookingAtLocal");
+
+  return {
+    draft,
+    missing,
+    ...(clarificationQuestion?.trim() ? { clarificationQuestion: clarificationQuestion.trim() } : {}),
+  };
+}
+
+const PARSE_ATTEMPTS = 3;
 
 export async function POST(req: Request) {
   try {
@@ -76,8 +111,9 @@ export async function POST(req: Request) {
       "Do NOT invent table IDs. Only return tableNameHint / areaNameHint as plain strings when mentioned.",
       `Time handling: now is ${input.nowIso}. Convert relative times (e.g. 'tối nay', 'mai', 'thứ bảy') into local time string YYYY-MM-DDTHH:mm (24h) in Vietnam time.`,
       "Phone, guestCount, area, table, guestType and note are optional.",
-      "guestType: set only when the speaker clearly indicates customer type (VIP, sinh nhật, đoàn, khách quen, đặt món trước). Otherwise omit.",
-      `guestType must be exactly one of: ${BOOKING_GUEST_TYPE_OPTIONS.join(", ")}.`,
+      "guestType: set only when the speaker clearly indicates customer type (VIP, sinh nhật, đoàn, khách quen, đặt món trước). Use a short Vietnamese label; otherwise omit.",
+      `Preferred guestType labels: ${BOOKING_GUEST_TYPE_OPTIONS.join(", ")}.`,
+      "Return missing required fields only via clarificationQuestion — do not invent customerName or bookingAtLocal.",
       "Phone handling: keep raw digits as spoken; accept +84 forms when present.",
       "If the transcript contains multiple bookings, only draft the first one and ignore the rest.",
     ].join("\n");
@@ -93,18 +129,32 @@ export async function POST(req: Request) {
     ].join("\n");
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12_000);
+    const timeout = setTimeout(() => controller.abort(), 20_000);
 
-    const result = await generateObject({
-      model: openai("gpt-4.1-mini"),
-      schema: ResponseSchema,
-      system,
-      prompt: user,
-      maxRetries: 0,
-      abortSignal: controller.signal,
-    }).finally(() => clearTimeout(timeout));
+    try {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < PARSE_ATTEMPTS; attempt++) {
+        try {
+          const result = await generateObject({
+            model: openai("gpt-4.1-mini"),
+            schema: LlmOutputSchema,
+            system,
+            prompt: user,
+            abortSignal: controller.signal,
+          });
+          return NextResponse.json(buildVoiceBookingResponse(result.object));
+        } catch (error) {
+          lastError = error;
+          const retryable =
+            NoObjectGeneratedError.isInstance(error) && attempt < PARSE_ATTEMPTS - 1;
+          if (!retryable) break;
+        }
+      }
 
-    return NextResponse.json(result.object);
+      throw lastError;
+    } finally {
+      clearTimeout(timeout);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 400 });

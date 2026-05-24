@@ -6,7 +6,6 @@ import {
   Button,
   Group,
   Modal,
-  NumberInput,
   Select,
   Stack,
   Text,
@@ -15,7 +14,8 @@ import {
 } from "@mantine/core";
 import { DateTimePicker } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { BOOKING_GUEST_TYPE_OPTIONS } from "@/lib/booking-meta";
 import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
@@ -147,6 +147,41 @@ export function VoiceBookingAssistant(props: {
   const [guestType, setGuestType] = useState<string | null>("Khách thường");
   const [clarify, setClarify] = useState<string | null>(null);
 
+  const defaultBookingAt = useCallback(
+    () => dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm"),
+    []
+  );
+
+  const resetForm = useCallback(() => {
+    const rec = recognitionRef.current;
+    if (rec) {
+      try {
+        rec.stop();
+      } catch {
+        // ignore if already stopped
+      }
+      recognitionRef.current = null;
+    }
+    setIsListening(false);
+    setIsWarmingMic(false);
+    setTranscript("");
+    setCustomerName("");
+    setCustomerPhone("");
+    setGuestCount(null);
+    setBookingAt(defaultBookingAt());
+    setAreaId(null);
+    setTableId(null);
+    setNote("");
+    setGuestType("Khách thường");
+    setClarify(null);
+    recordingAppendBaseRef.current = "";
+  }, [defaultBookingAt]);
+
+  const closeModal = useCallback(() => {
+    resetForm();
+    setOpened(false);
+  }, [resetForm]);
+
   const guestTypeOptions = useMemo(
     () => BOOKING_GUEST_TYPE_OPTIONS.map((label) => ({ value: label, label })),
     []
@@ -266,6 +301,29 @@ export function VoiceBookingAssistant(props: {
     }
   };
 
+  const applyParsedDraft = (data: Extract<VoiceBookingResponse, { draft: unknown }>) => {
+    const d = data.draft;
+    if (d.customerName) setCustomerName(formatVietnamesePersonName(d.customerName));
+    if (d.customerPhone) setCustomerPhone(d.customerPhone);
+    if (typeof d.guestCount === "number" && Number.isFinite(d.guestCount)) setGuestCount(d.guestCount);
+    if (d.bookingAtLocal) setBookingAt(d.bookingAtLocal);
+    if (d.note) setNote(d.note);
+
+    const parsedGuestType = normalizeGuestTypeHint(d.guestType);
+    if (parsedGuestType) setGuestType(parsedGuestType);
+
+    const matchedAreaId = matchAreaId(areas, d.areaNameHint);
+    const matchedTableId = matchTableId(tables, d.tableNameHint, {
+      preferAreaId: matchedAreaId,
+      minSeats: typeof d.guestCount === "number" ? d.guestCount : null,
+    });
+
+    if (matchedAreaId) setAreaId(matchedAreaId);
+    if (matchedTableId) setTableId(matchedTableId);
+
+    if (data.clarificationQuestion) setClarify(data.clarificationQuestion);
+  };
+
   const parseTranscript = async () => {
     if (!branch) {
       notifications.show({ color: "red", title: "Thiếu chi nhánh", message: "Cần chọn chi nhánh trước." });
@@ -276,46 +334,38 @@ export function VoiceBookingAssistant(props: {
     setIsParsing(true);
     setClarify(null);
     try {
-      const res = await fetch("/api/voice-booking", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          transcript: t,
-          nowIso: new Date().toISOString(),
-          branch,
-          areas,
-          tables,
-        }),
-      });
-      const data = (await res.json()) as VoiceBookingResponse;
-      if (!res.ok || "error" in data) {
-        throw new Error("error" in data ? data.error : "Không phân tích được.");
+      const payload = {
+        transcript: t,
+        nowIso: new Date().toISOString(),
+        branch,
+        areas,
+        tables,
+      };
+
+      let lastMessage = "Không phân tích được.";
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const res = await fetch("/api/voice-booking", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = (await res.json()) as VoiceBookingResponse;
+        if (res.ok && !("error" in data)) {
+          applyParsedDraft(data);
+          return;
+        }
+
+        lastMessage = "error" in data ? data.error : "Không phân tích được.";
+        const retryable =
+          attempt === 0 && /no object generated/i.test(lastMessage);
+        if (!retryable) break;
       }
 
-      const d = data.draft;
-      if (d.customerName) setCustomerName(formatVietnamesePersonName(d.customerName));
-      if (d.customerPhone) setCustomerPhone(d.customerPhone);
-      if (typeof d.guestCount === "number" && Number.isFinite(d.guestCount)) setGuestCount(d.guestCount);
-      if (d.bookingAtLocal) setBookingAt(d.bookingAtLocal);
-      if (d.note) setNote(d.note);
-
-      const parsedGuestType = normalizeGuestTypeHint(d.guestType);
-      if (parsedGuestType) setGuestType(parsedGuestType);
-
-      const matchedAreaId = matchAreaId(areas, d.areaNameHint);
-      const matchedTableId = matchTableId(tables, d.tableNameHint, {
-        preferAreaId: matchedAreaId,
-        minSeats: typeof d.guestCount === "number" ? d.guestCount : null,
-      });
-
-      if (matchedAreaId) setAreaId(matchedAreaId);
-      if (matchedTableId) setTableId(matchedTableId);
-
-      if (data.clarificationQuestion) setClarify(data.clarificationQuestion);
-      setTimeout(() => setIsParsing(false), 0);
+      throw new Error(lastMessage);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unknown error";
       notifications.show({ color: "red", title: "Phân tích thất bại", message });
+    } finally {
       setIsParsing(false);
     }
   };
@@ -365,8 +415,7 @@ export function VoiceBookingAssistant(props: {
 
       if (result.ok) {
         notifications.show({ color: "green", title: "Thành công", message: "Đã tạo booking." });
-        setGuestType("Khách thường");
-        setOpened(false);
+        closeModal();
       } else {
         notifications.show({ color: "red", title: "Tạo booking thất bại", message: result.message });
       }
@@ -386,7 +435,7 @@ export function VoiceBookingAssistant(props: {
         Đặt bàn bằng giọng nói
       </Button>
 
-      <Modal opened={opened} onClose={() => setOpened(false)} title="Đặt bàn bằng giọng nói" size="lg">
+      <Modal opened={opened} onClose={closeModal} title="Đặt bàn bằng giọng nói" size="lg">
         <Stack gap="md">
           {!branch ? (
             <Text c="dimmed">Chưa có chi nhánh trong scope hiện tại.</Text>
@@ -484,13 +533,10 @@ export function VoiceBookingAssistant(props: {
           />
 
           <Group grow align="flex-start">
-            <NumberInput
+            <GuestCountNumberInput
               label="Số khách"
               value={guestCount ?? undefined}
-              onChange={(v) => setGuestCount(typeof v === "number" && Number.isFinite(v) ? v : null)}
-              min={1}
-              allowDecimal={false}
-              clampBehavior="strict"
+              onChange={(value) => setGuestCount(value ?? null)}
               placeholder="Tùy chọn"
               disabled={isSubmitting}
             />
@@ -547,7 +593,7 @@ export function VoiceBookingAssistant(props: {
           />
 
           <Group justify="flex-end">
-            <Button variant="default" disabled={isSubmitting} onClick={() => setOpened(false)}>
+            <Button variant="default" disabled={isSubmitting} onClick={closeModal}>
               Đóng
             </Button>
             <Button

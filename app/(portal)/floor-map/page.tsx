@@ -13,7 +13,6 @@ import {
   Loader,
   Modal,
   MultiSelect,
-  NumberInput,
   Radio,
   Select,
   SegmentedControl,
@@ -28,6 +27,7 @@ import { DatePickerInput, TimeInput } from "@mantine/dates";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
+import { useRouter } from "next/navigation";
 import {
   ChevronDown,
   ChevronUp,
@@ -44,6 +44,8 @@ import {
   Wrench,
   X,
 } from "lucide-react";
+import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
+import { EditableNumberInput } from "@/components/editable-number-input";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import {
   BookingCalendarPanel,
@@ -96,6 +98,12 @@ import {
   deriveTableStatusFromDayBookings,
   pickPrimaryBookingOnTable,
 } from "@/lib/booking-meta";
+import {
+  formatTableGuestCapacityHint,
+  getMergeGroupEffectiveGuestCapacity,
+  getTableEffectiveGuestCapacity,
+  tableFitsGuestCount,
+} from "@/lib/table-capacity";
 import {
   confirmWaitlistOfferInSupabase,
   getTableBlockStateInSupabase,
@@ -393,6 +401,7 @@ export default function FloorMapPage() {
     removeTableFromMergeGroup,
     releaseTableMergeGroup,
   } = useAppContext();
+  const router = useRouter();
   const isCompact = usePortalCompact();
   const reserveManagerDock =
     (currentUser?.role === "manager" || currentUser?.role === "employee") && isCompact;
@@ -466,6 +475,14 @@ export default function FloorMapPage() {
   const blockCanvasForOverlay = Boolean(registerTable || detailTable) || statusMenuOpen;
   const isEditMode = mode === "edit";
   const editBlockedByOther = Boolean(layoutLockHolderName);
+
+  // #region agent log
+  const inRenderPhaseRef = useRef(false);
+  inRenderPhaseRef.current = true;
+  useLayoutEffect(() => {
+    inRenderPhaseRef.current = false;
+  });
+  // #endregion
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const calendarPanelRef = useRef<BookingCalendarPanelHandle | null>(null);
@@ -1130,8 +1147,44 @@ export default function FloorMapPage() {
       }
       if (info.userId !== currentUser.id) {
         setLayoutLockHolderName(info.fullName);
+        // #region agent log
+        fetch("http://127.0.0.1:7775/ingest/6dbf37ec-2333-468e-bf97-62fad053dd9f", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "7f6736",
+          },
+          body: JSON.stringify({
+            sessionId: "7f6736",
+            runId: "pre-fix",
+            hypothesisId: "A",
+            location: "floor-map/page.tsx:syncLockInfo",
+            message: "syncLockInfo foreign lock before setMode",
+            data: { modeRef: modeRef.current, inRender: inRenderPhaseRef.current },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         setMode((m) => {
           if (m === "edit") {
+            // #region agent log
+            fetch("http://127.0.0.1:7775/ingest/6dbf37ec-2333-468e-bf97-62fad053dd9f", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "7f6736",
+              },
+              body: JSON.stringify({
+                sessionId: "7f6736",
+                runId: "pre-fix",
+                hypothesisId: "A",
+                location: "floor-map/page.tsx:setMode-updater",
+                message: "setMode updater calling notifications.show",
+                data: { prevMode: m, inRender: inRenderPhaseRef.current },
+                timestamp: Date.now(),
+              }),
+            }).catch(() => {});
+            // #endregion
             notifications.show({
               color: "orange",
               message: `${info.fullName} đang chỉnh sửa sơ đồ. Chế độ của bạn chuyển sang xem.`,
@@ -1743,8 +1796,7 @@ export default function FloorMapPage() {
         title: "Mở Danh sách booking",
         children: (
           <Text size="sm">
-            Chuyển đến Danh sách booking ngày {dayjs(booking.bookingAt).format("DD/MM/YYYY")} (suất{" "}
-            {visitLabel}
+            Chuyển đến trang Đặt bàn · Danh sách booking (suất {visitLabel}
             {customer?.fullName ? ` · ${customer.fullName}` : ""})? Form gán bàn sẽ đóng.
           </Text>
         ),
@@ -1752,12 +1804,15 @@ export default function FloorMapPage() {
         onConfirm: () => {
           closeRegistrationPanel();
           closeDetailModal();
-          setFloorMapSelectedDate(dayjs(booking.bookingAt));
-          calendarPanelRef.current?.openDayListModalForBooking(booking);
+          const params = new URLSearchParams({
+            tab: "list",
+            focusBooking: booking.id,
+          });
+          router.push(`/bookings?${params.toString()}`);
         },
       });
     },
-    [closeRegistrationPanel, state.customers]
+    [closeRegistrationPanel, router, state.customers]
   );
 
   const openRegistrationForTable = (table: DiningTable, options?: { preferHoldAfterOccupied?: boolean }) => {
@@ -1846,10 +1901,10 @@ export default function FloorMapPage() {
       return;
     }
     const nextGuestCount = Math.max(1, Number(registerGuestCount || 1));
-    if (registerTable.seats > 0 && nextGuestCount > registerTable.seats) {
+    if (registerTable.seats > 0 && !tableFitsGuestCount(registerTable.seats, nextGuestCount)) {
       notifications.show({
         color: "red",
-        message: `Số khách không được vượt quá sức chứa bàn (${registerTable.seats} ghế).`,
+        message: `Số khách không được vượt quá sức chứa bàn (${formatTableGuestCapacityHint(registerTable.seats)}).`,
       });
       return;
     }
@@ -1953,7 +2008,12 @@ export default function FloorMapPage() {
       registerPendingSelected,
       registerTable.id,
       state.bookings,
-      { maxSeats: registerTable.seats > 0 ? registerTable.seats : undefined }
+      {
+        maxSeats:
+          registerTable.seats > 0
+            ? getTableEffectiveGuestCapacity(registerTable.seats)
+            : undefined,
+      }
     );
   }, [registerPendingSelected, registerTable, state.bookings]);
 
@@ -1971,7 +2031,12 @@ export default function FloorMapPage() {
         registerPendingSelected,
         registerTable.id,
         state.bookings,
-        { maxSeats: registerTable.seats > 0 ? registerTable.seats : undefined }
+        {
+          maxSeats:
+            registerTable.seats > 0
+              ? getTableEffectiveGuestCapacity(registerTable.seats)
+              : undefined,
+        }
       );
     if (plan.assignable.length === 0) {
       notifications.show({
@@ -2609,11 +2674,65 @@ export default function FloorMapPage() {
     paletteGestureRef.current = null;
     const dist = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
     if (dist <= PALETTE_DRAG_THRESHOLD_PX) {
+      // #region agent log
+      fetch("http://127.0.0.1:7775/ingest/6dbf37ec-2333-468e-bf97-62fad053dd9f", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "7f6736",
+        },
+        body: JSON.stringify({
+          sessionId: "7f6736",
+          runId: "pre-fix",
+          hypothesisId: "B",
+          location: "floor-map/page.tsx:handlePalettePointerUp",
+          message: "palette tap before setPendingPlacementTableId",
+          data: { tableId: table.id, inRender: inRenderPhaseRef.current },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setPendingPlacementTableId((current) => {
         if (current === table.id) {
+          // #region agent log
+          fetch("http://127.0.0.1:7775/ingest/6dbf37ec-2333-468e-bf97-62fad053dd9f", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Debug-Session-Id": "7f6736",
+            },
+            body: JSON.stringify({
+              sessionId: "7f6736",
+              runId: "pre-fix",
+              hypothesisId: "B",
+              location: "floor-map/page.tsx:setPendingPlacement-updater",
+              message: "setPendingPlacement updater calling notifications.show (deselect)",
+              data: { current, inRender: inRenderPhaseRef.current },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
           notifications.show({ color: "blue", message: "Đã bỏ chọn đặt bàn." });
           return null;
         }
+        // #region agent log
+        fetch("http://127.0.0.1:7775/ingest/6dbf37ec-2333-468e-bf97-62fad053dd9f", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Debug-Session-Id": "7f6736",
+          },
+          body: JSON.stringify({
+            sessionId: "7f6736",
+            runId: "pre-fix",
+            hypothesisId: "B",
+            location: "floor-map/page.tsx:setPendingPlacement-updater",
+            message: "setPendingPlacement updater calling notifications.show (select)",
+            data: { current, nextId: table.id, inRender: inRenderPhaseRef.current },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
         notifications.show({
           color: "blue",
           message: "Chạm vào ô trên sơ đồ để đặt bàn (hoặc kéo từ kho như trước).",
@@ -3139,8 +3258,9 @@ export default function FloorMapPage() {
                     >
                       <Stack gap="sm">
                         <Group align="end" gap="xs" wrap="nowrap">
-                          <NumberInput
+                          <EditableNumberInput
                             label="Cột"
+                            required
                             value={editLayout?.gridColumns ?? gridColumns}
                             onChange={(value) =>
                               setEditLayout((prev) =>
@@ -3148,7 +3268,7 @@ export default function FloorMapPage() {
                                   ? {
                                       ...prev,
                                       gridColumns: clamp(
-                                        Number(value) || DEFAULT_GRID_COLUMNS,
+                                        value ?? DEFAULT_GRID_COLUMNS,
                                         4,
                                         24
                                       ),
@@ -3158,32 +3278,32 @@ export default function FloorMapPage() {
                             }
                             min={4}
                             max={24}
-                            clampBehavior="strict"
                             style={{ flex: 1 }}
                             disabled={!editLayout}
                           />
-                          <NumberInput
+                          <EditableNumberInput
                             label="Hàng"
+                            required
                             value={editLayout?.gridRows ?? gridRows}
                             onChange={(value) =>
                               setEditLayout((prev) =>
                                 prev
                                   ? {
                                       ...prev,
-                                      gridRows: clamp(Number(value) || DEFAULT_GRID_ROWS, 4, 18),
+                                      gridRows: clamp(value ?? DEFAULT_GRID_ROWS, 4, 18),
                                     }
                                   : prev
                               )
                             }
                             min={4}
                             max={18}
-                            clampBehavior="strict"
                             style={{ flex: 1 }}
                             disabled={!editLayout}
                           />
                         </Group>
-                        <NumberInput
+                        <EditableNumberInput
                           label="Khoảng cách node"
+                          required
                           value={editLayout?.nodeSpacing ?? nodeSpacing}
                           onChange={(value) =>
                             setEditLayout((prev) =>
@@ -3191,7 +3311,7 @@ export default function FloorMapPage() {
                                 ? {
                                     ...prev,
                                     nodeSpacing: clampFloorNodeSpacing(
-                                      Number(value) || FLOOR_DEFAULT_NODE_SPACING_PX
+                                      value ?? FLOOR_DEFAULT_NODE_SPACING_PX
                                     ),
                                   }
                                 : prev
@@ -3200,7 +3320,6 @@ export default function FloorMapPage() {
                           min={FLOOR_NODE_SPACING_MIN_PX}
                           max={FLOOR_NODE_SPACING_MAX_PX}
                           step={4}
-                          clampBehavior="strict"
                           disabled={!editLayout}
                         />
                         <Button
@@ -3506,7 +3625,8 @@ export default function FloorMapPage() {
           <Stack gap="sm">
             <Group justify="space-between" align="flex-start" wrap="wrap" gap="xs">
               <Text size="sm" c="dimmed">
-                {registerTable.seats} ghế · {tableStatusLabel[registerTable.status]}
+                {formatTableGuestCapacityHint(registerTable.seats)} ·{" "}
+                {tableStatusLabel[registerTable.status]}
               </Text>
               {registerTable.status === "occupied" || registerTable.status === "hold" ? (
                 <Button
@@ -3671,12 +3791,16 @@ export default function FloorMapPage() {
                     onChange={(event) => setRegisterCustomerPhone(event.currentTarget.value)}
                     disabled={registerSaving}
                   />
-                  <NumberInput
+                  <GuestCountNumberInput
                     label="Số khách"
+                    required
                     value={registerGuestCount}
-                    onChange={(value) => setRegisterGuestCount(Number(value || 1))}
-                    min={1}
-                    max={registerTable.seats || undefined}
+                    onChange={(value) => setRegisterGuestCount(value ?? 1)}
+                    max={
+                      registerTable.seats > 0
+                        ? getTableEffectiveGuestCapacity(registerTable.seats)
+                        : undefined
+                    }
                     disabled={registerSaving}
                   />
                   <Select
@@ -3723,7 +3847,7 @@ export default function FloorMapPage() {
                   <RegisterPendingAssignTable
                     records={pendingBookings}
                     tableId={registerTable.id}
-                    tableSeats={registerTable.seats}
+                    tableSeats={getTableEffectiveGuestCapacity(registerTable.seats)}
                     selectedBookings={registerPendingSelected}
                     onSelectedBookingsChange={setRegisterPendingSelected}
                     onNavigateToBookingList={confirmNavigateToDayBookingList}
@@ -3837,11 +3961,11 @@ export default function FloorMapPage() {
             value={areaEditName}
             onChange={(event) => setAreaEditName(event.currentTarget.value)}
           />
-          <NumberInput
+          <GuestCountNumberInput
             label="Sức chứa"
+            required
             value={areaEditCapacity}
-            onChange={(value) => setAreaEditCapacity(Number(value || 1))}
-            min={1}
+            onChange={(value) => setAreaEditCapacity(value ?? 1)}
           />
           <Group justify="flex-end" mt="md">
             <Button variant="default" onClick={() => setAreaEditOpen(false)}>
@@ -4110,7 +4234,7 @@ function MergeGroupAssignablePending({
           (booking) =>
             booking.branchId === group.branchId &&
             (booking.areaId === group.areaId || !booking.areaId) &&
-            booking.guestCount <= group.totalCapacity
+            booking.guestCount <= getMergeGroupEffectiveGuestCapacity(group.totalCapacity)
         )
         .slice(0, 8),
     [group, pendingBookings]

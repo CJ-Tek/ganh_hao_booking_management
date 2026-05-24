@@ -9,7 +9,6 @@ import {
   Group,
   Modal,
   MultiSelect,
-  NumberInput,
   Paper,
   Select,
   SimpleGrid,
@@ -23,6 +22,7 @@ import { type DataTableSortStatus } from "mantine-datatable";
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
+import { EditableNumberInput } from "@/components/editable-number-input";
 import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
@@ -476,12 +476,12 @@ function TablesPageContent() {
             onChange={(event) => setSingleName(event.currentTarget.value)}
             size={isCompact ? "md" : "sm"}
           />
-          <NumberInput
+          <EditableNumberInput
             label="Số ghế"
-            min={1}
+            required
             max={areaSeatBudget && areaSeatBudget.remaining > 0 ? areaSeatBudget.remaining : undefined}
             value={singleSeats}
-            onChange={(value) => setSingleSeats(Number(value || 1))}
+            onChange={(value) => setSingleSeats(value ?? 1)}
             size={isCompact ? "md" : "sm"}
           />
           <div />
@@ -505,11 +505,11 @@ function TablesPageContent() {
               onChange={(event) => setBatchPrefix(event.currentTarget.value)}
               size={isCompact ? "md" : "sm"}
             />
-            <NumberInput
+            <EditableNumberInput
               label="Bắt đầu từ số"
-              min={1}
+              required
               value={batchStart}
-              onChange={(value) => setBatchStart(Number(value || 1))}
+              onChange={(value) => setBatchStart(value ?? 1)}
               size={isCompact ? "md" : "sm"}
             />
           </SimpleGrid>
@@ -525,29 +525,30 @@ function TablesPageContent() {
           <Stack gap="xs">
             {batchGroups.map((row, index) => (
               <Group key={index} align="flex-end" wrap="nowrap" gap="sm">
-                <NumberInput
+                <EditableNumberInput
                   label={index === 0 ? "Số bàn" : undefined}
                   placeholder="0"
+                  required
                   min={0}
                   value={row.count}
                   onChange={(value) =>
                     setBatchGroups((prev) =>
                       prev.map((g, i) =>
-                        i === index ? { ...g, count: Math.max(0, Number(value ?? 0)) } : g
+                        i === index ? { ...g, count: value ?? 0 } : g
                       )
                     )
                   }
                   style={{ flex: 1 }}
                   size={isCompact ? "md" : "sm"}
                 />
-                <NumberInput
+                <EditableNumberInput
                   label={index === 0 ? "Ghế / bàn" : undefined}
-                  min={1}
+                  required
                   value={row.seats}
                   onChange={(value) =>
                     setBatchGroups((prev) =>
                       prev.map((g, i) =>
-                        i === index ? { ...g, seats: Math.max(1, Number(value ?? 1)) } : g
+                        i === index ? { ...g, seats: value ?? 1 } : g
                       )
                     )
                   }
@@ -611,18 +612,18 @@ function TablesPageContent() {
       <Tabs.Panel value="batch-remove" pt="md">
         <Stack gap="sm">
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
-            <NumberInput
+            <EditableNumberInput
               label="Số ghế cần xóa"
-              min={1}
+              required
               value={removeBySeats}
-              onChange={(value) => setRemoveBySeats(Number(value || 1))}
+              onChange={(value) => setRemoveBySeats(value ?? 1)}
               size={isCompact ? "md" : "sm"}
             />
-            <NumberInput
+            <EditableNumberInput
               label="Số lượng cần xóa"
-              min={1}
+              required
               value={removeCount}
-              onChange={(value) => setRemoveCount(Number(value || 1))}
+              onChange={(value) => setRemoveCount(value ?? 1)}
               size={isCompact ? "md" : "sm"}
             />
             <TextInput

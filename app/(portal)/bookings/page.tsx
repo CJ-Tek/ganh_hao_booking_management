@@ -11,7 +11,6 @@ import {
   Drawer,
   Group,
   Modal,
-  NumberInput,
   Select,
   Stack,
   Tabs,
@@ -33,6 +32,11 @@ import {
   PortalStickyAction,
 } from "@/components/portal-page";
 import { BookingCalendarPanel } from "@/components/booking-calendar-panel";
+import {
+  AssignGuestCountPromptBody,
+  AssignGuestSpecifiedOptionsBody,
+} from "@/components/booking-management/assign-guest-bodies";
+import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
@@ -65,6 +69,7 @@ import {
   type MergeRecommendation,
 } from "@/lib/booking-meta";
 import { bookingCardBusyProps, bookingListRowStyle } from "@/lib/busy-row-style";
+import { getTableEffectiveGuestCapacity } from "@/lib/table-capacity";
 import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking, type BookingStatus } from "@/lib/types";
@@ -109,150 +114,6 @@ function BookingDetailField(props: { label: string; value: ReactNode }) {
       </Text>
       <div style={{ minWidth: 0, flex: 1, textAlign: "right" }}>{value}</div>
     </Group>
-  );
-}
-
-/** Mantine NumberInput may emit string while editing; keep a single parse path for guest counts. */
-function parseGuestCountFromNumberInput(value: number | string | undefined): number | undefined {
-  if (value === undefined || value === "") return undefined;
-  if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
-  const n = Number(String(value).trim().replace(",", "."));
-  return Number.isFinite(n) ? n : undefined;
-}
-
-function AssignGuestCountPromptBody(props: {
-  onBack?: () => void;
-  onManual: (guestCount: number) => void;
-}) {
-  const { onBack, onManual } = props;
-  const [guestCount, setGuestCount] = useState<number | undefined>(undefined);
-  return (
-    <Stack gap="sm">
-      {onBack ? (
-        <Button variant="default" size="compact-sm" onClick={onBack}>
-          ← Quay lại
-        </Button>
-      ) : null}
-      <NumberInput
-        label="Số khách"
-        min={1}
-        allowDecimal={false}
-        clampBehavior="strict"
-        value={guestCount}
-        onChange={(value) => setGuestCount(parseGuestCountFromNumberInput(value))}
-      />
-      <Button
-        onClick={() => {
-          if (typeof guestCount !== "number" || guestCount < 1) {
-            notifications.show({
-              color: "red",
-              message: "Vui lòng nhập số khách hợp lệ.",
-            });
-            return;
-          }
-          onManual(guestCount);
-        }}
-      >
-        Chọn bàn thủ công
-      </Button>
-    </Stack>
-  );
-}
-
-/** Đã có số khách: Sửa → chỉnh rồi Xong để lưu DB; sau đó có thể chọn thủ công / tự động. */
-function AssignGuestSpecifiedOptionsBody(props: {
-  booking: Booking;
-  modalId: string;
-  persistGuestCount: (bookingId: string, guestCount: number) => Promise<{ ok: boolean; message: string }>;
-  onManual: (guestCount: number) => void;
-}) {
-  const { booking, modalId, persistGuestCount, onManual } = props;
-  const [editingGuest, setEditingGuest] = useState(false);
-  const [guestDraft, setGuestDraft] = useState(() => Math.max(1, booking.guestCount));
-  const [committedGuest, setCommittedGuest] = useState(() => Math.max(1, booking.guestCount));
-  const [persistingGuest, setPersistingGuest] = useState(false);
-
-  useEffect(() => {
-    const base = Math.max(1, booking.guestCount);
-    setGuestDraft(base);
-    setCommittedGuest(base);
-    setEditingGuest(false);
-  }, [booking.id, booking.guestCount]);
-
-  const resolvedGuest = Math.max(
-    1,
-    Math.round(
-      typeof guestDraft === "number" && Number.isFinite(guestDraft)
-        ? guestDraft
-        : committedGuest
-    )
-  );
-
-  const handleEditToggle = async () => {
-    if (editingGuest) {
-      const next = resolvedGuest;
-      setPersistingGuest(true);
-      try {
-        const result = await persistGuestCount(booking.id, next);
-        notifications.show({ color: result.ok ? "green" : "red", message: result.message });
-        if (!result.ok) {
-          return;
-        }
-        setCommittedGuest(next);
-        setGuestDraft(next);
-      } finally {
-        setPersistingGuest(false);
-      }
-      setEditingGuest(false);
-      return;
-    }
-    setEditingGuest(true);
-  };
-
-  return (
-    <Stack gap="sm">
-      <Group gap="xs" align="flex-end" wrap="wrap">
-        {editingGuest ? (
-          <NumberInput
-            label="Số khách"
-            min={1}
-            miw={160}
-            style={{ flex: "1 1 12rem" }}
-            allowDecimal={false}
-            clampBehavior="strict"
-            disabled={persistingGuest}
-            value={guestDraft}
-            onChange={(v) =>
-              setGuestDraft(parseGuestCountFromNumberInput(v) ?? guestDraft)
-            }
-          />
-        ) : (
-          <Text size="sm" c="dimmed">
-            Đã có số khách: <strong>{resolvedGuest}</strong>.
-          </Text>
-        )}
-        <Button
-          variant="light"
-          size="compact-sm"
-          loading={persistingGuest}
-          disabled={persistingGuest}
-          onClick={() => void handleEditToggle()}
-        >
-          {editingGuest ? "Xong" : "Sửa"}
-        </Button>
-      </Group>
-      <Button
-        disabled={persistingGuest}
-        onClick={() => {
-          modals.close(modalId);
-          window.setTimeout(() => {
-            onManual(resolvedGuest);
-          }, MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS);
-        }}
-      >
-        Chọn bàn thủ công
-      </Button>
-    </Stack>
   );
 }
 
@@ -357,6 +218,23 @@ function BookingsPageContent() {
       setCreateBranchId(branchId);
     }
   }, [branchId, createModalOpened]);
+
+  const resetCreateForm = useCallback(() => {
+    setCustomerName("");
+    setCustomerPhone("");
+    setGuestCount(undefined);
+    setBookingAt(dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm"));
+    setNote("");
+    setGuestType("Khách thường");
+    setCreateBranchId(branchId);
+  }, [branchId]);
+
+  const closeCreateModal = useCallback(() => {
+    if (!isCreating) {
+      resetCreateForm();
+      setCreateModalOpened(false);
+    }
+  }, [isCreating, resetCreateForm]);
   const [todayTableAssignFilter, setTodayTableAssignFilter] = useState<
     "all" | "assigned" | "unassigned"
   >("all");
@@ -1555,11 +1433,7 @@ function BookingsPageContent() {
     });
     if (result.ok) {
       const switchedFrom = branchId;
-      setCustomerName("");
-      setCustomerPhone("");
-      setGuestCount(undefined);
-      setNote("");
-      setGuestType("Khách thường");
+      resetCreateForm();
       setCreateModalOpened(false);
       if (
         currentUser?.role === "manager" &&
@@ -1610,8 +1484,11 @@ function BookingsPageContent() {
     if (branchTables.length === 0) {
       return [];
     }
-    const maxSingleSeats = branchTables.reduce((acc, table) => Math.max(acc, table.seats), 0);
-    if (guestCount <= maxSingleSeats) {
+    const maxSingleGuestCapacity = branchTables.reduce(
+      (acc, table) => Math.max(acc, getTableEffectiveGuestCapacity(table.seats)),
+      0
+    );
+    if (guestCount <= maxSingleGuestCapacity) {
       return [];
     }
     const nowIso = new Date().toISOString();
@@ -1764,13 +1641,10 @@ function BookingsPageContent() {
           popoverProps={portalModalOverlayPopoverProps}
           timePickerProps={{ popoverProps: portalModalOverlayPopoverProps }}
         />
-        <NumberInput
+        <GuestCountNumberInput
           label="Số khách (tùy chọn)"
           value={guestCount}
-          onChange={(value) => setGuestCount(parseGuestCountFromNumberInput(value))}
-          min={1}
-          allowDecimal={false}
-          clampBehavior="strict"
+          onChange={setGuestCount}
           placeholder="Để trống nếu chưa rõ"
           disabled={createFormDisabled}
           size={isCompact ? "md" : "sm"}
@@ -2745,14 +2619,16 @@ function BookingsPageContent() {
       return null;
     }
 
-    const maxSeatsInScope = Math.max(...tablesInScope.map((table) => table.seats));
-    if (requiredSeats <= maxSeatsInScope) {
+    const maxGuestsInScope = Math.max(
+      ...tablesInScope.map((table) => getTableEffectiveGuestCapacity(table.seats))
+    );
+    if (requiredSeats <= maxGuestsInScope) {
       return null;
     }
 
     return assignAreaId
-      ? `Trong khu vực đã chọn, không có bàn nào đủ chỗ cho ${requiredSeats} khách (tối đa ${maxSeatsInScope} ghế/bàn). Chọn khu vực khác hoặc giảm số khách.`
-      : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất hiện có: ${maxSeatsInScope} ghế). Giảm số khách hoặc cấu hình bàn lớn hơn.`;
+      ? `Trong khu vực đã chọn, không có bàn nào đủ chỗ cho ${requiredSeats} khách (tối đa ${maxGuestsInScope} khách/bàn). Chọn khu vực khác hoặc giảm số khách.`
+      : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất hiện có: ${maxGuestsInScope} khách). Giảm số khách hoặc cấu hình bàn lớn hơn.`;
   }, [assignAreaId, assignFormBooking, assignManualGuestCount, state.bookings, state.tables]);
 
   const assignModalAreaOptions = useMemo(() => {
@@ -2925,13 +2801,15 @@ function BookingsPageContent() {
     if (tablesInScope.length === 0) {
       return null;
     }
-    const maxSeatsInScope = Math.max(...tablesInScope.map((table) => table.seats));
-    if (requiredSeats <= maxSeatsInScope) {
+    const maxGuestsInScope = Math.max(
+      ...tablesInScope.map((table) => getTableEffectiveGuestCapacity(table.seats))
+    );
+    if (requiredSeats <= maxGuestsInScope) {
       return null;
     }
     return editAreaId
-      ? `Trong khu vực đã chọn, không có bàn nào đủ chỗ cho ${requiredSeats} khách (tối đa ${maxSeatsInScope} ghế/bàn).`
-      : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất: ${maxSeatsInScope} ghế).`;
+      ? `Trong khu vực đã chọn, không có bàn nào đủ chỗ cho ${requiredSeats} khách (tối đa ${maxGuestsInScope} khách/bàn).`
+      : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất: ${maxGuestsInScope} khách).`;
   }, [editAreaId, editAssignCandidate, editGuestCount, state.bookings, state.tables]);
 
   const bookingDetailTitle = mobileDetailBookingLive
@@ -3174,11 +3052,7 @@ function BookingsPageContent() {
       )}
       <Modal
         opened={createModalOpened}
-        onClose={() => {
-          if (!isCreating) {
-            setCreateModalOpened(false);
-          }
-        }}
+        onClose={closeCreateModal}
         closeOnClickOutside={!isCreating}
         closeOnEscape={!isCreating}
         title="Tạo mới"
@@ -3231,14 +3105,11 @@ function BookingsPageContent() {
               onChange={(event) => setEditCustomerPhone(event.currentTarget.value)}
               size={isCompact ? "md" : "sm"}
             />
-            <NumberInput
+            <GuestCountNumberInput
               label="Số khách"
               description="Để trống nếu chưa rõ số khách."
               value={editGuestCount}
-              onChange={(value) => setEditGuestCount(parseGuestCountFromNumberInput(value))}
-              min={1}
-              allowDecimal={false}
-              clampBehavior="strict"
+              onChange={setEditGuestCount}
               placeholder="Chưa rõ"
               size={isCompact ? "md" : "sm"}
             />
@@ -3402,20 +3273,16 @@ function BookingsPageContent() {
               {state.customers.find((item) => item.id === assignFormBooking.customerId)?.fullName ?? "—"} ·{" "}
               {dayjs(assignFormBooking.bookingAt).format("HH:mm DD/MM/YYYY")}
             </Text>
-            <NumberInput
+            <GuestCountNumberInput
               label="Số khách"
               description={
                 isGuestCountSpecified(assignFormBooking)
                   ? "Có thể chỉnh lại trước khi gán bàn."
                   : undefined
               }
-              min={1}
+              required
               value={assignManualGuestCount}
-              onChange={(value) =>
-                setAssignManualGuestCount(parseGuestCountFromNumberInput(value))
-              }
-              allowDecimal={false}
-              clampBehavior="strict"
+              onChange={setAssignManualGuestCount}
             />
             <Group grow>
               <Select

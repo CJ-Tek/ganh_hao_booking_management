@@ -3,6 +3,10 @@ import dayjs from "dayjs";
 import { DEFAULT_BOOKING_RUNTIME_SETTINGS } from "@/lib/booking-runtime-defaults";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import {
+  getMergeGroupEffectiveGuestCapacity,
+  getTableEffectiveGuestCapacity,
+} from "@/lib/table-capacity";
+import {
   type Booking,
   type BookingRuntimeSettings,
   type BookingStatus,
@@ -489,7 +493,10 @@ export function getAssignableCandidateTables(
     if (table.branchId !== booking.branchId || table.status === "locked") {
       return false;
     }
-    if (seatsNeeded !== undefined && table.seats < seatsNeeded) {
+    if (
+      seatsNeeded !== undefined &&
+      getTableEffectiveGuestCapacity(table.seats) < seatsNeeded
+    ) {
       return false;
     }
     return !hasAssignableSlotConflictAtTable(booking, table.id, allBookings);
@@ -548,7 +555,7 @@ export function getAssignableMergeGroups(
     if (group.branchId !== booking.branchId || group.status !== "active") {
       return false;
     }
-    if (group.totalCapacity < seatsNeeded) {
+    if (getMergeGroupEffectiveGuestCapacity(group.totalCapacity) < seatsNeeded) {
       return false;
     }
     return !hasAssignableSlotConflictAtMergeGroup(booking, group, allBookings);
@@ -621,7 +628,7 @@ export function recommendMergeGroups(
       if (options.areaId && group.areaId !== options.areaId) {
         return false;
       }
-      if (group.totalCapacity < targetSeats) {
+      if (getMergeGroupEffectiveGuestCapacity(group.totalCapacity) < targetSeats) {
         return false;
       }
       return !hasAssignableSlotConflictAtMergeGroup(booking, group, options.allBookings);
@@ -658,8 +665,8 @@ export function recommendMergeGroups(
     if (a.tableIds.length !== b.tableIds.length) {
       return a.tableIds.length - b.tableIds.length;
     }
-    const wastedA = a.totalCapacity - targetSeats;
-    const wastedB = b.totalCapacity - targetSeats;
+    const wastedA = getMergeGroupEffectiveGuestCapacity(a.totalCapacity) - targetSeats;
+    const wastedB = getMergeGroupEffectiveGuestCapacity(b.totalCapacity) - targetSeats;
     if (wastedA !== wastedB) {
       return wastedA - wastedB;
     }
@@ -700,8 +707,8 @@ function enumerateBestCombinations(
     if (a.tableIds.length !== b.tableIds.length) {
       return a.tableIds.length - b.tableIds.length;
     }
-    const wastedA = a.totalCapacity - targetSeats;
-    const wastedB = b.totalCapacity - targetSeats;
+    const wastedA = getMergeGroupEffectiveGuestCapacity(a.totalCapacity) - targetSeats;
+    const wastedB = getMergeGroupEffectiveGuestCapacity(b.totalCapacity) - targetSeats;
     return wastedA - wastedB;
   });
 
@@ -720,7 +727,7 @@ function pushBoundedSubsets(
   const visit = (start: number, picked: DiningTable[]) => {
     if (picked.length >= 2 && picked.length <= MAX_NEW_COMBINATION_TABLES) {
       const total = picked.reduce((acc, t) => acc + t.seats, 0);
-      if (total >= targetSeats) {
+      if (getMergeGroupEffectiveGuestCapacity(total) >= targetSeats) {
         const sortedIds = picked
           .map((t) => t.id)
           .sort()
@@ -751,8 +758,8 @@ function pushBoundedSubsets(
     if (a.tables.length !== b.tables.length) {
       return a.tables.length - b.tables.length;
     }
-    const wastedA = a.total - targetSeats;
-    const wastedB = b.total - targetSeats;
+    const wastedA = getMergeGroupEffectiveGuestCapacity(a.total) - targetSeats;
+    const wastedB = getMergeGroupEffectiveGuestCapacity(b.total) - targetSeats;
     if (wastedA !== wastedB) {
       return wastedA - wastedB;
     }
@@ -784,7 +791,7 @@ function pushGreedyCombinations(
   for (const anchor of sortedBySeatsDesc.slice(0, MAX_RECOMMENDATION_CANDIDATES)) {
     const picked: DiningTable[] = [anchor];
     let total = anchor.seats;
-    if (total >= targetSeats) {
+    if (getMergeGroupEffectiveGuestCapacity(total) >= targetSeats) {
       continue;
     }
     const neighbors = [...tables]
@@ -793,11 +800,14 @@ function pushGreedyCombinations(
     for (const next of neighbors) {
       picked.push(next);
       total += next.seats;
-      if (total >= targetSeats || picked.length >= MAX_NEW_COMBINATION_TABLES) {
+      if (
+        getMergeGroupEffectiveGuestCapacity(total) >= targetSeats ||
+        picked.length >= MAX_NEW_COMBINATION_TABLES
+      ) {
         break;
       }
     }
-    if (total >= targetSeats) {
+    if (getMergeGroupEffectiveGuestCapacity(total) >= targetSeats) {
       const ids = picked.map((t) => t.id);
       out.push({
         key: `combo:${[...ids].sort().join(",")}`,

@@ -26,6 +26,7 @@ import {
 
 } from "@mantine/core";
 
+import { DatePickerInput } from "@mantine/dates";
 import { useMediaQuery } from "@mantine/hooks";
 
 import { type DataTableSortStatus } from "mantine-datatable";
@@ -44,6 +45,7 @@ import { bookingStatusLabel } from "@/lib/display";
 import { type Booking, type BookingStatus } from "@/lib/types";
 
 import { usePortalCompact } from "@/lib/use-portal-compact";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 
 
@@ -549,98 +551,61 @@ export const BookingCalendarPanel = forwardRef<
 
       </Group>
 
-      <Group justify="space-between" wrap="wrap" gap="xs">
-
+      <Group justify="space-between" wrap="wrap" gap="xs" align="flex-end">
         <Group gap="xs">
-
-          <Button
-
-            variant="default"
-
-            size={isCompact || isNarrowCalendar ? "xs" : "compact-sm"}
-
-            onClick={() => {
-
-              const nextMonth = activeMonth.subtract(1, "month");
-
-              setActiveMonth(nextMonth);
-
-              setSelectedDate(nextMonth.startOf("month"));
-
+          <DatePickerInput
+            label="Ngày xem sơ đồ"
+            value={selectedDate.format("YYYY-MM-DD")}
+            onChange={(value) => {
+              if (!value) {
+                return;
+              }
+              const date = dayjs(value, "YYYY-MM-DD");
+              setActiveMonth(date.startOf("month"));
+              setSelectedDate(date);
             }}
-
-          >
-
-            {isNarrowCalendar ? "Trước" : "Tháng trước"}
-
-          </Button>
-
-          <Button
-
-            variant="default"
-
-            size={isCompact || isNarrowCalendar ? "xs" : "compact-sm"}
-
-            onClick={() => {
-
-              const nextMonth = activeMonth.add(1, "month");
-
-              setActiveMonth(nextMonth);
-
-              setSelectedDate(nextMonth.startOf("month"));
-
-            }}
-
-          >
-
-            {isNarrowCalendar ? "Sau" : "Tháng sau"}
-
-          </Button>
-
+            valueFormat="DD/MM/YYYY"
+            size={isCompact || isNarrowCalendar ? "xs" : "sm"}
+            style={{ flex: "1 1 auto", minWidth: isNarrowCalendar ? "100%" : 200 }}
+            maw={isNarrowCalendar ? undefined : 280}
+          />
         </Group>
-
-        <Button
-
-          variant="default"
-
-          size={isCompact || isNarrowCalendar ? "xs" : "compact-sm"}
-
-          onClick={() => {
-
-            const now = dayjs();
-
-            setActiveMonth(now.startOf("month"));
-
-            setSelectedDate(now);
-
-          }}
-
-        >
-
-          Hôm nay
-
-        </Button>
-
+        <Group gap="xs" align="center">
+          <Button
+            variant="default"
+            size={isCompact || isNarrowCalendar ? "xs" : "compact-sm"}
+            onClick={() => {
+              const nextMonth = activeMonth.subtract(1, "month");
+              setActiveMonth(nextMonth);
+              setSelectedDate(nextMonth.startOf("month"));
+            }}
+          >
+            <ChevronLeft size={16} />
+          </Button>
+          <Button
+            variant="default"
+            size={isCompact || isNarrowCalendar ? "xs" : "compact-sm"}
+            onClick={() => {
+              const now = dayjs();
+              setActiveMonth(now.startOf("month"));
+              setSelectedDate(now);
+            }}
+          >
+            Hôm nay
+          </Button>
+          <Button
+            variant="default"
+            size={isCompact || isNarrowCalendar ? "xs" : "compact-sm"}
+            onClick={() => {
+              const nextMonth = activeMonth.add(1, "month");
+              setActiveMonth(nextMonth);
+              setSelectedDate(nextMonth.startOf("month"));
+            }}
+          >
+            <ChevronRight size={16} />
+          </Button>
+        </Group>
       </Group>
-
-
-
-      <Text fw={700} size={isNarrowCalendar ? "sm" : "md"}>
-
-        {activeMonth.format("MM/YYYY")}
-
-      </Text>
-
-
-
-      {selectDayOnly ? (
-        <Text size="sm" c="dimmed">
-          Ngày xem sơ đồ:{" "}
-          <Text span fw={600} c="var(--mantine-color-text)">
-            {selectedDate.format("DD/MM/YYYY")}
-          </Text>
-        </Text>
-      ) : null}
 
       {selectDayOnly && showDayListButton ? (
         <Group justify="flex-end" wrap="wrap" gap="xs">

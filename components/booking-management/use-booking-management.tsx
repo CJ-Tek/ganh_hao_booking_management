@@ -6,7 +6,6 @@ import {
   Button,
   Group,
   Modal,
-  NumberInput,
   Select,
   Stack,
   Text,
@@ -20,13 +19,13 @@ import {
   AssignGuestCountPromptBody,
   AssignGuestSpecifiedOptionsBody,
 } from "@/components/booking-management/assign-guest-bodies";
+import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
 import {
   canEditBookingOrder,
   MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS,
   MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX,
   MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX,
-  parseGuestCountFromNumberInput,
   portalModalOverlayPopoverProps,
 } from "@/components/booking-management/shared";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
@@ -47,6 +46,7 @@ import {
   isSyntheticPhoneValue,
 } from "@/lib/booking-meta";
 import { bookingRowBusyStyle } from "@/lib/busy-row-style";
+import { getTableEffectiveGuestCapacity } from "@/lib/table-capacity";
 import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
@@ -607,13 +607,15 @@ export function useBookingManagement() {
     if (tablesInScope.length === 0) {
       return null;
     }
-    const maxSeatsInScope = Math.max(...tablesInScope.map((table) => table.seats));
-    if (requiredSeats <= maxSeatsInScope) {
+    const maxGuestsInScope = Math.max(
+      ...tablesInScope.map((table) => getTableEffectiveGuestCapacity(table.seats))
+    );
+    if (requiredSeats <= maxGuestsInScope) {
       return null;
     }
     return editAreaId
-      ? `Trong khu vực đã chọn, không có bàn nào đủ chỗ cho ${requiredSeats} khách (tối đa ${maxSeatsInScope} ghế/bàn).`
-      : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất: ${maxSeatsInScope} ghế).`;
+      ? `Trong khu vực đã chọn, không có bàn nào đủ chỗ cho ${requiredSeats} khách (tối đa ${maxGuestsInScope} khách/bàn).`
+      : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất: ${maxGuestsInScope} khách).`;
   }, [editAreaId, editAssignCandidate, editGuestCount, getCandidateTables, state.tables]);
 
   const assignModalAreaOptions = useMemo(() => {
@@ -671,13 +673,15 @@ export function useBookingManagement() {
     if (tablesInScope.length === 0) {
       return null;
     }
-    const maxSeatsInScope = Math.max(...tablesInScope.map((table) => table.seats));
-    if (requiredSeats <= maxSeatsInScope) {
+    const maxGuestsInScope = Math.max(
+      ...tablesInScope.map((table) => getTableEffectiveGuestCapacity(table.seats))
+    );
+    if (requiredSeats <= maxGuestsInScope) {
       return null;
     }
     return assignAreaId
-      ? `Trong khu vực đã chọn, không có bàn nào đủ chỗ cho ${requiredSeats} khách (tối đa ${maxSeatsInScope} ghế/bàn).`
-      : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất: ${maxSeatsInScope} ghế).`;
+      ? `Trong khu vực đã chọn, không có bàn nào đủ chỗ cho ${requiredSeats} khách (tối đa ${maxGuestsInScope} khách/bàn).`
+      : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất: ${maxGuestsInScope} khách).`;
   }, [assignAreaId, assignFormBooking, assignManualGuestCount, getCandidateTables, state.tables]);
 
   const bookingManagementModals = (
@@ -726,14 +730,11 @@ export function useBookingManagement() {
               onChange={(event) => setEditCustomerPhone(event.currentTarget.value)}
               size={isCompact ? "md" : "sm"}
             />
-            <NumberInput
+            <GuestCountNumberInput
               label="Số khách"
               description="Để trống nếu chưa rõ số khách."
               value={editGuestCount}
-              onChange={(value) => setEditGuestCount(parseGuestCountFromNumberInput(value))}
-              min={1}
-              allowDecimal={false}
-              clampBehavior="strict"
+              onChange={setEditGuestCount}
               placeholder="Chưa rõ"
               size={isCompact ? "md" : "sm"}
             />
@@ -818,20 +819,16 @@ export function useBookingManagement() {
                 "—"}{" "}
               · {dayjs(assignFormBooking.bookingAt).format("HH:mm DD/MM/YYYY")}
             </Text>
-            <NumberInput
+            <GuestCountNumberInput
               label="Số khách"
               description={
                 isGuestCountSpecified(assignFormBooking)
                   ? "Có thể chỉnh lại trước khi gán bàn."
                   : undefined
               }
-              min={1}
+              required
               value={assignManualGuestCount}
-              onChange={(value) =>
-                setAssignManualGuestCount(parseGuestCountFromNumberInput(value))
-              }
-              allowDecimal={false}
-              clampBehavior="strict"
+              onChange={setAssignManualGuestCount}
             />
             <Group grow>
               <Select

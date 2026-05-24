@@ -1,3 +1,5 @@
+import { getTableEffectiveGuestCapacity } from "@/lib/table-capacity";
+
 export type AreaLite = { id: string; name: string };
 export type TableLite = { id: string; name: string; seats: number; areaId: string; status?: string };
 
@@ -41,7 +43,7 @@ export function matchTableId(
   let best: { id: string; score: number } | null = null;
   for (const t of tables) {
     if (preferAreaId && t.areaId !== preferAreaId) continue;
-    if (minSeats != null && t.seats < minSeats) continue;
+    if (minSeats != null && getTableEffectiveGuestCapacity(t.seats) < minSeats) continue;
     const s = scoreMatch(t.name, tableNameHint);
     if (!best || s > best.score) best = { id: t.id, score: s };
   }

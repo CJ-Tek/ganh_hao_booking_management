@@ -152,8 +152,8 @@ export function RegisterPendingAssignTable(props: {
                 ) : null}
                 {assignPlan.skippedOverCapacity.length > 0 ? (
                   <Text size="xs">
-                    {assignPlan.skippedOverCapacity.length} booking vượt sức chứa bàn ({tableSeats}{" "}
-                    ghế).
+                    {assignPlan.skippedOverCapacity.length} booking vượt sức chứa bàn (tối đa{" "}
+                    {tableSeats} khách).
                   </Text>
                 ) : null}
               </Stack>
