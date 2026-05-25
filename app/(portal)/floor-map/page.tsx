@@ -3297,27 +3297,11 @@ export default function FloorMapPage() {
                 : "Chạm bàn để đổi trạng thái. Kéo nền để xem sơ đồ, cuộn/chụm để zoom."}
           </Text>
         </div>
-        {isEditMode ? (
+        {isEditMode && isLayoutDirty ? (
           <Group gap="xs">
-            <Badge variant="light">
-              Node Grid {effectiveGridColumns} × {effectiveGridRows}
+            <Badge color="orange" variant="light">
+              Chưa lưu
             </Badge>
-            {isLayoutDirty ? (
-              <Badge color="orange" variant="light">
-                Chưa lưu
-              </Badge>
-            ) : null}
-            <Button
-              size={isCompact ? "sm" : "compact-sm"}
-              variant="light"
-              onClick={() => {
-                setMergeSelectedTableIds(editSelectedTableIds);
-                setMergeModalOpen(true);
-              }}
-              disabled={!activeAreaBranchId}
-            >
-              Thêm bàn gộp
-            </Button>
           </Group>
         ) : null}
       </Group>
@@ -3346,7 +3330,7 @@ export default function FloorMapPage() {
                 <Text fw={600} size={isCompact ? "sm" : "md"}>
                   {isCompact ? "Lịch booking" : "Lịch booking theo sơ đồ"}
                 </Text>
-                <Text size={isCompact ? "xs" : "sm"} c="dimmed" style={{ flexShrink: 0 }}>
+                <Text size="sm" fw={500} c="dimmed" style={{ flexShrink: 0 }}>
                   {floorMapSelectedDate.format("DD/MM/YYYY")}
                 </Text>
               </Group>
@@ -3997,7 +3981,20 @@ export default function FloorMapPage() {
                           >
                             Gộp bàn
                           </Button>
-                        ) : null}
+                        ) : (
+                          <Button
+                            size={isCompact ? "sm" : "compact-sm"}
+                            variant="light"
+                            className={classes.toolbarDayListBtn}
+                            onClick={() => {
+                              setMergeSelectedTableIds(editSelectedTableIds);
+                              setMergeModalOpen(true);
+                            }}
+                            disabled={!activeAreaBranchId}
+                          >
+                            Thêm bàn gộp
+                          </Button>
+                        )}
                       </Group>
                       {!isBranchManager ? (
                         <Group

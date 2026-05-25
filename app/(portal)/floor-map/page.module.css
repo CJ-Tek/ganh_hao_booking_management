@@ -11,6 +11,8 @@
 
 .floorMapCalendarAccordion :global([data-accordion-control]) {
   background-color: var(--mantine-color-white);
+  border: 1px solid #ededed;
+  border-radius: 10px;
 }
 
 .floorMapCalendarAccordion :global([data-accordion-panel]) {
@@ -838,7 +840,7 @@ button.mergeGroupContainerHeaderClickable:hover .mergeGroupContainerTitle {
   align-items: center;
   justify-content: center;
   width: 152px;
-  height: 168px;
+  height: 70px;
   border: 2px dashed rgba(12, 97, 164, 0.55);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.55);
