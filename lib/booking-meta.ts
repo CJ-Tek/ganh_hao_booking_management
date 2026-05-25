@@ -19,6 +19,14 @@ const UNKNOWN_GUEST_TAG = "[[guest_count_unknown]]";
 const GUEST_TYPE_TAG_PATTERN = /\[\[guest_type:([^\]]+)\]\]/;
 const SYNTHETIC_PHONE_PREFIX = "__no_phone__:";
 
+/** True when arrival is now or in the past (floor-map "Vào bàn ngay") — table should be Đã ngồi. */
+export function isImmediateBookingArrival(
+  bookingAtIso: string,
+  now: dayjs.Dayjs = dayjs()
+): boolean {
+  return !dayjs(bookingAtIso).isAfter(now);
+}
+
 /** Nhãn loại khách — dùng trong form tạo booking và lọc màn hôm nay. */
 export const BOOKING_GUEST_TYPE_OPTIONS = [
   "Khách thường",

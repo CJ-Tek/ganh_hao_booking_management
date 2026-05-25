@@ -20,6 +20,7 @@ import {
   shouldPickBranchOnLogin,
 } from "@/lib/branch-pick";
 import { type BookingDuplicateInfo, DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
+import { isImmediateBookingArrival } from "@/lib/booking-meta";
 import { initialState } from "@/lib/initial-state";
 import {
   assertEmployeeMaySetBookingStatus,
@@ -1211,8 +1212,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       ? state.tables.find((t) => t.id === input.tableId)
       : undefined;
     if (tableBefore && tableBefore.status !== "locked") {
-      // Confirmed booking without check-in → Giữ chỗ (server uses same rule after refresh).
-      const nextStatus: TableStatus = "hold";
+      const nextStatus: TableStatus = isImmediateBookingArrival(input.bookingAt)
+        ? "occupied"
+        : "hold";
       setState((prev) => ({
         ...prev,
         tables: prev.tables.map((t) =>

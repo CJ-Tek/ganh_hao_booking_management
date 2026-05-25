@@ -693,7 +693,7 @@ export default function FloorMapPage() {
       bookingAt: startIso,
       startTime: startIso,
       endTime: endIso,
-      status: "confirmed",
+      status: registerArrivalMode === "immediate" ? "seated" : "confirmed",
       createdByUserId: "",
     };
   }, [

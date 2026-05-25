@@ -26,6 +26,7 @@ import {
   bookingsTimeSlotsOverlap,
   buildBookingNoteForStorage,
   formatTableSlotConflictMessage,
+  isImmediateBookingArrival,
   isSyntheticPhoneValue,
   pickPrimaryBookingOnTable,
   stripUnknownGuestTag,
@@ -514,6 +515,35 @@ async function refreshTableAvailabilityForBooking(
   );
   const nextStatus: TableStatus = hasSeated ? "occupied" : "hold";
   await client.from("tables").update({ status: nextStatus }).eq("id", tableId);
+}
+
+/** Vào bàn ngay / arrival due: mark booking seated so refresh sets table to occupied. */
+async function seatBookingForImmediateArrival(
+  client: ReturnType<typeof ensureClient>,
+  input: { bookingId: string; tableId: string; bookingAtIso: string }
+): Promise<void> {
+  if (!isImmediateBookingArrival(input.bookingAtIso)) {
+    return;
+  }
+  const { error: bookingErr } = await (client as any)
+    .from("bookings")
+    .update({
+      status: "seated",
+      checked_in_at: dayjs().toISOString(),
+      no_show_marked_at: null,
+    })
+    .eq("id", input.bookingId);
+  if (bookingErr) {
+    throw new Error(bookingErr.message);
+  }
+  const { data: tableRow } = await client
+    .from("tables")
+    .select("status")
+    .eq("id", input.tableId)
+    .maybeSingle();
+  if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+    await refreshTableAvailabilityForBooking(client, input.tableId);
+  }
 }
 
 /**
@@ -1031,6 +1061,32 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
       return { ok: false, message: "Không nhận được phản hồi khi tạo booking cụm bàn gộp." };
     }
 
+    const mergeOutcome = outcome as BookingCreateOrQueueResult;
+    if (mergeOutcome.outcome === "confirmed") {
+      try {
+        await seatBookingForImmediateArrival(client, {
+          bookingId: mergeOutcome.booking_id,
+          tableId: groupCheck.fallbackTableId,
+          bookingAtIso: normalizedAt,
+        });
+        if (!isImmediateBookingArrival(normalizedAt)) {
+          const { data: tableRow } = await client
+            .from("tables")
+            .select("status")
+            .eq("id", groupCheck.fallbackTableId)
+            .maybeSingle();
+          if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+            await refreshTableAvailabilityForBooking(client, groupCheck.fallbackTableId);
+          }
+        }
+      } catch (seatErr) {
+        return {
+          ok: false,
+          message: seatErr instanceof Error ? seatErr.message : "Không check-in được booking.",
+        };
+      }
+    }
+
     await client.from("internal_notifications").insert({
       title: "Đặt bàn mới",
       message: `Đã xác nhận booking cho ${input.customerName} trên cụm ${groupCheck.mergedName} lúc ${dayjs(
@@ -1111,14 +1167,28 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
       };
     }
 
-    {
-      const { data: tableRow } = await client
-        .from("tables")
-        .select("status")
-        .eq("id", input.tableId!)
-        .maybeSingle();
-      if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-        await refreshTableAvailabilityForBooking(client, input.tableId!);
+    if (normalizedOutcome.outcome === "confirmed") {
+      try {
+        await seatBookingForImmediateArrival(client, {
+          bookingId: normalizedOutcome.booking_id,
+          tableId: input.tableId!,
+          bookingAtIso: normalizedAt,
+        });
+        if (!isImmediateBookingArrival(normalizedAt)) {
+          const { data: tableRow } = await client
+            .from("tables")
+            .select("status")
+            .eq("id", input.tableId!)
+            .maybeSingle();
+          if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+            await refreshTableAvailabilityForBooking(client, input.tableId!);
+          }
+        }
+      } catch (seatErr) {
+        return {
+          ok: false,
+          message: seatErr instanceof Error ? seatErr.message : "Không check-in được booking.",
+        };
       }
     }
 
@@ -1230,6 +1300,30 @@ export async function assignBookingToTableInSupabase(input: {
     if (!outcome || typeof outcome !== "object") {
       return { ok: false, message: "Không nhận được phản hồi khi gán cụm bàn gộp." };
     }
+    if ((outcome as BookingCreateOrQueueResult).outcome !== "waitlisted") {
+      try {
+        await seatBookingForImmediateArrival(client, {
+          bookingId,
+          tableId: groupCheck.fallbackTableId,
+          bookingAtIso: normalizedStart,
+        });
+        if (!isImmediateBookingArrival(normalizedStart)) {
+          const { data: tableRow } = await client
+            .from("tables")
+            .select("status")
+            .eq("id", groupCheck.fallbackTableId)
+            .maybeSingle();
+          if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+            await refreshTableAvailabilityForBooking(client, groupCheck.fallbackTableId);
+          }
+        }
+      } catch (seatErr) {
+        return {
+          ok: false,
+          message: seatErr instanceof Error ? seatErr.message : "Không check-in được booking.",
+        };
+      }
+    }
 
     return { ok: true, message: `Đã gán booking vào cụm ${groupCheck.mergedName}.` };
   }
@@ -1296,13 +1390,27 @@ export async function assignBookingToTableInSupabase(input: {
     }
   }
 
-  const { data: tableRow } = await client
-    .from("tables")
-    .select("status")
-    .eq("id", tableId)
-    .maybeSingle();
-  if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-    await refreshTableAvailabilityForBooking(client, tableId);
+  try {
+    await seatBookingForImmediateArrival(client, {
+      bookingId,
+      tableId,
+      bookingAtIso: normalizedStart,
+    });
+    if (!isImmediateBookingArrival(normalizedStart)) {
+      const { data: tableRow } = await client
+        .from("tables")
+        .select("status")
+        .eq("id", tableId)
+        .maybeSingle();
+      if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+        await refreshTableAvailabilityForBooking(client, tableId);
+      }
+    }
+  } catch (seatErr) {
+    return {
+      ok: false,
+      message: seatErr instanceof Error ? seatErr.message : "Không check-in được booking.",
+    };
   }
   return { ok: true, message: "Đã gán bàn cho booking." };
 }
