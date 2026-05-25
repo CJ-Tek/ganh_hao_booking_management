@@ -51,6 +51,7 @@ import {
   BookingCalendarPanel,
   type BookingCalendarPanelHandle,
 } from "@/components/booking-calendar-panel";
+import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
 import { RegisterPendingAssignTable } from "@/components/floor-map/register-pending-assign-table";
 import { TableBlockDetailModal } from "@/components/floor-map/table-block-detail-modal";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
@@ -406,6 +407,7 @@ export default function FloorMapPage() {
   const reserveManagerDock =
     (currentUser?.role === "manager" || currentUser?.role === "employee") && isCompact;
   const isEmployee = currentUser?.role === "employee";
+  const isBranchManager = currentUser?.role === "manager";
   const [activeAreaId, setActiveAreaId] = useState<string | null>(null);
   const [mode, setMode] = useState<CanvasMode>("view");
   const [search, setSearch] = useState("");
@@ -471,6 +473,7 @@ export default function FloorMapPage() {
   /** Status menu uses portal — block canvas interaction while open */
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [floorMapSelectedDate, setFloorMapSelectedDate] = useState(() => dayjs());
+  const [createBookingModalOpened, setCreateBookingModalOpened] = useState(false);
 
   const blockCanvasForOverlay = Boolean(registerTable || detailTable) || statusMenuOpen;
   const isEditMode = mode === "edit";
@@ -804,6 +807,15 @@ export default function FloorMapPage() {
   useEffect(() => {
     if (!isEditMode) {
       setEditSelectedTableIds([]);
+    }
+  }, [isEditMode]);
+
+  // Search/filter is view-only; clear when entering layout edit.
+  useEffect(() => {
+    if (isEditMode) {
+      setSearch("");
+      setStatusFilter("all");
+      setIsSearchPanelOpen(false);
     }
   }, [isEditMode]);
   useEffect(() => {
@@ -1312,6 +1324,9 @@ export default function FloorMapPage() {
   }, [isEditMode, editLayout, areaId, state.areas, tablesInArea]);
 
   const visibleTables = useMemo(() => {
+    if (isEditMode) {
+      return tablesForFloorView;
+    }
     const keyword = search.trim().toLowerCase();
     return tablesForFloorView.filter((table) => {
       const displayBooking = pickPrimaryBookingOnTable(table.id, bookingsForFloorTableDisplay);
@@ -1347,6 +1362,7 @@ export default function FloorMapPage() {
     });
   }, [
     bookingsForFloorTableDisplay,
+    isEditMode,
     search,
     statusFilter,
     state.customers,
@@ -2830,15 +2846,6 @@ export default function FloorMapPage() {
               Thêm bàn gộp
             </Button>
           </Group>
-        ) : !isEmployee ? (
-          <Button
-            size={isCompact ? "sm" : "compact-sm"}
-            variant="light"
-            onClick={() => setMergeModalOpen(true)}
-            disabled={!activeAreaBranchId}
-          >
-            Gộp bàn
-          </Button>
         ) : null}
       </Group>
 
@@ -3112,7 +3119,7 @@ export default function FloorMapPage() {
                       key={stackKey}
                       data-table-block="true"
                       data-table-status={table.status}
-                      className={`${classes.tableBlock} ${TABLE_STATUS_SURFACE_CLASS[table.status]} ${dragState?.tableId === table.id ? classes.tableBlockDragging : ""
+                      className={`${classes.tableBlock} ${classes.tableBlockEdit} ${dragState?.tableId === table.id ? classes.tableBlockDragging : ""
                         } ${isMergeMember ? classes.tableBlockMergeMember : ""} ${
                           isMergeSelected ? classes.tableBlockMergeSelected : ""
                         }`}
@@ -3158,10 +3165,9 @@ export default function FloorMapPage() {
                       <Text fw={600} size="sm" lineClamp={1}>
                         {table.name}
                       </Text>
-                      <Text size="xs">{table.seats} ghế</Text>
-                      <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
-                        {tableStatusLabel[table.status]}
-                      </Badge>
+                      <Text size="xs" c="dimmed">
+                        {table.seats} ghế
+                      </Text>
                     </div>
                   );
                 });
@@ -3195,48 +3201,50 @@ export default function FloorMapPage() {
           <div className={classes.canvasOverlay}>
             {isTopToolbarOpen ? (
               <div className={classes.canvasTopToolbar}>
-                <div className={classes.toolbarPopoverAnchor}>
-                  <ActionIcon
-                    variant={isSearchPanelOpen ? "filled" : "light"}
-                    size="lg"
-                    aria-label="Search filters"
-                    onClick={() => {
-                      setIsSearchPanelOpen((value) => !value);
-                      setIsToolsPanelOpen(false);
-                    }}
-                  >
-                    <Search size={16} />
-                  </ActionIcon>
-                  <div
-                    className={`${classes.canvasPopoverPanel} ${isSearchPanelOpen ? classes.canvasPopoverPanelOpen : ""
-                      } ${classes.toolbarPopoverLeft}`}
-                    aria-hidden={!isSearchPanelOpen}
-                  >
-                    <Stack gap="sm">
-                      <TextInputWithVoice
-                        label="Tìm bàn"
-                        placeholder="Tên bàn, khách, SĐT, giờ đặt, giờ check-in…"
-                        value={search}
-                        onChange={(event) => setSearch(event.currentTarget.value)}
-                        size="sm"
-                      />
-                      <Select
-                        label="Lọc trạng thái"
-                        value={statusFilter}
-                        onChange={(value) => setStatusFilter(value ?? "all")}
-                        data={[
-                          { value: "all", label: "Tất cả trạng thái" },
-                          ...(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
-                            (status) => ({
-                              value: status,
-                              label: tableStatusLabel[status],
-                            })
-                          ),
-                        ]}
-                      />
-                    </Stack>
+                {!isEditMode ? (
+                  <div className={classes.toolbarPopoverAnchor}>
+                    <ActionIcon
+                      variant={isSearchPanelOpen ? "filled" : "light"}
+                      size="lg"
+                      aria-label="Search filters"
+                      onClick={() => {
+                        setIsSearchPanelOpen((value) => !value);
+                        setIsToolsPanelOpen(false);
+                      }}
+                    >
+                      <Search size={16} />
+                    </ActionIcon>
+                    <div
+                      className={`${classes.canvasPopoverPanel} ${isSearchPanelOpen ? classes.canvasPopoverPanelOpen : ""
+                        } ${classes.toolbarPopoverLeft}`}
+                      aria-hidden={!isSearchPanelOpen}
+                    >
+                      <Stack gap="sm">
+                        <TextInputWithVoice
+                          label="Tìm bàn"
+                          placeholder="Tên bàn, khách, SĐT, giờ đặt, giờ check-in…"
+                          value={search}
+                          onChange={(event) => setSearch(event.currentTarget.value)}
+                          size="sm"
+                        />
+                        <Select
+                          label="Lọc trạng thái"
+                          value={statusFilter}
+                          onChange={(value) => setStatusFilter(value ?? "all")}
+                          data={[
+                            { value: "all", label: "Tất cả trạng thái" },
+                            ...(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
+                              (status) => ({
+                                value: status,
+                                label: tableStatusLabel[status],
+                              })
+                            ),
+                          ]}
+                        />
+                      </Stack>
+                    </div>
                   </div>
-                </div>
+                ) : null}
 
                 {isEditMode ? (
                   <div className={classes.toolbarPopoverAnchor}>
@@ -3418,7 +3426,6 @@ export default function FloorMapPage() {
 
                 <div className={classes.toolbarAreaRow}>
                   <Select
-                    label="Khu vực"
                     value={areaId}
                     onChange={setActiveAreaId}
                     data={availableAreas.map((area) => ({
@@ -3431,42 +3438,68 @@ export default function FloorMapPage() {
                   />
                   {!isEmployee ? (
                     <div className={classes.toolbarAreaSecondary}>
-                      <Button
-                        size={isCompact ? "sm" : "compact-sm"}
-                        variant="filled"
-                        fullWidth={isCompact}
-                        className={classes.toolbarDayListBtn}
-                        onClick={() => calendarPanelRef.current?.openDayListModal()}
-                      >
-                        Danh sách booking
-                      </Button>
                       <Group
                         gap={isCompact ? 8 : 4}
-                        className={classes.toolbarAreaActions}
                         wrap="nowrap"
+                        className={classes.toolbarAreaPrimaryBtns}
                       >
-                        <ActionIcon
-                          variant="light"
-                          size={isCompact ? "input-md" : "lg"}
-                          className={classes.toolbarAreaActionBtn}
-                          aria-label="Sửa khu vực"
-                          disabled={!areaId || !hasSupabase}
-                          onClick={openAreaMetadataEdit}
+                        <Button
+                          color="brand"
+                          size={isCompact ? "sm" : "compact-sm"}
+                          className={classes.toolbarDayListBtn}
+                          onClick={() => setCreateBookingModalOpened(true)}
                         >
-                          <Pencil size={16} />
-                        </ActionIcon>
-                        <ActionIcon
-                          variant="light"
-                          color="red"
-                          size={isCompact ? "input-md" : "lg"}
-                          className={classes.toolbarAreaActionBtn}
-                          aria-label="Xóa khu vực"
-                          disabled={!areaId || !hasSupabase}
-                          onClick={() => setAreaDeleteOpen(true)}
+                          Tạo mới
+                        </Button>
+                        <Button
+                          size={isCompact ? "sm" : "compact-sm"}
+                          variant="filled"
+                          className={classes.toolbarDayListBtn}
+                          onClick={() => calendarPanelRef.current?.openDayListModal()}
                         >
-                          <Trash2 size={16} />
-                        </ActionIcon>
+                          Danh sách booking
+                        </Button>
+                        {!isEditMode ? (
+                          <Button
+                            size={isCompact ? "sm" : "compact-sm"}
+                            variant="light"
+                            className={classes.toolbarDayListBtn}
+                            onClick={() => setMergeModalOpen(true)}
+                            disabled={!activeAreaBranchId}
+                          >
+                            Gộp bàn
+                          </Button>
+                        ) : null}
                       </Group>
+                      {!isBranchManager ? (
+                        <Group
+                          gap={isCompact ? 8 : 4}
+                          className={classes.toolbarAreaActions}
+                          wrap="nowrap"
+                        >
+                          <ActionIcon
+                            variant="light"
+                            size={isCompact ? "input-md" : "lg"}
+                            className={classes.toolbarAreaActionBtn}
+                            aria-label="Sửa khu vực"
+                            disabled={!areaId || !hasSupabase}
+                            onClick={openAreaMetadataEdit}
+                          >
+                            <Pencil size={16} />
+                          </ActionIcon>
+                          <ActionIcon
+                            variant="light"
+                            color="red"
+                            size={isCompact ? "input-md" : "lg"}
+                            className={classes.toolbarAreaActionBtn}
+                            aria-label="Xóa khu vực"
+                            disabled={!areaId || !hasSupabase}
+                            onClick={() => setAreaDeleteOpen(true)}
+                          >
+                            <Trash2 size={16} />
+                          </ActionIcon>
+                        </Group>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -4029,6 +4062,14 @@ export default function FloorMapPage() {
             color: result.ok ? "green" : "red",
             message: result.message,
           });
+        }}
+      />
+
+      <CreateBookingModal
+        opened={createBookingModalOpened}
+        onClose={() => setCreateBookingModalOpened(false)}
+        onFocusExistingBooking={(booking) => {
+          calendarPanelRef.current?.openDayListModalForBooking(booking);
         }}
       />
 

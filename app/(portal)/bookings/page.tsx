@@ -26,11 +26,7 @@ import { type DataTableSortStatus } from "mantine-datatable";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
-import {
-  PortalPageTitle,
-  PortalSectionCard,
-  PortalStickyAction,
-} from "@/components/portal-page";
+import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { BookingCalendarPanel } from "@/components/booking-calendar-panel";
 import {
   AssignGuestCountPromptBody,
@@ -38,9 +34,9 @@ import {
 } from "@/components/booking-management/assign-guest-bodies";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
+import { MergeRecommendationCard } from "@/components/booking-management/merge-recommendation-card";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
-import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
 import { useAppContext } from "@/contexts/app-context";
 import {
   bookingSlotKey,
@@ -48,11 +44,9 @@ import {
   formatBookingDuplicateAlertMessage,
   isPlausibleVietnamPhone,
   normalizeVietnamPhone,
-  type BookingDuplicateInfo,
 } from "@/lib/booking-duplicate";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import {
-  BOOKING_GUEST_TYPE_OPTIONS,
   displayCustomerPhone,
   findAssignableSlotConflictsAtTable,
   formatTableSlotConflictMessage,
@@ -73,7 +67,6 @@ import { getTableEffectiveGuestCapacity } from "@/lib/table-capacity";
 import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking, type BookingStatus } from "@/lib/types";
-import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
 
 function branchScopeKey(branchIds: string[]) {
   return [...branchIds].sort().join("|") || "none";
@@ -127,13 +120,11 @@ function BookingsPageContent() {
     state,
     currentUser,
     filteredBranchIds,
-    createBooking,
     assignBookingToTable,
     updateBookingGuestCount,
     updateBookingOrder,
     updateBookingStatus,
     checkInBooking,
-    setActiveBranchId,
     hasSupabase,
     createTableMergeGroup,
   } = useAppContext();
@@ -144,8 +135,6 @@ function BookingsPageContent() {
     isBusy: isBookingRowBusy,
     run: runBookingRowAction,
   } = useBusyId();
-  const [isCreating, setIsCreating] = useState(false);
-
   const branchId = filteredBranchIds[0] ?? null;
   const branchName =
     branchId ? state.branches.find((b) => b.id === branchId)?.name ?? "—" : "—";
@@ -160,17 +149,7 @@ function BookingsPageContent() {
     [state.bookingRuntimeSettings]
   );
 
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [createBranchId, setCreateBranchId] = useState<string | null>(branchId);
-  const [guestCount, setGuestCount] = useState<number | undefined>(undefined);
-  const [bookingAt, setBookingAt] = useState<string | null>(
-    dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm")
-  );
-  const [note, setNote] = useState("");
-  const [guestType, setGuestType] = useState<string | null>("Khách thường");
   const [activeTab, setActiveTab] = useState<string | null>("today");
-  const [createModalOpened, setCreateModalOpened] = useState(false);
   const [editBooking, setEditBooking] = useState<Booking | null>(null);
   const [editBookingAt, setEditBookingAt] = useState<string | null>(null);
   const [editGuestCount, setEditGuestCount] = useState<number | undefined>(undefined);
@@ -213,28 +192,6 @@ function BookingsPageContent() {
   const [todayReceptionStatusFilter, setTodayReceptionStatusFilter] = useState<string | null>(null);
   const [todayGuestTypeFilter, setTodayGuestTypeFilter] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!createModalOpened) {
-      setCreateBranchId(branchId);
-    }
-  }, [branchId, createModalOpened]);
-
-  const resetCreateForm = useCallback(() => {
-    setCustomerName("");
-    setCustomerPhone("");
-    setGuestCount(undefined);
-    setBookingAt(dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm"));
-    setNote("");
-    setGuestType("Khách thường");
-    setCreateBranchId(branchId);
-  }, [branchId]);
-
-  const closeCreateModal = useCallback(() => {
-    if (!isCreating) {
-      resetCreateForm();
-      setCreateModalOpened(false);
-    }
-  }, [isCreating, resetCreateForm]);
   const [todayTableAssignFilter, setTodayTableAssignFilter] = useState<
     "all" | "assigned" | "unassigned"
   >("all");
@@ -248,76 +205,6 @@ function BookingsPageContent() {
 
   const listPageSize = isCompact ? mobileBookingsPageSize : desktopBookingsPageSize;
   const todayPageSize = isCompact ? mobileBookingsPageSize : todayDesktopPageSize;
-  const selectedBookingSlot = useMemo(() => (bookingAt ? bookingSlotKey(bookingAt) : null), [bookingAt]);
-  const normalizedCustomerPhone = useMemo(
-    () => normalizeVietnamPhone(customerPhone.trim()),
-    [customerPhone]
-  );
-
-  const duplicateCandidates = useMemo(() => {
-    if (!branchId || !selectedBookingSlot || !normalizedCustomerPhone) {
-      return [];
-    }
-    if (!isPlausibleVietnamPhone(normalizedCustomerPhone)) {
-      return [];
-    }
-    return state.bookings
-      .filter((booking) => booking.branchId === branchId)
-      .filter((booking) => !["cancelled", "completed", "no_show"].includes(booking.status))
-      .map((booking) => {
-        const customer = state.customers.find((item) => item.id === booking.customerId);
-        if (!customer?.phone) {
-          return null;
-        }
-        const bookingPhone = normalizeVietnamPhone(customer.phone);
-        if (bookingPhone !== normalizedCustomerPhone) {
-          return null;
-        }
-        const slot = bookingSlotKey(booking.bookingAt);
-        if (!slot) {
-          return null;
-        }
-        if (slot.dayKey !== selectedBookingSlot.dayKey || slot.timeKey !== selectedBookingSlot.timeKey) {
-          return null;
-        }
-        const receiverName =
-          state.users.find((user) => user.id === booking.createdByUserId)?.fullName ?? "Không rõ";
-        return {
-          booking,
-          receiverName,
-        };
-      })
-      .filter((item): item is { booking: Booking; receiverName: string } => item !== null)
-      .sort(
-        (a, b) =>
-          dayjs(a.booking.bookingAt).valueOf() - dayjs(b.booking.bookingAt).valueOf() ||
-          a.booking.id.localeCompare(b.booking.id)
-      );
-  }, [
-    branchId,
-    normalizedCustomerPhone,
-    selectedBookingSlot,
-    state.bookings,
-    state.customers,
-    state.users,
-  ]);
-
-  const duplicateInfosForAlert = useMemo<BookingDuplicateInfo[]>(
-    () =>
-      duplicateCandidates.map((item) => ({
-        bookingId: item.booking.id,
-        bookingAt: item.booking.bookingAt,
-        guestCount: item.booking.guestCount,
-        receiverFullName: item.receiverName,
-      })),
-    [duplicateCandidates]
-  );
-
-  const duplicateWarningMessage = useMemo(
-    () => formatBookingDuplicateAlertMessage(duplicateInfosForAlert, bookingAt ?? undefined),
-    [bookingAt, duplicateInfosForAlert]
-  );
-
   const openCancelBookingConfirm = (booking: Booking) => {
     const customer = state.customers.find((c) => c.id === booking.customerId);
     const name = customer?.fullName ?? "—";
@@ -402,21 +289,6 @@ function BookingsPageContent() {
       }
     });
   };
-
-  const createBranchName =
-    createBranchId ? state.branches.find((b) => b.id === createBranchId)?.name ?? "—" : "—";
-  const createBranchOptions = useMemo(
-    () => state.branches.map((branch) => ({ value: branch.id, label: branch.name })),
-    [state.branches]
-  );
-  const createBranchAreas = useMemo(
-    () => state.areas.filter((area) => area.branchId === createBranchId),
-    [createBranchId, state.areas]
-  );
-  const createBranchTables = useMemo(
-    () => state.tables.filter((table) => table.branchId === createBranchId),
-    [createBranchId, state.tables]
-  );
 
   const branchBookings = useMemo(
     () => state.bookings.filter((booking) => filteredBranchIds.includes(booking.branchId)),
@@ -1381,298 +1253,6 @@ function BookingsPageContent() {
     }, LIST_BOOKING_PULSE_TOTAL_MS);
     return () => window.clearTimeout(timer);
   }, [listFocusBookingId]);
-
-  const submitCreateBooking = async (options?: { allowDuplicate?: boolean }) => {
-    if (!customerName || !createBranchId || !bookingAt) {
-      notifications.show({ color: "red", message: "Cần ít nhất tên khách và thời gian đến." });
-      return;
-    }
-    if (normalizedCustomerPhone && !isPlausibleVietnamPhone(normalizedCustomerPhone)) {
-      notifications.show({
-        color: "red",
-        message:
-          "Số điện thoại không đúng định dạng Việt Nam (ví dụ 0912345678, +84912345678).",
-      });
-      return;
-    }
-    setIsCreating(true);
-    let result;
-    try {
-      result = await createBooking({
-      customerName: formatVietnamesePersonName(customerName),
-      customerPhone: normalizedCustomerPhone || undefined,
-      branchId: createBranchId,
-      guestCount: typeof guestCount === "number" && Number.isFinite(guestCount) ? Math.max(1, guestCount) : undefined,
-      bookingAt: dayjs(bookingAt).toISOString(),
-      note,
-      guestType,
-      allowDuplicate: options?.allowDuplicate,
-    });
-    } finally {
-      setIsCreating(false);
-    }
-    if (!result.ok && result.code === DUPLICATE_BOOKING_CODE && result.duplicates?.length) {
-      notifications.show({ color: "orange", message: result.message });
-      confirmDuplicateBookingSecond(
-        result.duplicates,
-        () => {
-          void submitCreateBooking({ allowDuplicate: true });
-        },
-        (bookingId) => {
-          const target = state.bookings.find((item) => item.id === bookingId);
-          if (target) {
-            openBookingInList(target);
-          }
-        }
-      );
-      return;
-    }
-    notifications.show({
-      color: result.ok ? "green" : "red",
-      message: result.message,
-    });
-    if (result.ok) {
-      const switchedFrom = branchId;
-      resetCreateForm();
-      setCreateModalOpened(false);
-      if (
-        currentUser?.role === "manager" &&
-        switchedFrom &&
-        createBranchId !== switchedFrom
-      ) {
-        notifications.show({
-          color: "blue",
-          message: "Đã tạo booking ở chi nhánh khác. Nhấn để quay về chi nhánh đang vận hành.",
-          autoClose: 6000,
-          onClick: () => setActiveBranchId(switchedFrom),
-        });
-      }
-    }
-  };
-
-  const handleCreate = async () => {
-    if (duplicateInfosForAlert.length === 0) {
-      await submitCreateBooking();
-      return;
-    }
-    confirmDuplicateBookingSecond(
-      duplicateInfosForAlert,
-      () => {
-        void submitCreateBooking({ allowDuplicate: true });
-      },
-      (bookingId) => {
-        const target = state.bookings.find((item) => item.id === bookingId);
-        if (target) {
-          openBookingInList(target);
-        }
-      }
-    );
-  };
-
-  /**
-   * Recommendations for the create form. We don't have an area yet, so we treat the entire branch
-   * as the search space and constrain combinations to a single area (handled inside recommendMergeGroups).
-   * Visible only when the guest count exceeds the largest single table in the branch.
-   */
-  const createFormMergeRecommendations = useMemo<MergeRecommendation[]>(() => {
-    if (!createBranchId || typeof guestCount !== "number" || guestCount < 1) {
-      return [];
-    }
-    const branchTables = state.tables.filter(
-      (table) => table.branchId === createBranchId && table.status !== "locked"
-    );
-    if (branchTables.length === 0) {
-      return [];
-    }
-    const maxSingleGuestCapacity = branchTables.reduce(
-      (acc, table) => Math.max(acc, getTableEffectiveGuestCapacity(table.seats)),
-      0
-    );
-    if (guestCount <= maxSingleGuestCapacity) {
-      return [];
-    }
-    const nowIso = new Date().toISOString();
-    const startIso = bookingAt ? dayjs(bookingAt).toISOString() : nowIso;
-    const endIso = bookingAt ? dayjs(bookingAt).add(2, "hour").toISOString() : nowIso;
-    const pseudoBooking: Booking = {
-      id: "__create-form__",
-      customerId: "",
-      branchId: createBranchId,
-      areaId: null,
-      tableId: null,
-      mergeGroupId: null,
-      bookingAt: startIso,
-      startTime: startIso,
-      endTime: endIso,
-      status: "pending",
-      guestCount,
-      createdByUserId: currentUser?.id ?? "",
-    };
-    return recommendMergeGroups(pseudoBooking, {
-      areaTables: branchTables,
-      mergeGroups: state.mergeGroups,
-      allBookings: state.bookings,
-      targetSeats: guestCount,
-      areaId: null,
-    });
-  }, [bookingAt, createBranchId, guestCount, state.bookings, state.mergeGroups, state.tables]);
-
-  const createFormDisabled = isCreating;
-
-  const createForm = (
-    <PortalSectionCard>
-      <Stack gap="sm">
-        <Text size="sm" c="dimmed">
-          Chi nhánh đang tạo booking: <strong>{createBranchName}</strong>
-        </Text>
-        <Select
-          label="Chi nhánh booking"
-          data={createBranchOptions}
-          value={createBranchId}
-          onChange={(value) => setCreateBranchId(value)}
-          allowDeselect={false}
-          disabled={createFormDisabled}
-          size={isCompact ? "md" : "sm"}
-        />
-        <Group justify="flex-start">
-          <VoiceBookingAssistant
-            branch={createBranchId ? { id: createBranchId, name: createBranchName } : null}
-            areas={createBranchAreas.map((a) => ({ id: a.id, name: a.name }))}
-            tables={createBranchTables.map((t) => ({
-              id: t.id,
-              name: t.name,
-              seats: t.seats,
-              areaId: t.areaId,
-              status: t.status,
-            }))}
-            onCreateBooking={createBooking}
-          />
-        </Group>
-        <TextInput
-          label="Tên khách"
-          placeholder="Họ và tên"
-          value={customerName}
-          onChange={(event) => setCustomerName(event.currentTarget.value)}
-          onBlur={() => setCustomerName((v) => formatVietnamesePersonName(v))}
-          disabled={createFormDisabled}
-          size={isCompact ? "md" : "sm"}
-        />
-        <TextInput
-          label="Số điện thoại"
-          placeholder="09… (tùy chọn)"
-          inputMode="tel"
-          value={customerPhone}
-          onChange={(event) => setCustomerPhone(event.currentTarget.value)}
-          disabled={createFormDisabled}
-          size={isCompact ? "md" : "sm"}
-        />
-        <Select
-          label="Loại khách"
-          placeholder="Chọn loại khách"
-          data={BOOKING_GUEST_TYPE_OPTIONS.map((label) => ({ value: label, label }))}
-          value={guestType}
-          onChange={setGuestType}
-          allowDeselect={false}
-          disabled={createFormDisabled}
-          size={isCompact ? "md" : "sm"}
-        />
-        {duplicateWarningMessage ? (
-          <Alert color="orange" variant="light" title="Cảnh báo trùng booking">
-            {duplicateWarningMessage}
-          </Alert>
-        ) : null}
-        {createFormMergeRecommendations.length > 0 && typeof guestCount === "number" ? (
-          <MergeRecommendationCard
-            recommendations={createFormMergeRecommendations}
-            tables={state.tables.filter((table) => table.branchId === createBranchId)}
-            targetSeats={guestCount}
-            busyKey={recommendationBusyKey}
-            maxItems={3}
-            onUseExisting={async (rec) => {
-              if (!rec.existingGroup) {
-                return;
-              }
-              notifications.show({
-                color: "blue",
-                message: `Sau khi tạo booking, dùng "Gán" trên danh sách rồi chọn ${rec.existingGroup.mergedName}.`,
-              });
-            }}
-            onMergeAndApply={async (rec) => {
-              const firstTable = state.tables.find((table) => table.id === rec.tableIds[0]);
-              if (!firstTable || !firstTable.areaId) {
-                notifications.show({
-                  color: "red",
-                  message: "Không xác định được khu vực để gộp bàn.",
-                });
-                return;
-              }
-              setRecommendationBusyKey(`combo:${rec.tableIds.join(",")}`);
-              try {
-                const result = await createTableMergeGroup({
-                  branchId: createBranchId!,
-                  areaId: firstTable.areaId,
-                  tableIds: rec.tableIds,
-                });
-                notifications.show({
-                  color: result.ok ? "green" : "red",
-                  message: result.ok
-                    ? `${result.message}. Tạo booking xong, hệ thống sẽ ưu tiên gán vào cụm này.`
-                    : result.message,
-                });
-              } finally {
-                setRecommendationBusyKey(null);
-              }
-            }}
-          />
-        ) : null}
-        <Text size="sm" c="dimmed">
-          Khu vực, trạng thái bàn và bàn gán sẽ được cấu hình ở mục <strong>Sơ đồ</strong>.
-        </Text>
-        <Text size="sm" c="dimmed">
-          Booking tạo từ đây sẽ ở trạng thái <strong>Chờ xếp bàn</strong>.
-        </Text>
-        <DateTimePicker
-          value={bookingAt}
-          onChange={setBookingAt}
-          label="Thời gian đến"
-          valueFormat="DD/MM/YYYY HH:mm"
-          disabled={createFormDisabled}
-          size={isCompact ? "md" : "sm"}
-          popoverProps={portalModalOverlayPopoverProps}
-          timePickerProps={{ popoverProps: portalModalOverlayPopoverProps }}
-        />
-        <GuestCountNumberInput
-          label="Số khách (tùy chọn)"
-          value={guestCount}
-          onChange={setGuestCount}
-          placeholder="Để trống nếu chưa rõ"
-          disabled={createFormDisabled}
-          size={isCompact ? "md" : "sm"}
-        />
-        <Textarea
-          label="Ghi chú"
-          placeholder="Tùy chọn"
-          value={note}
-          onChange={(event) => setNote(event.currentTarget.value)}
-          autosize
-          minRows={2}
-          disabled={createFormDisabled}
-          size={isCompact ? "md" : "sm"}
-        />
-        <PortalStickyAction>
-          <Button
-            fullWidth
-            size={isCompact ? "md" : "sm"}
-            loading={isCreating}
-            disabled={isCreating}
-            onClick={() => void handleCreate()}
-          >
-            Tạo booking
-          </Button>
-        </PortalStickyAction>
-      </Stack>
-    </PortalSectionCard>
-  );
 
   const bookingsSearchPlaceholder =
     "Tìm theo khách, SĐT, giờ đến, giờ check-in, khu, bàn, trạng thái...";
@@ -2962,18 +2542,9 @@ function BookingsPageContent() {
 
   return (
     <Stack gap="md">
-      <Group justify="space-between" align="center" wrap="wrap" gap="md">
-        <PortalPageTitle order={isCompact ? 3 : 2} mb={0}>
-          Đặt bàn
-        </PortalPageTitle>
-        <Button
-          color="brand"
-          size={isCompact ? "md" : "sm"}
-          onClick={() => setCreateModalOpened(true)}
-        >
-          Tạo mới
-        </Button>
-      </Group>
+      <PortalPageTitle order={isCompact ? 3 : 2} mb={0}>
+        Đặt bàn
+      </PortalPageTitle>
 
       <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>
         <Tabs.List grow>
@@ -3050,17 +2621,6 @@ function BookingsPageContent() {
           {bookingDetailPanel}
         </Modal>
       )}
-      <Modal
-        opened={createModalOpened}
-        onClose={closeCreateModal}
-        closeOnClickOutside={!isCreating}
-        closeOnEscape={!isCreating}
-        title="Tạo mới"
-        size="lg"
-        centered
-      >
-        {createForm}
-      </Modal>
       <Modal
         opened={editBooking != null}
         onClose={closeEditBookingModal}
@@ -3405,94 +2965,3 @@ function BookingsPageContent() {
   );
 }
 
-interface MergeRecommendationCardProps {
-  recommendations: MergeRecommendation[];
-  tables: { id: string; name: string; seats: number }[];
-  targetSeats: number;
-  /** Optional area name for context in the heading. */
-  areaName?: string | null;
-  /** Limit how many suggestions to render (UI conciseness). */
-  maxItems?: number;
-  /** When set, label the action button as "Dùng cụm" instead of just "Áp dụng". */
-  applyLabel?: string;
-  busyKey?: string | null;
-  onUseExisting: (group: MergeRecommendation) => void | Promise<void>;
-  onMergeAndApply: (combo: MergeRecommendation) => void | Promise<void>;
-}
-
-function MergeRecommendationCard({
-  recommendations,
-  tables,
-  targetSeats,
-  areaName,
-  maxItems = 3,
-  busyKey,
-  onUseExisting,
-  onMergeAndApply,
-}: MergeRecommendationCardProps) {
-  const tableMap = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; seats: number }>();
-    for (const table of tables) {
-      map.set(table.id, table);
-    }
-    return map;
-  }, [tables]);
-  if (recommendations.length === 0) {
-    return null;
-  }
-  const items = recommendations.slice(0, maxItems);
-  return (
-    <Alert
-      color="blue"
-      variant="light"
-      title={`Gợi ý gộp bàn cho ${targetSeats} khách${areaName ? ` · ${areaName}` : ""}`}
-    >
-      <Stack gap="xs">
-        <Text size="xs" c="dimmed">
-          Không có bàn lẻ nào đủ chỗ. Áp dụng một trong các gợi ý dưới đây để gộp bàn và gán booking ngay.
-        </Text>
-        {items.map((rec) => {
-          const labelTables = rec.tableIds
-            .map((id) => tableMap.get(id)?.name ?? "?")
-            .join(" + ");
-          const isExisting = rec.kind === "existing-group";
-          const ctaLabel = isExisting
-            ? `Dùng ${rec.existingGroup?.mergedName ?? "cụm có sẵn"}`
-            : `Gộp & gán: ${labelTables}`;
-          const subtitle = isExisting
-            ? `${labelTables} · ${rec.totalCapacity} chỗ`
-            : `Tổng ${rec.totalCapacity} chỗ`;
-          const itemKey = isExisting
-            ? `existing:${rec.existingGroup?.id ?? rec.key}`
-            : `combo:${rec.tableIds.join(",")}`;
-          return (
-            <Group key={rec.key} justify="space-between" wrap="nowrap" gap="xs">
-              <Stack gap={0} style={{ minWidth: 0 }}>
-                <Text size="sm" fw={600} lineClamp={1}>
-                  {ctaLabel}
-                </Text>
-                <Text size="xs" c="dimmed" lineClamp={1}>
-                  {subtitle}
-                </Text>
-              </Stack>
-              <Button
-                size="xs"
-                variant={isExisting ? "filled" : "light"}
-                loading={busyKey === itemKey}
-                onClick={() => {
-                  if (isExisting) {
-                    void onUseExisting(rec);
-                  } else {
-                    void onMergeAndApply(rec);
-                  }
-                }}
-              >
-                {isExisting ? "Dùng cụm" : "Gộp & gán"}
-              </Button>
-            </Group>
-          );
-        })}
-      </Stack>
-    </Alert>
-  );
-}

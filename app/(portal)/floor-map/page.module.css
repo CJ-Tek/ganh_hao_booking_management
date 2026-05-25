@@ -118,6 +118,17 @@
   max-width: 320px;
 }
 
+.tableBlockEdit {
+  background-color: #ffffff;
+  border-color: rgba(148, 163, 184, 0.5);
+  cursor: grab;
+}
+
+:global([data-mantine-color-scheme="dark"]) .tableBlockEdit {
+  background-color: var(--mantine-color-dark-6);
+  border-color: rgba(148, 163, 184, 0.35);
+}
+
 .tableBlockView {
   position: relative;
   cursor: pointer;
@@ -210,6 +221,11 @@
   align-items: flex-end;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.toolbarAreaPrimaryBtns {
+  flex: 1;
+  min-width: 0;
 }
 
 .toolbarAreaActions {
@@ -371,6 +387,11 @@
     width: 100%;
     align-items: stretch;
     gap: 8px;
+  }
+
+  .toolbarAreaPrimaryBtns {
+    flex: 1;
+    min-width: 0;
   }
 
   .toolbarDayListBtn {
