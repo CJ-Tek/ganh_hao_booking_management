@@ -360,6 +360,18 @@ export function mergeGroupHasBookingOnDay(
   );
 }
 
+/** True when the merge group's primary booking has checked in or is seated. */
+export function mergeGroupPrimaryGuestHasArrived(
+  mergeGroupId: string,
+  bookings: readonly Booking[]
+): boolean {
+  const primary = pickPrimaryBookingOnMergeGroup(mergeGroupId, bookings);
+  return (
+    primary != null &&
+    (primary.status === "checked_in" || primary.status === "seated")
+  );
+}
+
 /** Floor-map calendar preview: derive merge-bar color from bookings on the selected day. */
 export function deriveMergeGroupStatusFromDayBookings(
   mergeGroupId: string,

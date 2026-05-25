@@ -9,15 +9,18 @@ import { useAppContext } from "@/contexts/app-context";
 import { mergeRowStyles } from "@/lib/busy-row-style";
 import {
   displayCustomerPhone,
+  pickNonOverlappingBookingsForMergeGroup,
   pickNonOverlappingBookingsForTable,
 } from "@/lib/booking-meta";
+import { getMergeGroupEffectiveGuestCapacity } from "@/lib/table-capacity";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
-import { type Booking } from "@/lib/types";
+import { type Booking, type TableMergeGroup } from "@/lib/types";
 
 export function RegisterPendingAssignTable(props: {
   records: Booking[];
-  tableId: string;
-  tableSeats: number;
+  tableId?: string;
+  tableSeats?: number;
+  mergeGroup?: TableMergeGroup;
   selectedBookings: Booking[];
   onSelectedBookingsChange: (bookings: Booking[]) => void;
   onNavigateToBookingList?: (booking: Booking) => void;
@@ -26,7 +29,8 @@ export function RegisterPendingAssignTable(props: {
   const {
     records,
     tableId,
-    tableSeats,
+    tableSeats = 0,
+    mergeGroup,
     selectedBookings,
     onSelectedBookingsChange,
     onNavigateToBookingList,
@@ -34,13 +38,30 @@ export function RegisterPendingAssignTable(props: {
   } = props;
   const { state } = useAppContext();
 
-  const assignPlan = useMemo(
-    () =>
-      pickNonOverlappingBookingsForTable(selectedBookings, tableId, state.bookings, {
-        maxSeats: tableSeats > 0 ? tableSeats : undefined,
-      }),
-    [selectedBookings, state.bookings, tableId, tableSeats]
-  );
+  const assignPlan = useMemo(() => {
+    if (mergeGroup) {
+      return pickNonOverlappingBookingsForMergeGroup(
+        selectedBookings,
+        mergeGroup,
+        state.bookings
+      );
+    }
+    if (!tableId) {
+      return {
+        assignable: [],
+        skippedSelectionOverlap: [],
+        skippedTableConflict: [],
+        skippedOverCapacity: [],
+      };
+    }
+    return pickNonOverlappingBookingsForTable(selectedBookings, tableId, state.bookings, {
+      maxSeats: tableSeats > 0 ? tableSeats : undefined,
+    });
+  }, [mergeGroup, selectedBookings, state.bookings, tableId, tableSeats]);
+
+  const capacityLabel = mergeGroup
+    ? getMergeGroupEffectiveGuestCapacity(mergeGroup.totalCapacity)
+    : tableSeats;
 
   const skippedCount =
     assignPlan.skippedSelectionOverlap.length +
@@ -120,8 +141,9 @@ export function RegisterPendingAssignTable(props: {
     <Stack gap="xs">
       {selectedBookings.length === 0 ? (
         <Text size="xs" c="dimmed">
-          Chọn một hoặc nhiều booking (checkbox) để gán vào bàn này. Chỉ gán các suất không trùng
-          giờ với nhau. Bấm dòng để mở Danh sách booking.
+          {mergeGroup
+            ? `Chọn booking chờ để gán vào ${mergeGroup.mergedName}. Chỉ gán các suất không trùng giờ với nhau hoặc booking đã có trên cụm. Bấm dòng để mở Danh sách booking.`
+            : "Chọn một hoặc nhiều booking (checkbox) để gán vào bàn này. Chỉ gán các suất không trùng giờ với nhau. Bấm dòng để mở Danh sách booking."}
         </Text>
       ) : (
         <Stack gap={6}>
@@ -147,13 +169,13 @@ export function RegisterPendingAssignTable(props: {
                 {assignPlan.skippedTableConflict.length > 0 ? (
                   <Text size="xs">
                     {assignPlan.skippedTableConflict.length} booking trùng khung giờ với booking
-                    đã có trên bàn.
+                    {mergeGroup ? " đã có trên cụm hoặc bàn thành viên" : " đã có trên bàn"}.
                   </Text>
                 ) : null}
                 {assignPlan.skippedOverCapacity.length > 0 ? (
                   <Text size="xs">
-                    {assignPlan.skippedOverCapacity.length} booking vượt sức chứa bàn (tối đa{" "}
-                    {tableSeats} khách).
+                    {assignPlan.skippedOverCapacity.length} booking vượt sức chứa{" "}
+                    {mergeGroup ? "cụm" : "bàn"} (tối đa {capacityLabel} khách).
                   </Text>
                 ) : null}
               </Stack>
@@ -297,6 +319,11 @@ export function RegisterPendingAssignTable(props: {
             title: "Khu vực / Bàn",
             sortable: true,
             render: (booking) => {
+              if (booking.mergeGroupId) {
+                const group = state.mergeGroups.find((item) => item.id === booking.mergeGroupId);
+                const area = state.areas.find((item) => item.id === booking.areaId);
+                return `${area?.name ?? "—"} · ${group?.mergedName ?? "Cụm gộp"}`;
+              }
               if (!booking.areaId && !booking.tableId) {
                 return (
                   <Text size="sm" c="dimmed">

@@ -539,6 +539,111 @@
   border-color: rgba(116, 192, 252, 0.55);
 }
 
+/* Status tint — must follow .mergeGroupContainer so it wins in cascade */
+.mergeGroupContainer.statusSurface_available {
+  background-color: rgba(230, 252, 245, 0.78);
+  border-color: rgba(32, 201, 151, 0.55);
+}
+
+.mergeGroupContainer.statusSurface_hold {
+  background-color: rgba(255, 251, 230, 0.78);
+  border-color: rgba(250, 197, 21, 0.65);
+}
+
+.mergeGroupContainer.statusSurface_occupied {
+  background-color: rgba(245, 240, 252, 0.78);
+  border-color: rgba(151, 112, 215, 0.55);
+}
+
+.mergeGroupContainer.statusSurface_locked {
+  background-color: rgba(248, 250, 252, 0.78);
+  border-color: rgba(100, 116, 139, 0.55);
+}
+
+.mergeGroupContainer.statusSurface_available .mergeGroupContainerHeader,
+.mergeGroupContainer.statusSurface_available .mergeGroupContainerHeaderClickable {
+  background: rgba(230, 252, 245, 0.98);
+  border-bottom-color: rgba(32, 201, 151, 0.28);
+}
+
+.mergeGroupContainer.statusSurface_hold .mergeGroupContainerHeader,
+.mergeGroupContainer.statusSurface_hold .mergeGroupContainerHeaderClickable {
+  background: rgba(255, 251, 230, 0.98);
+  border-bottom-color: rgba(250, 197, 21, 0.35);
+}
+
+.mergeGroupContainer.statusSurface_occupied .mergeGroupContainerHeader,
+.mergeGroupContainer.statusSurface_occupied .mergeGroupContainerHeaderClickable {
+  background: rgba(245, 240, 252, 0.98);
+  border-bottom-color: rgba(151, 112, 215, 0.32);
+}
+
+.mergeGroupContainer.statusSurface_locked .mergeGroupContainerHeader,
+.mergeGroupContainer.statusSurface_locked .mergeGroupContainerHeaderClickable {
+  background: rgba(248, 250, 252, 0.98);
+  border-bottom-color: rgba(100, 116, 139, 0.32);
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupContainer.statusSurface_available {
+  background-color: rgba(24, 58, 48, 0.88);
+  border-color: rgba(32, 201, 151, 0.45);
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupContainer.statusSurface_hold {
+  background-color: rgba(58, 48, 20, 0.88);
+  border-color: rgba(250, 197, 21, 0.45);
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupContainer.statusSurface_occupied {
+  background-color: rgba(48, 36, 68, 0.88);
+  border-color: rgba(151, 112, 215, 0.45);
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupContainer.statusSurface_locked {
+  background-color: rgba(38, 45, 56, 0.88);
+  border-color: rgba(148, 163, 184, 0.45);
+}
+
+:global([data-mantine-color-scheme="dark"])
+  .mergeGroupContainer.statusSurface_available
+  .mergeGroupContainerHeader,
+:global([data-mantine-color-scheme="dark"])
+  .mergeGroupContainer.statusSurface_available
+  .mergeGroupContainerHeaderClickable {
+  background: rgba(24, 58, 48, 0.96);
+  border-bottom-color: rgba(32, 201, 151, 0.28);
+}
+
+:global([data-mantine-color-scheme="dark"])
+  .mergeGroupContainer.statusSurface_hold
+  .mergeGroupContainerHeader,
+:global([data-mantine-color-scheme="dark"])
+  .mergeGroupContainer.statusSurface_hold
+  .mergeGroupContainerHeaderClickable {
+  background: rgba(58, 48, 20, 0.96);
+  border-bottom-color: rgba(250, 197, 21, 0.3);
+}
+
+:global([data-mantine-color-scheme="dark"])
+  .mergeGroupContainer.statusSurface_occupied
+  .mergeGroupContainerHeader,
+:global([data-mantine-color-scheme="dark"])
+  .mergeGroupContainer.statusSurface_occupied
+  .mergeGroupContainerHeaderClickable {
+  background: rgba(48, 36, 68, 0.96);
+  border-bottom-color: rgba(151, 112, 215, 0.3);
+}
+
+:global([data-mantine-color-scheme="dark"])
+  .mergeGroupContainer.statusSurface_locked
+  .mergeGroupContainerHeader,
+:global([data-mantine-color-scheme="dark"])
+  .mergeGroupContainer.statusSurface_locked
+  .mergeGroupContainerHeaderClickable {
+  background: rgba(38, 45, 56, 0.96);
+  border-bottom-color: rgba(148, 163, 184, 0.3);
+}
+
 .mergeGroupContainerActive {
   border-style: solid;
   border-color: rgba(12, 97, 164, 0.9);
@@ -554,15 +659,103 @@
   top: 0;
   left: 0;
   right: 0;
+  z-index: 1;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
-  padding: 0 8px 0 10px;
+  align-content: flex-start;
+  gap: 4px 8px;
+  padding: 4px 8px 4px 10px;
+  box-sizing: border-box;
   border-bottom: 1px solid rgba(12, 97, 164, 0.2);
   background: rgba(255, 252, 245, 0.95);
   border-radius: 14px 14px 0 0;
   pointer-events: auto;
+  overflow: hidden;
+}
+
+.mergeGroupContainerHeaderClickable {
+  width: 100%;
+  margin: 0;
+  border: none;
+  border-bottom: 1px solid rgba(12, 97, 164, 0.2);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: background-color 0.15s ease;
+}
+
+.mergeGroupContainerHeaderStacked {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 2px;
+}
+
+.mergeGroupContainerHeaderPrimary {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 8px;
+  flex-wrap: nowrap;
+}
+
+.mergeGroupContainerHeaderTitleRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 1;
+}
+
+.mergeGroupContainerHeaderClickable:hover {
+  background: rgba(230, 244, 255, 0.98);
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupContainerHeaderClickable:hover {
+  background: rgba(40, 52, 68, 0.98);
+}
+
+.mergeGroupContainerHeaderMeta {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mergeGroupContainerBookingPeek {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+  overflow: hidden;
+  line-height: 1.25;
+}
+
+.mergeGroupContainerBookingCustomer {
+  flex-shrink: 0;
+  max-width: 7rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mergeGroupContainerBookingTimes {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .mergeGroupContainerHeaderDraggable {
@@ -595,15 +788,17 @@
   font-size: 0.82rem;
   font-weight: 700;
   color: #0c61a4;
-  cursor: pointer;
+  cursor: inherit;
   text-align: left;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 :global([data-mantine-color-scheme="dark"]) .mergeGroupContainerTitle {
   color: #74c0fc;
 }
 
-.mergeGroupContainerTitle:hover {
+button.mergeGroupContainerHeaderClickable:hover .mergeGroupContainerTitle {
   text-decoration: underline;
 }
 
@@ -612,6 +807,11 @@
   font-weight: 600;
   color: #334155;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mergeGroupContainerHeaderPrimary > .mergeGroupContainerCapacity {
+  margin-left: auto;
 }
 
 :global([data-mantine-color-scheme="dark"]) .mergeGroupContainerCapacity {
