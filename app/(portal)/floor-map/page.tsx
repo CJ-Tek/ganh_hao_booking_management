@@ -3457,7 +3457,7 @@ export default function FloorMapPage() {
                   ) : null}
                 </div>
                 <ActionIcon
-                  variant="light"
+                  variant="transparent"
                   size="lg"
                   className={classes.topToolbarCollapseBtn}
                   onClick={() => {
@@ -3524,7 +3524,7 @@ export default function FloorMapPage() {
                         Bàn khả dụng
                       </Text>
                       <ActionIcon
-                        variant="light"
+                        variant="transparent"
                         size="sm"
                         onClick={() => setIsPaletteOpen(false)}
                         aria-label="Ẩn kho bàn"
