@@ -1,3 +1,4 @@
+import type { FloorMapStateSlice } from "./floor-map-state-slice";
 import { callStore } from "./store-client";
 import type {
   AppStateSnapshot,
@@ -40,6 +41,21 @@ export async function fetchSnapshot(options?: {
     return initialState;
   }
   return callStore<AppStateSnapshot>("fetchSnapshot", options);
+}
+
+export async function fetchFloorMapSlice(
+  branchIds: readonly string[]
+): Promise<FloorMapStateSlice> {
+  if (!isSupabaseEnabled()) {
+    return {
+      areas: [],
+      tables: [],
+      bookings: [],
+      customers: [],
+      mergeGroups: [],
+    };
+  }
+  return callStore("fetchFloorMapSlice", { branchIds: [...branchIds] });
 }
 
 export async function loginWithSupabase(

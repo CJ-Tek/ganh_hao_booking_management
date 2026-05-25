@@ -26,6 +26,8 @@ import {
   EMPLOYEE_MUTATION_BLOCKED,
   isEmployeeUser,
 } from "@/lib/employee-access";
+import { mergeFloorMapSliceIntoState, reloadScopeForRealtimeTable } from "@/lib/floor-map-state-slice";
+import { applyBookingPatchToSnapshot } from "@/lib/optimistic-booking-sync";
 import { clampFloorNodeSpacing } from "@/lib/floor-map-layout";
 import {
   addAreaInSupabase,
@@ -39,6 +41,7 @@ import {
   updateUserInSupabase,
   checkInBookingInSupabase,
   createBookingInSupabase,
+  fetchFloorMapSlice,
   fetchSnapshot,
   getFloorLayoutLockInfoInSupabase,
   isSupabaseEnabled,
@@ -80,6 +83,7 @@ import {
   DiningTable,
   InternalNotification,
   Role,
+  TableMergeGroup,
   TableStatus,
 } from "@/lib/types";
 
@@ -128,7 +132,11 @@ interface AppContextValue {
   hasSupabase: boolean;
   login: (username: string, password: string) => Promise<AppUser | null>;
   logout: () => void;
-  reload: (options?: { forceMaintenance?: boolean }) => Promise<void>;
+  reload: (options?: {
+    forceMaintenance?: boolean;
+    /** `floor` = bookings/tables/merge slice only; `full` = entire app snapshot (default). */
+    scope?: "full" | "floor";
+  }) => Promise<void>;
   setActiveBranchId: (branchId: string) => void;
   updateBranch: (
     branchId: string,
@@ -285,39 +293,49 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     [currentUser, state.activeBranchId]
   );
 
-  const reload = useCallback(async (options?: { forceMaintenance?: boolean }) => {
-    const mergeActive = (
-      prev: AppStateSnapshot,
-      fallback: AppStateSnapshot["activeBranchId"]
-    ): AppStateSnapshot["activeBranchId"] => {
-      if (!currentUser) {
+  const reload = useCallback(
+    async (options?: { forceMaintenance?: boolean; scope?: "full" | "floor" }) => {
+      const mergeActive = (
+        prev: AppStateSnapshot,
+        fallback: AppStateSnapshot["activeBranchId"]
+      ): AppStateSnapshot["activeBranchId"] => {
+        if (!currentUser) {
+          return prev.activeBranchId ?? fallback;
+        }
+        if (shouldPickBranchOnLogin(currentUser.role) && isBranchPickRequired()) {
+          return undefined;
+        }
+        const stored = readStoredActiveBranch(currentUser);
+        if (stored) {
+          return stored;
+        }
         return prev.activeBranchId ?? fallback;
-      }
-      if (shouldPickBranchOnLogin(currentUser.role) && isBranchPickRequired()) {
-        return undefined;
-      }
-      const stored = readStoredActiveBranch(currentUser);
-      if (stored) {
-        return stored;
-      }
-      return prev.activeBranchId ?? fallback;
-    };
+      };
 
-    if (!hasSupabase) {
+      if (!hasSupabase) {
+        setState((prev) => ({
+          ...initialState,
+          activeBranchId: mergeActive(prev, initialState.activeBranchId),
+        }));
+        return;
+      }
+
+      if (options?.scope === "floor") {
+        const slice = await fetchFloorMapSlice(filteredBranchIds);
+        setState((prev) => mergeFloorMapSliceIntoState(prev, slice, filteredBranchIds));
+        return;
+      }
+
+      const snapshot = await fetchSnapshot({
+        forceMaintenance: options?.forceMaintenance,
+      });
       setState((prev) => ({
-        ...initialState,
-        activeBranchId: mergeActive(prev, initialState.activeBranchId),
+        ...snapshot,
+        activeBranchId: mergeActive(prev, snapshot.activeBranchId),
       }));
-      return;
-    }
-    const snapshot = await fetchSnapshot({
-      forceMaintenance: options?.forceMaintenance,
-    });
-    setState((prev) => ({
-      ...snapshot,
-      activeBranchId: mergeActive(prev, snapshot.activeBranchId),
-    }));
-  }, [hasSupabase, currentUser]);
+    },
+    [filteredBranchIds, hasSupabase, currentUser]
+  );
 
   const lastReloadAtRef = useRef<number>(0);
   const reloadInFlightRef = useRef(false);
@@ -341,16 +359,17 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     let cancelled = false;
     const realtime = getSupabaseBrowserClient();
     const realtimeChannelName = `app-snapshot-sync:${currentUser?.id ?? "guest"}`;
-    const runReload = () => {
+    const runReload = (sourceTable?: string) => {
       if (cancelled) return;
       if (reloadInFlightRef.current) return;
       // Burst updates can emit multiple row changes; cap reload cadence to avoid thrash.
-      if (Date.now() - lastReloadAtRef.current < 700) return;
+      if (Date.now() - lastReloadAtRef.current < 400) return;
       reloadInFlightRef.current = true;
       lastReloadAtRef.current = Date.now();
-      Promise.resolve(reload())
+      const scope = reloadScopeForRealtimeTable(sourceTable);
+      Promise.resolve(reload({ scope }))
         .catch(() => {
-          // Keep running; fallback timer/realtime retries will pull the next snapshot.
+          // Keep running; fallback timer/realtime retries will pull the next slice/snapshot.
         })
         .finally(() => {
           reloadInFlightRef.current = false;
@@ -436,8 +455,22 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       const mergeGroupId = row.merge_group_id;
       const guestCount = row.guest_count;
       const bookingAt = row.booking_at;
-      const startTime = row.start_time;
-      const endTime = row.end_time;
+      const startTimeRaw = row.start_time;
+      const endTimeRaw = row.end_time;
+      const startTime =
+        typeof startTimeRaw === "string" && startTimeRaw.trim().length > 0
+          ? startTimeRaw
+          : typeof bookingAt === "string"
+            ? bookingAt
+            : null;
+      const endTime =
+        typeof endTimeRaw === "string" && endTimeRaw.trim().length > 0
+          ? endTimeRaw
+          : typeof startTime === "string"
+            ? dayjs(startTime)
+                .add(90, "minute")
+                .toISOString()
+            : null;
       const checkedInAt = row.checked_in_at;
       const noShowMarkedAt = row.no_show_marked_at;
       const note = row.note;
@@ -452,8 +485,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         typeof branchId !== "string" ||
         typeof guestCount !== "number" ||
         typeof bookingAt !== "string" ||
-        typeof startTime !== "string" ||
-        typeof endTime !== "string" ||
+        startTime === null ||
+        endTime === null ||
         typeof createdByUserId !== "string" ||
         typeof status !== "string" ||
         !bookingStatuses.includes(status as BookingStatus)
@@ -643,6 +676,40 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         fullName,
         role: role as Role,
         branchIds: (branchIds ?? []) as string[],
+      };
+    };
+
+    const mapRealtimeMergeGroup = (row: RealtimeRow): TableMergeGroup | null => {
+      const id = row.id;
+      const branchId = row.branch_id;
+      const areaId = row.area_id;
+      const autoNumber = row.auto_number;
+      const mergedName = row.merged_name;
+      const totalCapacity = row.total_capacity;
+      const status = row.status;
+      const createdAt = row.created_at;
+      const releasedAt = row.released_at;
+      if (
+        typeof id !== "string" ||
+        typeof branchId !== "string" ||
+        typeof areaId !== "string" ||
+        typeof mergedName !== "string" ||
+        typeof status !== "string" ||
+        typeof createdAt !== "string"
+      ) {
+        return null;
+      }
+      return {
+        id,
+        branchId,
+        areaId,
+        autoNumber: typeof autoNumber === "number" ? autoNumber : 0,
+        mergedName,
+        totalCapacity: typeof totalCapacity === "number" ? totalCapacity : 0,
+        tableIds: [],
+        status: status === "released" ? "released" : "active",
+        createdAt,
+        releasedAt: typeof releasedAt === "string" ? releasedAt : null,
       };
     };
 
@@ -862,6 +929,82 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         setCurrentUser((prev) => (prev?.id === mapped.id ? userForSession(mapped) : prev));
         return true;
       }
+      if (table === "table_merge_groups") {
+        if (payload.eventType === "DELETE") {
+          const id = payload.old?.id;
+          if (typeof id !== "string") {
+            return false;
+          }
+          setState((prev) => ({
+            ...prev,
+            mergeGroups: prev.mergeGroups.filter((item) => item.id !== id),
+          }));
+          return true;
+        }
+        if (!payload.new) {
+          return false;
+        }
+        const mapped = mapRealtimeMergeGroup(payload.new);
+        if (!mapped) {
+          return false;
+        }
+        if (mapped.status !== "active") {
+          setState((prev) => ({
+            ...prev,
+            mergeGroups: prev.mergeGroups.filter((item) => item.id !== mapped.id),
+          }));
+          return true;
+        }
+        setState((prev) => {
+          const existing = prev.mergeGroups.find((item) => item.id === mapped.id);
+          const nextGroup: TableMergeGroup = {
+            ...mapped,
+            tableIds: existing?.tableIds ?? mapped.tableIds,
+          };
+          const without = prev.mergeGroups.filter((item) => item.id !== mapped.id);
+          return { ...prev, mergeGroups: [...without, nextGroup] };
+        });
+        return true;
+      }
+      if (table === "table_merge_members") {
+        if (payload.eventType === "UPDATE") {
+          return false;
+        }
+        if (payload.eventType === "DELETE") {
+          const groupId = payload.old?.group_id;
+          const tableId = payload.old?.table_id;
+          if (typeof groupId !== "string" || typeof tableId !== "string") {
+            return false;
+          }
+          setState((prev) => ({
+            ...prev,
+            mergeGroups: prev.mergeGroups.map((group) =>
+              group.id === groupId
+                ? { ...group, tableIds: group.tableIds.filter((id) => id !== tableId) }
+                : group
+            ),
+          }));
+          return true;
+        }
+        if (!payload.new) {
+          return false;
+        }
+        const groupId = payload.new.group_id;
+        const tableId = payload.new.table_id;
+        if (typeof groupId !== "string" || typeof tableId !== "string") {
+          return false;
+        }
+        setState((prev) => ({
+          ...prev,
+          mergeGroups: prev.mergeGroups.map((group) => {
+            if (group.id !== groupId || group.tableIds.includes(tableId)) {
+              return group;
+            }
+            return { ...group, tableIds: [...group.tableIds, tableId] };
+          }),
+        }));
+        return true;
+      }
       return false;
     };
 
@@ -869,7 +1012,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       "app_users",
       "booking_runtime_settings",
       "branches",
-      // table_merge_members has no branch_id; rely on global subscription + snapshot reload.
       "table_merge_members",
     ] as const;
     const branchScopedRealtimeTables = [
@@ -892,7 +1034,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
           if (applyRealtimePatch(table, payload as RealtimePayload)) {
             return;
           }
-          runReload();
+          runReload(table);
         }
       );
 
@@ -1101,12 +1243,12 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
           reloadInFlightRef.current = true;
           lastReloadAtRef.current = Date.now();
           try {
-            await reload();
+            await reload({ scope: "floor" });
           } finally {
             reloadInFlightRef.current = false;
           }
         } else {
-          // If a poll reload is already in flight, skip; next tick/snapshot will include it.
+          // If a poll reload is already in flight, skip; next tick/slice will include it.
         }
       }
 
@@ -1144,7 +1286,39 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase) {
       return { ok: false, message: "Chưa kết nối Supabase." };
     }
-    return assignBookingToTableInSupabase(input);
+
+    const revertPatch: Partial<Booking> = {
+      areaId: booking.areaId,
+      tableId: booking.tableId,
+      mergeGroupId: booking.mergeGroupId,
+      status: booking.status,
+      guestCount: booking.guestCount,
+    };
+
+    if (input.tableId || input.mergeGroupId) {
+      setState((prev) => {
+        const next = applyBookingPatchToSnapshot(prev, input.bookingId, {
+          areaId: input.areaId,
+          tableId: input.tableId ?? null,
+          mergeGroupId: input.mergeGroupId ?? null,
+          status: "confirmed",
+          guestCount:
+            typeof input.guestCount === "number" && Number.isFinite(input.guestCount)
+              ? Math.max(1, Math.round(input.guestCount))
+              : booking.guestCount,
+        });
+        return next ?? prev;
+      });
+    }
+
+    const result = await assignBookingToTableInSupabase(input);
+    if (!result.ok || /hàng chờ/i.test(result.message)) {
+      setState((prev) => {
+        const next = applyBookingPatchToSnapshot(prev, input.bookingId, revertPatch);
+        return next ?? prev;
+      });
+    }
+    return result;
   };
 
   const updateBookingGuestCount = async (bookingId: string, guestCount: number) => {
@@ -1166,7 +1340,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       reloadInFlightRef.current = true;
       lastReloadAtRef.current = Date.now();
       try {
-        await reload();
+        await reload({ scope: "floor" });
       } finally {
         reloadInFlightRef.current = false;
       }
@@ -1208,7 +1382,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       reloadInFlightRef.current = true;
       lastReloadAtRef.current = Date.now();
       try {
-        await reload();
+        await reload({ scope: "floor" });
       } finally {
         reloadInFlightRef.current = false;
       }
@@ -1230,7 +1404,40 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       assertEmployeeMaySetBookingStatus(state, bookingId, status);
     }
-    await updateBookingStatusInSupabase(bookingId, status);
+
+    const clearsCheckedInAt =
+      status === "cancelled" ||
+      status === "completed" ||
+      status === "no_show" ||
+      status === "confirmed" ||
+      status === "pending";
+
+    const optimisticPatch: Partial<Booking> = {
+      status,
+      ...(clearsCheckedInAt ? { checkedInAt: undefined } : {}),
+      ...(status === "no_show" ? { noShowMarkedAt: dayjs().toISOString() } : {}),
+    };
+
+    const revertPatch: Partial<Booking> = {
+      status: booking.status,
+      checkedInAt: booking.checkedInAt,
+      noShowMarkedAt: booking.noShowMarkedAt,
+    };
+
+    setState((prev) => {
+      const next = applyBookingPatchToSnapshot(prev, bookingId, optimisticPatch);
+      return next ?? prev;
+    });
+
+    try {
+      await updateBookingStatusInSupabase(bookingId, status);
+    } catch (error) {
+      setState((prev) => {
+        const next = applyBookingPatchToSnapshot(prev, bookingId, revertPatch);
+        return next ?? prev;
+      });
+      throw error;
+    }
   };
 
   const checkInBooking = async (bookingId: string) => {
@@ -1247,7 +1454,29 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
       throw new Error("Bạn không có quyền chỉnh booking của chi nhánh này.");
     }
-    await checkInBookingInSupabase(bookingId);
+
+    const revertPatch: Partial<Booking> = {
+      status: booking.status,
+      checkedInAt: booking.checkedInAt,
+    };
+
+    setState((prev) => {
+      const next = applyBookingPatchToSnapshot(prev, bookingId, {
+        status: "seated",
+        checkedInAt: dayjs().toISOString(),
+      });
+      return next ?? prev;
+    });
+
+    try {
+      await checkInBookingInSupabase(bookingId);
+    } catch (error) {
+      setState((prev) => {
+        const next = applyBookingPatchToSnapshot(prev, bookingId, revertPatch);
+        return next ?? prev;
+      });
+      throw error;
+    }
   };
 
   const deleteCustomers = async (customerIds: string[]) => {
@@ -1425,7 +1654,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       // changes (old branch listeners won't receive the UPDATE). Use a one-time reload in
       // that specific case to keep everyone consistent.
       if (input.branchId !== undefined) {
-        await reload();
+        await reload({ scope: "floor" });
       }
     }
     return result;
@@ -1738,7 +1967,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         floorNodeSpacing,
         tablePositions,
       });
-      await reload();
+      await reload({ scope: "floor" });
     },
     [currentUser, hasSupabase, reload]
   );
@@ -1807,7 +2036,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         createdByUserId: currentUser.id,
       });
       if (result.ok) {
-        await reload();
+        await reload({ scope: "floor" });
       }
       return result;
     },
@@ -1824,7 +2053,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       }
       const result = await addTableToMergeGroupInSupabase(input);
       if (result.ok) {
-        await reload();
+        await reload({ scope: "floor" });
       }
       return result;
     },
@@ -1841,7 +2070,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       }
       const result = await removeTableFromMergeGroupInSupabase(input);
       if (result.ok) {
-        await reload();
+        await reload({ scope: "floor" });
       }
       return result;
     },
@@ -1858,7 +2087,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       }
       const result = await releaseTableMergeGroupInSupabase(input);
       if (result.ok) {
-        await reload();
+        await reload({ scope: "floor" });
       }
       return result;
     },

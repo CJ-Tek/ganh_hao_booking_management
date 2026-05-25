@@ -52,6 +52,7 @@ import {
   type BookingCalendarPanelHandle,
 } from "@/components/booking-calendar-panel";
 import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
+import { FloorTableBlockView } from "@/components/floor-map/floor-table-block-view";
 import { RegisterPendingAssignTable } from "@/components/floor-map/register-pending-assign-table";
 import { TableBlockDetailModal } from "@/components/floor-map/table-block-detail-modal";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
@@ -890,7 +891,7 @@ export default function FloorMapPage() {
         message: result.message,
       });
       if (result.ok && detailTable) {
-        await reload();
+        await reload({ scope: "floor" });
         const blockState = await getTableBlockStateInSupabase({
           tableId: detailTable.id,
           slotStartTime: detailTableBlockState?.slotStartTime ?? dayjs().toISOString(),
@@ -1290,6 +1291,22 @@ export default function FloorMapPage() {
   const tablesForFloorView =
     isEditMode || isEmployee ? layoutTablesInArea : floorMapDisplayTables;
 
+  const customerById = useMemo(
+    () => new Map(state.customers.map((customer) => [customer.id, customer])),
+    [state.customers]
+  );
+
+  const primaryBookingByTableId = useMemo(() => {
+    const map = new Map<string, Booking | null>();
+    for (const table of tablesForFloorView) {
+      map.set(
+        table.id,
+        pickPrimaryBookingOnTable(table.id, bookingsForFloorTableDisplay)
+      );
+    }
+    return map;
+  }, [bookingsForFloorTableDisplay, tablesForFloorView]);
+
   const effectiveGridColumns =
     isEditMode && editLayout ? editLayout.gridColumns : gridColumns;
   const effectiveGridRows = isEditMode && editLayout ? editLayout.gridRows : gridRows;
@@ -1329,9 +1346,9 @@ export default function FloorMapPage() {
     }
     const keyword = search.trim().toLowerCase();
     return tablesForFloorView.filter((table) => {
-      const displayBooking = pickPrimaryBookingOnTable(table.id, bookingsForFloorTableDisplay);
+      const displayBooking = primaryBookingByTableId.get(table.id) ?? null;
       const customer = displayBooking
-        ? state.customers.find((item) => item.id === displayBooking.customerId)
+        ? customerById.get(displayBooking.customerId)
         : undefined;
       const haystackParts = [
         table.name,
@@ -1361,11 +1378,11 @@ export default function FloorMapPage() {
       return hitKeyword && hitStatus;
     });
   }, [
-    bookingsForFloorTableDisplay,
+    customerById,
     isEditMode,
+    primaryBookingByTableId,
     search,
     statusFilter,
-    state.customers,
     tablesForFloorView,
   ]);
 
@@ -3022,95 +3039,31 @@ export default function FloorMapPage() {
                   };
                   const isMergeMember = tableToMergeGroupId.has(table.id);
                   if (!isEditMode) {
+                    const displayBooking = primaryBookingByTableId.get(table.id) ?? null;
+                    const peekCustomer = displayBooking
+                      ? customerById.get(displayBooking.customerId)
+                      : undefined;
                     return (
-                      <div
+                      <FloorTableBlockView
                         key={stackKey}
-                        className={`${classes.tableFloorAnchor} ${
-                          isMergeMember ? classes.tableBlockMergeMember : ""
-                        }`}
+                        table={table}
                         style={style}
-                      >
-                        <div
-                          data-table-block="true"
-                          data-table-status={table.status}
-                          className={`${classes.tableBlock} ${classes.tableBlockView} ${TABLE_STATUS_SURFACE_CLASS[table.status]} ${dragState?.tableId === table.id ? classes.tableBlockDragging : ""
-                            }`}
-                          style={bookingRowBusyStyle(isTableStatusBusy(table.id))}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (isTableStatusBusy(table.id)) {
-                              return;
-                            }
-                            handleViewOrRegisterForTable(table);
-                          }}
-                        >
-                          {!isEmployee ? (
-                          <Menu
-                            withinPortal
-                            position="bottom-end"
-                            closeOnItemClick
-                            onOpen={() => {
-                              panStateRef.current = null;
-                              placementTapRef.current = null;
-                              setStatusMenuOpen(true);
-                            }}
-                            onClose={() => setStatusMenuOpen(false)}
-                          >
-                            <Menu.Target>
-                              <ActionIcon
-                                type="button"
-                                variant="subtle"
-                                color="gray"
-                                size="sm"
-                                className={classes.tableBlockStatusMenuBtn}
-                                aria-label="Đổi trạng thái"
-                                data-table-status-menu=""
-                                onClick={(event) => event.stopPropagation()}
-                              >
-                                <MoreVertical size={14} />
-                              </ActionIcon>
-                            </Menu.Target>
-                            <Menu.Dropdown>
-                              <Menu.Item
-                                onClick={() => openDetailForTable(table)}
-                              >
-                                Lịch sử booking & hàng chờ
-                              </Menu.Item>
-                              <Menu.Divider />
-                              {(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
-                                (nextStatus) => (
-                                  <Menu.Item
-                                    key={nextStatus}
-                                    disabled={
-                                      table.status === nextStatus || isTableStatusBusy(table.id)
-                                    }
-                                    onClick={() => void handleStatusChange(table, nextStatus)}
-                                  >
-                                    {tableStatusLabel[nextStatus]}
-                                  </Menu.Item>
-                                )
-                              )}
-                            </Menu.Dropdown>
-                          </Menu>
-                          ) : null}
-                          <Text fw={600} size="sm" lineClamp={1}>
-                            {table.name}
-                          </Text>
-                          <Text size="xs">{table.seats} ghế</Text>
-                          <Badge
-                            color={tableStatusColor[table.status]}
-                            variant="light"
-                            size="xs"
-                          >
-                            {tableStatusLabel[table.status]}
-                          </Badge>
-                          <TableBlockBookingPeek
-                            tableId={table.id}
-                            bookings={bookingsForFloorTableDisplay}
-                            customers={state.customers}
-                          />
-                        </div>
-                      </div>
+                        isMergeMember={isMergeMember}
+                        displayBooking={displayBooking}
+                        customerName={peekCustomer?.fullName ?? ""}
+                        isEmployee={isEmployee}
+                        isBusy={isTableStatusBusy(table.id)}
+                        isDragging={dragState?.tableId === table.id}
+                        onOpenTable={() => handleViewOrRegisterForTable(table)}
+                        onOpenDetail={() => openDetailForTable(table)}
+                        onStatusChange={(nextStatus) => void handleStatusChange(table, nextStatus)}
+                        onStatusMenuOpen={() => {
+                          panStateRef.current = null;
+                          placementTapRef.current = null;
+                          setStatusMenuOpen(true);
+                        }}
+                        onStatusMenuClose={() => setStatusMenuOpen(false)}
+                      />
                     );
                   }
                   const isMergeSelected = editSelectedTableIds.includes(table.id);

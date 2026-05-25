@@ -28,6 +28,10 @@ const handlers: Record<string, StoreHandler> = {
     store.fetchSnapshot(
       payload as { forceMaintenance?: boolean } | undefined
     ),
+  fetchFloorMapSlice: (payload) => {
+    const p = payload as { branchIds?: string[] };
+    return store.fetchFloorMapSliceInSupabase(p?.branchIds ?? []);
+  },
   updateBookingRuntimeSettings: (payload) =>
     store.updateBookingRuntimeSettingsInSupabase(payload as Parameters<typeof store.updateBookingRuntimeSettingsInSupabase>[0]),
   updateBranch: (payload) => {

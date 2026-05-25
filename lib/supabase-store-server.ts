@@ -40,6 +40,7 @@ import {
   getTableEffectiveGuestCapacity,
   tableFitsGuestCount,
 } from "./table-capacity";
+import type { FloorMapStateSlice } from "./floor-map-state-slice";
 import {
   AppStateSnapshot,
   AppUser,
@@ -752,6 +753,204 @@ export async function fetchSnapshot(options?: {
     bookingRuntimeSettings,
     activeBranchId:
       branchesResult.data?.[0]?.id ?? initialState.activeBranchId ?? undefined,
+  };
+}
+
+/**
+ * Lighter than `fetchSnapshot`: bookings/tables/areas/merge groups (+ referenced customers)
+ * for the given branches. Skips users, notifications, maintenance, and full customer table scan.
+ */
+export async function fetchFloorMapSliceInSupabase(
+  branchIds: readonly string[]
+): Promise<FloorMapStateSlice> {
+  if (!isSupabaseStoreServerConfigured()) {
+    return {
+      areas: [],
+      tables: [],
+      bookings: [],
+      customers: [],
+      mergeGroups: [],
+    };
+  }
+
+  const client = ensureClient();
+  const scopedBranches = branchIds.filter((id) => id.length > 0);
+
+  let bookingsQuery = client.from("bookings").select("*");
+  let tablesQuery = client.from("tables").select("*");
+  let areasQuery = client.from("areas").select("*");
+  let mergeGroupsQuery = client
+    .from("table_merge_groups")
+    .select("*")
+    .eq("status", "active")
+    .order("auto_number", { ascending: true });
+
+  if (scopedBranches.length > 0) {
+    bookingsQuery = bookingsQuery.in("branch_id", scopedBranches);
+    tablesQuery = tablesQuery.in("branch_id", scopedBranches);
+    areasQuery = areasQuery.in("branch_id", scopedBranches);
+    mergeGroupsQuery = mergeGroupsQuery.in("branch_id", scopedBranches);
+  }
+
+  const [bookingsResult, tablesResult, areasResult, mergeGroupsResult] = await Promise.all([
+    bookingsQuery,
+    tablesQuery,
+    areasQuery,
+    mergeGroupsQuery,
+  ]);
+
+  const errors = [
+    bookingsResult.error,
+    tablesResult.error,
+    areasResult.error,
+    mergeGroupsResult.error,
+  ].filter(Boolean);
+
+  if (errors.length > 0) {
+    throw new Error(errors[0]?.message ?? "Không thể tải dữ liệu sơ đồ.");
+  }
+
+  const bookings: FloorMapStateSlice["bookings"] = ((bookingsResult.data ?? []) as any[]).map(
+    (item) => ({
+      id: item.id,
+      customerId: item.customer_id,
+      branchId: item.branch_id,
+      areaId: item.area_id,
+      tableId: item.table_id,
+      mergeGroupId: item.merge_group_id ?? null,
+      guestCount: item.guest_count,
+      bookingAt: item.booking_at,
+      startTime: item.start_time ?? item.booking_at,
+      endTime:
+        item.end_time ??
+        dayjs(item.start_time ?? item.booking_at)
+          .add(DEFAULT_BOOKING_RUNTIME_SETTINGS.standardTurnaroundMinutes, "minute")
+          .toISOString(),
+      checkedInAt: item.checked_in_at ?? undefined,
+      noShowMarkedAt: item.no_show_marked_at ?? undefined,
+      note: item.note ?? undefined,
+      createdByUserId: item.created_by_user_id,
+      lastEditedAt: item.last_edited_at ?? undefined,
+      lastEditedByUserId: item.last_edited_by_user_id ?? undefined,
+      status: item.status as BookingStatus,
+    })
+  );
+
+  const customerIds = [...new Set(bookings.map((booking) => booking.customerId))];
+  let customers: FloorMapStateSlice["customers"] = [];
+  if (customerIds.length > 0) {
+    const customersResult = await client.from("customers").select("*").in("id", customerIds);
+    if (customersResult.error) {
+      throw new Error(customersResult.error.message);
+    }
+    customers =
+      customersResult.data?.map((item) => ({
+        id: item.id,
+        fullName: item.full_name,
+        phone: item.phone,
+        note: item.note ?? undefined,
+      })) ?? [];
+  }
+
+  const mergeGroupRows = (mergeGroupsResult.data ?? []) as Array<{
+    id: string;
+    branch_id: string;
+    area_id: string;
+    auto_number: number | null;
+    merged_name: string;
+    total_capacity: number;
+    status: string;
+    created_at: string;
+    released_at: string | null;
+  }>;
+  const groupIds = mergeGroupRows.map((row) => row.id);
+  let mergeMemberRows: Array<{ group_id: string; table_id: string; order_index: number }> = [];
+  if (groupIds.length > 0) {
+    const mergeMembersResult = await client
+      .from("table_merge_members")
+      .select("group_id, table_id, order_index")
+      .in("group_id", groupIds)
+      .order("order_index", { ascending: true });
+    if (mergeMembersResult.error) {
+      throw new Error(mergeMembersResult.error.message);
+    }
+    mergeMemberRows = (mergeMembersResult.data ?? []) as typeof mergeMemberRows;
+  }
+
+  const membersByGroup = new Map<string, string[]>();
+  for (const member of mergeMemberRows) {
+    const bucket = membersByGroup.get(member.group_id) ?? [];
+    bucket.push(member.table_id);
+    membersByGroup.set(member.group_id, bucket);
+  }
+  const mergeGroups: TableMergeGroup[] = mergeGroupRows.map((row) => ({
+    id: row.id,
+    branchId: row.branch_id,
+    areaId: row.area_id,
+    autoNumber: row.auto_number ?? 0,
+    mergedName: row.merged_name,
+    totalCapacity: row.total_capacity ?? 0,
+    tableIds: membersByGroup.get(row.id) ?? [],
+    status: row.status === "released" ? "released" : "active",
+    createdAt: row.created_at,
+    releasedAt: row.released_at,
+  }));
+
+  let tablesRowList = tablesResult.data ?? [];
+  const orphanTableIds = tablesRowList
+    .filter((item) => {
+      const st = item.status as TableStatus;
+      if (st === "locked") {
+        return false;
+      }
+      if (st !== "hold" && st !== "occupied") {
+        return false;
+      }
+      return pickPrimaryBookingOnTable(item.id, bookings) === null;
+    })
+    .map((item) => item.id);
+
+  if (orphanTableIds.length > 0) {
+    await Promise.all(orphanTableIds.map((id) => refreshTableAvailabilityForBooking(client, id)));
+    let tablesRefetch = client.from("tables").select("*");
+    if (scopedBranches.length > 0) {
+      tablesRefetch = tablesRefetch.in("branch_id", scopedBranches);
+    }
+    const refetched = await tablesRefetch;
+    if (!refetched.error && refetched.data) {
+      tablesRowList = refetched.data;
+    }
+  }
+
+  return {
+    areas:
+      areasResult.data?.map((item) => ({
+        id: item.id,
+        branchId: item.branch_id,
+        name: item.name,
+        capacity: item.capacity,
+        floorGridColumns:
+          typeof item.floor_grid_columns === "number" ? item.floor_grid_columns : 12,
+        floorGridRows: typeof item.floor_grid_rows === "number" ? item.floor_grid_rows : 8,
+        floorNodeSpacing:
+          typeof item.floor_node_spacing === "number"
+            ? item.floor_node_spacing
+            : FLOOR_DEFAULT_NODE_SPACING_PX,
+      })) ?? [],
+    tables:
+      tablesRowList.map((item) => ({
+        id: item.id,
+        branchId: item.branch_id,
+        areaId: item.area_id,
+        name: item.name,
+        seats: item.seats,
+        status: item.status as TableStatus,
+        positionX: item.position_x,
+        positionY: item.position_y,
+      })) ?? [],
+    bookings,
+    customers,
+    mergeGroups,
   };
 }
 
