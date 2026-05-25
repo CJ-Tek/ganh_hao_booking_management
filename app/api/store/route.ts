@@ -72,6 +72,10 @@ const handlers: Record<string, StoreHandler> = {
     store.releaseTableMergeGroupInSupabase(
       payload as Parameters<typeof store.releaseTableMergeGroupInSupabase>[0]
     ),
+  updateTableMergeGroupDates: (payload) =>
+    store.updateTableMergeGroupDatesInSupabase(
+      payload as Parameters<typeof store.updateTableMergeGroupDatesInSupabase>[0]
+    ),
   listTableMergeGroups: (payload) =>
     store.listTableMergeGroupsInSupabase(payload as string),
   runBookingMaintenance: () => store.runBookingMaintenanceInSupabase(),

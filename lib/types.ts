@@ -148,6 +148,10 @@ export interface TableMergeGroup {
   /** Member table ids in `order_index` order. */
   tableIds: string[];
   status: "active" | "released";
+  /** Inclusive calendar start (YYYY-MM-DD) when the merge is in effect on the floor map. */
+  startDate: string;
+  /** Inclusive calendar end (YYYY-MM-DD); after this day the group is auto-released. */
+  endDate: string;
   createdAt: string;
   releasedAt?: string | null;
 }

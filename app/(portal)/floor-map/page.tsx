@@ -115,6 +115,13 @@ import {
   tableFitsGuestCount,
 } from "@/lib/table-capacity";
 import {
+  formatMergeGroupDate,
+  formatMergeGroupDateRange,
+  isMergeGroupEffectiveOnDate,
+  isMergeGroupExpired,
+  validateMergeGroupDateRange,
+} from "@/lib/merge-group-utils";
+import {
   confirmWaitlistOfferInSupabase,
   getTableBlockStateInSupabase,
 } from "@/lib/supabase-store";
@@ -432,6 +439,7 @@ export default function FloorMapPage() {
     addTableToMergeGroup,
     removeTableFromMergeGroup,
     releaseTableMergeGroup,
+    updateTableMergeGroupDates,
   } = useAppContext();
   const router = useRouter();
   const isCompact = usePortalCompact();
@@ -491,6 +499,12 @@ export default function FloorMapPage() {
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
   /** Modal multi-select of tables to merge (view-mode "Gộp bàn" flow). */
   const [mergeSelectedTableIds, setMergeSelectedTableIds] = useState<string[]>([]);
+  const [mergeStartDate, setMergeStartDate] = useState<string | null>(() =>
+    formatMergeGroupDate(dayjs())
+  );
+  const [mergeEndDate, setMergeEndDate] = useState<string | null>(() =>
+    formatMergeGroupDate(dayjs())
+  );
   const [mergeSaving, setMergeSaving] = useState(false);
   /** Edit-mode shift-click selection: a set of table ids highlighted for the "Gộp đã chọn" toolbar action. */
   const [editSelectedTableIds, setEditSelectedTableIds] = useState<string[]>([]);
@@ -762,12 +776,15 @@ export default function FloorMapPage() {
       if (group.status !== "active") {
         continue;
       }
+      if (!isMergeGroupEffectiveOnDate(group, floorMapSelectedDate)) {
+        continue;
+      }
       for (const tableId of group.tableIds) {
         ids.add(tableId);
       }
     }
     return ids;
-  }, [state.mergeGroups]);
+  }, [floorMapSelectedDate, state.mergeGroups]);
 
   const mergeCandidateTables = useMemo(() => {
     if (!areaId) {
@@ -801,9 +818,10 @@ export default function FloorMapPage() {
       (group) =>
         group.status === "active" &&
         group.branchId === activeAreaBranchId &&
-        group.areaId === areaId
+        group.areaId === areaId &&
+        isMergeGroupEffectiveOnDate(group, floorMapSelectedDate)
     );
-  }, [activeAreaBranchId, areaId, state.mergeGroups]);
+  }, [activeAreaBranchId, areaId, floorMapSelectedDate, state.mergeGroups]);
 
   const editMergeGroupsInArea = useMemo<TableMergeGroup[]>(() => {
     if (!isEditMode || !editLayout || !areaId) {
@@ -2507,6 +2525,12 @@ export default function FloorMapPage() {
     }
   };
 
+  useEffect(() => {
+    const day = formatMergeGroupDate(floorMapSelectedDate);
+    setMergeStartDate(day);
+    setMergeEndDate(day);
+  }, [floorMapSelectedDate]);
+
   const handleCreateMergeGroup = async (tableIds: string[]) => {
     if (!hasSupabase) {
       notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
@@ -2521,12 +2545,26 @@ export default function FloorMapPage() {
       notifications.show({ color: "red", message: "Cần chọn ít nhất 2 bàn để gộp." });
       return;
     }
+    if (!mergeStartDate || !mergeEndDate) {
+      notifications.show({ color: "red", message: "Vui lòng chọn ngày bắt đầu và ngày kết thúc." });
+      return;
+    }
+    const dateCheck = validateMergeGroupDateRange({
+      startDate: mergeStartDate,
+      endDate: mergeEndDate,
+    });
+    if (!dateCheck.ok) {
+      notifications.show({ color: "red", message: dateCheck.message });
+      return;
+    }
     setMergeSaving(true);
     try {
       const result = await createTableMergeGroup({
         branchId: activeAreaBranchId,
         areaId,
         tableIds: uniqueIds,
+        startDate: mergeStartDate,
+        endDate: mergeEndDate,
       });
       notifications.show({
         color: result.ok ? "green" : "red",
@@ -3453,6 +3491,15 @@ export default function FloorMapPage() {
                         </button>
                         <div className={classes.mergeGroupContainerHeaderMeta}>
                           <span
+                            className={classes.mergeGroupContainerDateRange}
+                            data-merge-no-drag="true"
+                          >
+                            {formatMergeGroupDateRange(
+                              mergeGroup.startDate,
+                              mergeGroup.endDate
+                            )}
+                          </span>
+                          <span
                             className={classes.mergeGroupContainerCapacity}
                             data-merge-no-drag="true"
                           >
@@ -3508,7 +3555,11 @@ export default function FloorMapPage() {
                             ) : null}
                           </span>
                           <span className={classes.mergeGroupContainerCapacity}>
-                            Tổng: {bbox.totalCapacity} chỗ
+                            Tổng: {bbox.totalCapacity} chỗ ·{" "}
+                            {formatMergeGroupDateRange(
+                              mergeGroup.startDate,
+                              mergeGroup.endDate
+                            )}
                           </span>
                         </span>
                         {viewMergeBooking ? (
@@ -4533,9 +4584,31 @@ export default function FloorMapPage() {
       >
         <Stack gap="sm">
           <Text size="sm" c="dimmed">
-            Chọn ít nhất 2 bàn trong cùng khu vực. Hệ thống tự đặt tên là &quot;Bàn gộp N&quot; theo
-            thứ tự nhỏ nhất chưa dùng trong khu vực.
+            Chọn ít nhất 2 bàn trong cùng khu vực. Cụm gộp chỉ hiển thị trong khoảng ngày đã chọn;
+            sau ngày kết thúc hệ thống tự bỏ gộp để trả bàn lẻ.
           </Text>
+          <Group grow align="flex-end">
+            <DatePickerInput
+              label="Từ ngày"
+              value={mergeStartDate}
+              onChange={(value) => {
+                setMergeStartDate(value);
+                if (value && mergeEndDate && dayjs(mergeEndDate).isBefore(value, "day")) {
+                  setMergeEndDate(value);
+                }
+              }}
+              valueFormat="DD/MM/YYYY"
+              disabled={mergeSaving}
+            />
+            <DatePickerInput
+              label="Đến ngày"
+              value={mergeEndDate}
+              onChange={setMergeEndDate}
+              valueFormat="DD/MM/YYYY"
+              minDate={mergeStartDate ? dayjs(mergeStartDate).toDate() : undefined}
+              disabled={mergeSaving}
+            />
+          </Group>
           <MultiSelect
             label="Bàn thành viên"
             data={mergeTableOptions}
@@ -4657,6 +4730,17 @@ export default function FloorMapPage() {
             message: result.message,
           });
         }}
+        onUpdateDates={async (groupId, startDate, endDate) => {
+          const result = await updateTableMergeGroupDates({
+            groupId,
+            startDate,
+            endDate,
+          });
+          notifications.show({
+            color: result.ok ? "green" : "red",
+            message: result.message,
+          });
+        }}
       />
 
       <CreateBookingModal
@@ -4714,6 +4798,7 @@ interface MergeGroupDetailModalProps {
   onRequestRelease: (groupId: string) => void;
   onRequestRemoveMember: (groupId: string, tableId: string) => Promise<void>;
   onAssignPendingBooking: (booking: Booking, group: TableMergeGroup) => Promise<void>;
+  onUpdateDates: (groupId: string, startDate: string, endDate: string) => Promise<void>;
 }
 
 function MergeGroupDetailModal({
@@ -4729,6 +4814,7 @@ function MergeGroupDetailModal({
   onRequestRelease,
   onRequestRemoveMember,
   onAssignPendingBooking,
+  onUpdateDates,
 }: MergeGroupDetailModalProps) {
   const group = useMemo(
     () => mergeGroups.find((candidate) => candidate.id === groupId) ?? null,
@@ -4762,9 +4848,45 @@ function MergeGroupDetailModal({
     return map;
   }, [customers]);
   const [removingTableId, setRemovingTableId] = useState<string | null>(null);
+  const [editStartDate, setEditStartDate] = useState<string | null>(group?.startDate ?? null);
+  const [editEndDate, setEditEndDate] = useState<string | null>(group?.endDate ?? null);
+  const [datesSaving, setDatesSaving] = useState(false);
+
+  useEffect(() => {
+    if (!group) {
+      return;
+    }
+    setEditStartDate(group.startDate);
+    setEditEndDate(group.endDate);
+  }, [group?.endDate, group?.id, group?.startDate]);
+
   if (!group) {
     return null;
   }
+
+  const datesDirty =
+    editStartDate !== group.startDate || editEndDate !== group.endDate;
+
+  const handleSaveDates = async () => {
+    if (!editStartDate || !editEndDate) {
+      return;
+    }
+    const dateCheck = validateMergeGroupDateRange({
+      startDate: editStartDate,
+      endDate: editEndDate,
+    });
+    if (!dateCheck.ok) {
+      notifications.show({ color: "red", message: dateCheck.message });
+      return;
+    }
+    setDatesSaving(true);
+    try {
+      await onUpdateDates(group.id, editStartDate, editEndDate);
+    } finally {
+      setDatesSaving(false);
+    }
+  };
+
   return (
     <Modal opened={Boolean(groupId)} onClose={onClose} title={group.mergedName} size="md">
       <Stack gap="md">
@@ -4774,6 +4896,16 @@ function MergeGroupDetailModal({
               Tổng sức chứa
             </Text>
             <Text fw={600}>{group.totalCapacity} chỗ</Text>
+            {!isEditMode ? (
+              <Text size="xs" c="dimmed">
+                Hiệu lực: {formatMergeGroupDateRange(group.startDate, group.endDate)}
+              </Text>
+            ) : null}
+            {isMergeGroupExpired(group) ? (
+              <Text size="xs" c="orange">
+                Đã qua ngày kết thúc — hệ thống sẽ tự bỏ gộp khi tải lại dữ liệu.
+              </Text>
+            ) : null}
           </Stack>
           {isEditMode ? (
             <Button color="red" variant="light" onClick={() => onRequestRelease(group.id)}>
@@ -4781,6 +4913,56 @@ function MergeGroupDetailModal({
             </Button>
           ) : null}
         </Group>
+        {isEditMode ? (
+          <Stack gap="xs">
+            <Text size="sm" fw={500}>
+              Khoảng hiệu lực
+            </Text>
+            <Group grow align="flex-end">
+              <DatePickerInput
+                label="Từ ngày"
+                value={editStartDate}
+                onChange={(value) => {
+                  setEditStartDate(value);
+                  if (value && editEndDate && dayjs(editEndDate).isBefore(value, "day")) {
+                    setEditEndDate(value);
+                  }
+                }}
+                valueFormat="DD/MM/YYYY"
+                disabled={datesSaving}
+              />
+              <DatePickerInput
+                label="Đến ngày"
+                value={editEndDate}
+                onChange={setEditEndDate}
+                valueFormat="DD/MM/YYYY"
+                minDate={editStartDate ? dayjs(editStartDate).toDate() : undefined}
+                disabled={datesSaving}
+              />
+            </Group>
+            <Group justify="flex-end">
+              <Button
+                size="xs"
+                variant="light"
+                disabled={!datesDirty || datesSaving}
+                onClick={() => {
+                  setEditStartDate(group.startDate);
+                  setEditEndDate(group.endDate);
+                }}
+              >
+                Hoàn tác
+              </Button>
+              <Button
+                size="xs"
+                loading={datesSaving}
+                disabled={!datesDirty || !editStartDate || !editEndDate}
+                onClick={() => void handleSaveDates()}
+              >
+                Lưu ngày
+              </Button>
+            </Group>
+          </Stack>
+        ) : null}
         <Divider label="Bàn thành viên" labelPosition="left" />
         <Stack gap="xs">
           {memberTables.map((table) => (

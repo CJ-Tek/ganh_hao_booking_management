@@ -423,10 +423,13 @@ export function CreateBookingModal({
                 }
                 setRecommendationBusyKey(`combo:${rec.tableIds.join(",")}`);
                 try {
+                  const mergeDay = dayjs(bookingAt ?? undefined).format("YYYY-MM-DD");
                   const result = await createTableMergeGroup({
                     branchId: createBranchId!,
                     areaId: firstTable.areaId,
                     tableIds: rec.tableIds,
+                    startDate: mergeDay,
+                    endDate: mergeDay,
                   });
                   notifications.show({
                     color: result.ok ? "green" : "red",

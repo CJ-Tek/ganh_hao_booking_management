@@ -527,10 +527,13 @@ function BookingsPageContent() {
   ) => {
     setIsAssignSaving(true);
     try {
+      const mergeDay = dayjs(booking.bookingAt).format("YYYY-MM-DD");
       const createResult = await createTableMergeGroup({
         branchId: booking.branchId,
         areaId: target.areaId,
         tableIds: target.tableIds,
+        startDate: mergeDay,
+        endDate: mergeDay,
       });
       if (!createResult.ok || !createResult.groupId) {
         notifications.show({ color: "red", message: createResult.message });
@@ -564,10 +567,13 @@ function BookingsPageContent() {
   ) => {
     setIsEditSaving(true);
     try {
+      const mergeDay = dayjs(booking.bookingAt).format("YYYY-MM-DD");
       const createResult = await createTableMergeGroup({
         branchId: booking.branchId,
         areaId: target.areaId,
         tableIds: target.tableIds,
+        startDate: mergeDay,
+        endDate: mergeDay,
       });
       if (!createResult.ok || !createResult.groupId) {
         notifications.show({ color: "red", message: createResult.message });

@@ -36,6 +36,14 @@ import {
 } from "./floor-map-layout";
 import { packMergeGroupTablePositions } from "./floor-map-merge-layout";
 import {
+  formatMergeGroupDate,
+  mapTableMergeGroupFromRow,
+  mergeDateRangesOverlap,
+  resolveMergeGroupDateRange,
+  validateMergeGroupDateRange,
+  type TableMergeGroupRowLike,
+} from "./merge-group-utils";
+import {
   formatTableGuestCapacityHint,
   getMergeGroupEffectiveGuestCapacity,
   getTableEffectiveGuestCapacity,
@@ -120,8 +128,11 @@ async function maybeRunBookingMaintenance(force = false): Promise<void> {
   ) {
     return;
   }
-  bookingMaintenanceInFlight = runBookingMaintenanceInSupabase()
-    .then((result) => {
+  bookingMaintenanceInFlight = Promise.all([
+    runBookingMaintenanceInSupabase(),
+    releaseExpiredTableMergeGroupsInSupabase(),
+  ])
+    .then(([result]) => {
       if (result.ok) {
         lastBookingMaintenanceAt = Date.now();
       }
@@ -427,11 +438,14 @@ async function assertMergeGroupBookingAllowed(
     branchId: string;
     areaId?: string | null;
     guestCount: number;
+    bookingAt?: string;
   }
 ): Promise<MergeGroupAssignContext> {
   const { data: groupRow, error: groupErr } = await (client as any)
     .from("table_merge_groups")
-    .select("id, branch_id, area_id, status, merged_name, total_capacity")
+    .select(
+      "id, branch_id, area_id, status, merged_name, total_capacity, start_date, end_date, created_at"
+    )
     .eq("id", input.mergeGroupId)
     .maybeSingle();
   if (groupErr) {
@@ -448,6 +462,16 @@ async function assertMergeGroupBookingAllowed(
   }
   if (input.areaId && groupRow.area_id !== input.areaId) {
     return { ok: false, message: "Cụm bàn gộp không thuộc khu vực đã chọn." };
+  }
+  if (input.bookingAt) {
+    const bookingDay = formatMergeGroupDate(input.bookingAt);
+    const { startDate, endDate } = resolveMergeGroupDateRange(groupRow);
+    if (!mergeDateRangesOverlap(bookingDay, bookingDay, startDate, endDate)) {
+      return {
+        ok: false,
+        message: `Cụm bàn gộp chỉ có hiệu lực từ ${startDate} đến ${endDate}.`,
+      };
+    }
   }
   const groupMaxGuests = getMergeGroupEffectiveGuestCapacity(groupRow.total_capacity);
   if (input.guestCount > groupMaxGuests) {
@@ -694,18 +718,9 @@ export async function fetchSnapshot(options?: {
     bucket.push(member.table_id);
     membersByGroup.set(member.group_id, bucket);
   }
-  const mergeGroups: TableMergeGroup[] = mergeGroupRows.map((row) => ({
-    id: row.id,
-    branchId: row.branch_id,
-    areaId: row.area_id,
-    autoNumber: row.auto_number ?? 0,
-    mergedName: row.merged_name,
-    totalCapacity: row.total_capacity ?? 0,
-    tableIds: membersByGroup.get(row.id) ?? [],
-    status: row.status === "released" ? "released" : "active",
-    createdAt: row.created_at,
-    releasedAt: row.released_at,
-  }));
+  const mergeGroups: TableMergeGroup[] = mergeGroupRows.map((row) =>
+    mapTableMergeGroupFromRow(row as TableMergeGroupRowLike, membersByGroup.get(row.id) ?? [])
+  );
 
   let tablesRowList = tablesResult.data ?? [];
   const orphanTableIds = tablesRowList
@@ -804,6 +819,7 @@ export async function fetchFloorMapSliceInSupabase(
   }
 
   const client = ensureClient();
+  await releaseExpiredTableMergeGroupsInSupabase();
   const scopedBranches = branchIds.filter((id) => id.length > 0);
 
   let bookingsQuery = client.from("bookings").select("*");
@@ -913,18 +929,9 @@ export async function fetchFloorMapSliceInSupabase(
     bucket.push(member.table_id);
     membersByGroup.set(member.group_id, bucket);
   }
-  const mergeGroups: TableMergeGroup[] = mergeGroupRows.map((row) => ({
-    id: row.id,
-    branchId: row.branch_id,
-    areaId: row.area_id,
-    autoNumber: row.auto_number ?? 0,
-    mergedName: row.merged_name,
-    totalCapacity: row.total_capacity ?? 0,
-    tableIds: membersByGroup.get(row.id) ?? [],
-    status: row.status === "released" ? "released" : "active",
-    createdAt: row.created_at,
-    releasedAt: row.released_at,
-  }));
+  const mergeGroups: TableMergeGroup[] = mergeGroupRows.map((row) =>
+    mapTableMergeGroupFromRow(row as TableMergeGroupRowLike, membersByGroup.get(row.id) ?? [])
+  );
 
   let tablesRowList = tablesResult.data ?? [];
   const orphanTableIds = tablesRowList
@@ -1033,6 +1040,7 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
       branchId: input.branchId,
       areaId: input.areaId ?? null,
       guestCount: normalizedGuestCount,
+      bookingAt: normalizedAt,
     });
     if (!groupCheck.ok) {
       return { ok: false, message: groupCheck.message };
@@ -1276,6 +1284,7 @@ export async function assignBookingToTableInSupabase(input: {
       branchId: booking.branch_id,
       areaId,
       guestCount: nextGuestCount,
+      bookingAt: booking.booking_at,
     });
     if (!groupCheck.ok) {
       return { ok: false, message: groupCheck.message };
@@ -1625,6 +1634,7 @@ export async function updateBookingOrderInSupabase(input: {
       branchId: booking.branch_id,
       areaId: nextAreaId,
       guestCount: effectiveGuestCount,
+      bookingAt: input.bookingAt ?? booking.booking_at,
     });
     if (!mergeGroupContext.ok) {
       return { ok: false, message: mergeGroupContext.message };
@@ -2144,6 +2154,8 @@ type MergeGroupCreateInput = {
   branchId: string;
   areaId: string;
   tableIds: string[];
+  startDate: string;
+  endDate: string;
   createdByUserId?: string;
 };
 
@@ -2179,28 +2191,60 @@ async function pickNextMergeGroupNumberForArea(
 
 async function ensureTablesAreFreeToMerge(
   client: ReturnType<typeof ensureClient>,
-  tableIds: string[]
+  tableIds: string[],
+  dateRange: { startDate: string; endDate: string },
+  options?: { excludeGroupId?: string }
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   if (tableIds.length === 0) {
     return { ok: true };
   }
   const { data, error } = await (client as any)
     .from("table_merge_members")
-    .select("table_id, table_merge_groups!inner(status)")
+    .select(
+      "table_id, group_id, table_merge_groups!inner(status, start_date, end_date, created_at)"
+    )
     .in("table_id", tableIds)
     .eq("table_merge_groups.status", "active");
   if (error) {
     return { ok: false, message: error.message };
   }
-  const busyIds = new Set(
-    ((data ?? []) as Array<{ table_id: string }>).map((row) => row.table_id)
-  );
+  const busyIds = new Set<string>();
+  for (const row of (data ?? []) as Array<{
+    table_id: string;
+    group_id: string;
+    table_merge_groups:
+      | { status: string; start_date?: string | null; end_date?: string | null; created_at: string }
+      | Array<{
+          status: string;
+          start_date?: string | null;
+          end_date?: string | null;
+          created_at: string;
+        }>;
+  }>) {
+    if (options?.excludeGroupId && row.group_id === options.excludeGroupId) {
+      continue;
+    }
+    const groupJoin = Array.isArray(row.table_merge_groups)
+      ? row.table_merge_groups[0]
+      : row.table_merge_groups;
+    if (!groupJoin) {
+      continue;
+    }
+    const { startDate, endDate } = resolveMergeGroupDateRange({
+      created_at: groupJoin.created_at,
+      start_date: groupJoin.start_date,
+      end_date: groupJoin.end_date,
+    });
+    if (mergeDateRangesOverlap(dateRange.startDate, dateRange.endDate, startDate, endDate)) {
+      busyIds.add(row.table_id);
+    }
+  }
   if (busyIds.size === 0) {
     return { ok: true };
   }
   return {
     ok: false,
-    message: `Có bàn đã thuộc cụm gộp khác (${busyIds.size} bàn). Vui lòng bỏ gộp trước khi gộp mới.`,
+    message: `Có bàn đã thuộc cụm gộp khác trong cùng khoảng ngày (${busyIds.size} bàn). Vui lòng bỏ gộp hoặc đổi ngày trước khi gộp mới.`,
   };
 }
 
@@ -2292,7 +2336,17 @@ export async function createTableMergeGroupInSupabase(
   if (tables.some((table) => (table.status as TableStatus) === "locked")) {
     return { ok: false, message: "Không gộp được bàn đang khóa." };
   }
-  const lockCheck = await ensureTablesAreFreeToMerge(client, tableIds);
+  const dateCheck = validateMergeGroupDateRange({
+    startDate: input.startDate,
+    endDate: input.endDate,
+  });
+  if (!dateCheck.ok) {
+    return { ok: false, message: dateCheck.message };
+  }
+  const lockCheck = await ensureTablesAreFreeToMerge(client, tableIds, {
+    startDate: input.startDate,
+    endDate: input.endDate,
+  });
   if (!lockCheck.ok) {
     return { ok: false, message: lockCheck.message };
   }
@@ -2311,6 +2365,8 @@ export async function createTableMergeGroupInSupabase(
       total_capacity: totalCapacity,
       created_by_user_id: input.createdByUserId ?? null,
       status: "active",
+      start_date: input.startDate,
+      end_date: input.endDate,
     })
     .select("id")
     .single();
@@ -2333,7 +2389,7 @@ export async function createTableMergeGroupInSupabase(
   }
 
   const packResult = await packMergeGroupTablesOnFloor(client, input.areaId, tableIds);
-  let message = `Đã gộp ${tableIds.length} bàn thành "${groupName}".`;
+  let message = `Đã gộp ${tableIds.length} bàn thành "${groupName}" (${input.startDate} → ${input.endDate}).`;
   if (!packResult.packed) {
     message +=
       " Chưa xếp được cụm trên sơ đồ tự động — vào Sơ đồ (chỉnh sửa) để kéo các bàn sát nhau.";
@@ -2356,7 +2412,9 @@ export async function addTableToMergeGroupInSupabase(input: {
   const client = ensureClient();
   const { data: group, error: groupErr } = await (client as any)
     .from("table_merge_groups")
-    .select("id, branch_id, area_id, status, merged_name, total_capacity")
+    .select(
+      "id, branch_id, area_id, status, merged_name, total_capacity, start_date, end_date, created_at"
+    )
     .eq("id", input.groupId)
     .maybeSingle();
   if (groupErr || !group) {
@@ -2380,7 +2438,8 @@ export async function addTableToMergeGroupInSupabase(input: {
   if ((table.status as TableStatus) === "locked") {
     return { ok: false, message: "Không gộp được bàn đang khóa." };
   }
-  const lockCheck = await ensureTablesAreFreeToMerge(client, [input.tableId]);
+  const groupDates = resolveMergeGroupDateRange(group);
+  const lockCheck = await ensureTablesAreFreeToMerge(client, [input.tableId], groupDates);
   if (!lockCheck.ok) {
     return { ok: false, message: lockCheck.message };
   }
@@ -2523,6 +2582,140 @@ const RELEASE_BLOCKING_BOOKING_STATUSES: BookingStatus[] = [
   "checked_in",
 ];
 
+export async function updateTableMergeGroupDatesInSupabase(input: {
+  groupId: string;
+  startDate: string;
+  endDate: string;
+}): Promise<Result> {
+  const client = ensureClient();
+  const dateCheck = validateMergeGroupDateRange({
+    startDate: input.startDate,
+    endDate: input.endDate,
+  });
+  if (!dateCheck.ok) {
+    return { ok: false, message: dateCheck.message };
+  }
+
+  const { data: group, error: groupErr } = await (client as any)
+    .from("table_merge_groups")
+    .select("id, status, merged_name")
+    .eq("id", input.groupId)
+    .maybeSingle();
+  if (groupErr || !group) {
+    return { ok: false, message: groupErr?.message ?? "Không tìm thấy cụm bàn gộp." };
+  }
+  if (group.status !== "active") {
+    return { ok: false, message: "Cụm bàn gộp đã được giải tán, không thể đổi ngày." };
+  }
+
+  const { data: members, error: membersErr } = await (client as any)
+    .from("table_merge_members")
+    .select("table_id")
+    .eq("group_id", input.groupId);
+  if (membersErr) {
+    return { ok: false, message: membersErr.message };
+  }
+  const tableIds = ((members ?? []) as Array<{ table_id: string }>).map((row) => row.table_id);
+  const lockCheck = await ensureTablesAreFreeToMerge(client, tableIds, {
+    startDate: input.startDate,
+    endDate: input.endDate,
+  }, { excludeGroupId: input.groupId });
+  if (!lockCheck.ok) {
+    return { ok: false, message: lockCheck.message };
+  }
+
+  const { data: activeBookings, error: bookingsErr } = await (client as any)
+    .from("bookings")
+    .select("id, booking_at")
+    .eq("merge_group_id", input.groupId)
+    .in("status", RELEASE_BLOCKING_BOOKING_STATUSES);
+  if (bookingsErr) {
+    return { ok: false, message: bookingsErr.message };
+  }
+  const outOfRange = ((activeBookings ?? []) as Array<{ id: string; booking_at: string }>).filter(
+    (row) => {
+      const bookingDay = formatMergeGroupDate(row.booking_at);
+      return !mergeDateRangesOverlap(
+        bookingDay,
+        bookingDay,
+        input.startDate,
+        input.endDate
+      );
+    }
+  );
+  if (outOfRange.length > 0) {
+    return {
+      ok: false,
+      message: `Không thể thu hẹp khoảng ngày: còn ${outOfRange.length} booking đang giữ cụm ngoài khoảng mới. Hãy đổi ngày booking hoặc mở rộng khoảng hiệu lực.`,
+    };
+  }
+
+  const { error: updateErr } = await (client as any)
+    .from("table_merge_groups")
+    .update({
+      start_date: input.startDate,
+      end_date: input.endDate,
+      updated_at: dayjs().toISOString(),
+    })
+    .eq("id", input.groupId);
+  if (updateErr) {
+    return { ok: false, message: updateErr.message };
+  }
+
+  return {
+    ok: true,
+    message: `Đã cập nhật hiệu lực ${group.merged_name}: ${input.startDate} → ${input.endDate}.`,
+  };
+}
+
+/** Dissolve active merge groups whose end date is before today (calendar day). */
+export async function releaseExpiredTableMergeGroupsInSupabase(): Promise<Result & {
+  releasedCount?: number;
+}> {
+  const client = ensureClient();
+  const today = dayjs().format("YYYY-MM-DD");
+  const { data: expiredRows, error } = await (client as any)
+    .from("table_merge_groups")
+    .select("id, merged_name")
+    .eq("status", "active")
+    .lt("end_date", today);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  const rows = (expiredRows ?? []) as Array<{ id: string; merged_name: string }>;
+  if (rows.length === 0) {
+    return { ok: true, message: "Không có cụm bàn gộp hết hạn.", releasedCount: 0 };
+  }
+
+  let releasedCount = 0;
+  const failures: string[] = [];
+  for (const row of rows) {
+    const result = await releaseTableMergeGroupInSupabase({ groupId: row.id });
+    if (result.ok) {
+      releasedCount += 1;
+    } else {
+      failures.push(`${row.merged_name}: ${result.message}`);
+    }
+  }
+
+  if (failures.length > 0) {
+    return {
+      ok: releasedCount > 0,
+      releasedCount,
+      message:
+        releasedCount > 0
+          ? `Đã giải tán ${releasedCount} cụm hết hạn. Một số cụm chưa giải tán được: ${failures.join("; ")}`
+          : failures.join("; "),
+    };
+  }
+
+  return {
+    ok: true,
+    releasedCount,
+    message: `Đã tự giải tán ${releasedCount} cụm bàn gộp hết hạn.`,
+  };
+}
+
 export async function releaseTableMergeGroupInSupabase(input: {
   groupId: string;
 }): Promise<Result> {
@@ -2645,7 +2838,9 @@ export async function listTableMergeGroupsInSupabase(branchId: string): Promise<
   const client = ensureClient();
   const { data: groups, error: groupsErr } = await (client as any)
     .from("table_merge_groups")
-    .select("id, branch_id, area_id, auto_number, merged_name, total_capacity, status, created_at, released_at")
+    .select(
+      "id, branch_id, area_id, auto_number, merged_name, total_capacity, status, created_at, released_at, start_date, end_date"
+    )
     .eq("branch_id", branchId)
     .eq("status", "active")
     .order("auto_number", { ascending: true });
@@ -2653,17 +2848,7 @@ export async function listTableMergeGroupsInSupabase(branchId: string): Promise<
     return [];
   }
 
-  const typedGroups = (groups ?? []) as Array<{
-    id: string;
-    branch_id: string;
-    area_id: string;
-    auto_number: number | null;
-    merged_name: string;
-    total_capacity: number;
-    status: string;
-    created_at: string;
-    released_at: string | null;
-  }>;
+  const typedGroups = (groups ?? []) as TableMergeGroupRowLike[];
   const groupIds = typedGroups.map((group) => group.id);
   if (groupIds.length === 0) {
     return [];
@@ -2678,20 +2863,14 @@ export async function listTableMergeGroupsInSupabase(branchId: string): Promise<
     table_id: string;
     order_index: number;
   }>;
-  return typedGroups.map((group) => ({
-    id: group.id,
-    branchId: group.branch_id,
-    areaId: group.area_id,
-    autoNumber: group.auto_number ?? 0,
-    mergedName: group.merged_name,
-    totalCapacity: group.total_capacity ?? 0,
-    tableIds: typedMembers
-      .filter((member) => member.group_id === group.id)
-      .map((member) => member.table_id),
-    status: group.status === "released" ? "released" : "active",
-    createdAt: group.created_at,
-    releasedAt: group.released_at,
-  }));
+  return typedGroups.map((group) =>
+    mapTableMergeGroupFromRow(
+      group,
+      typedMembers
+        .filter((member) => member.group_id === group.id)
+        .map((member) => member.table_id)
+    )
+  );
 }
 
 export async function runBookingMaintenanceInSupabase(): Promise<Result> {

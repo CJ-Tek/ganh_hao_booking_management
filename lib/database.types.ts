@@ -556,9 +556,11 @@ export type Database = {
           branch_id: string
           created_at: string
           created_by_user_id: string | null
+          end_date: string
           id: string
           merged_name: string
           released_at: string | null
+          start_date: string
           status: string
           total_capacity: number
           updated_at: string
@@ -569,9 +571,11 @@ export type Database = {
           branch_id: string
           created_at?: string
           created_by_user_id?: string | null
+          end_date: string
           id?: string
           merged_name: string
           released_at?: string | null
+          start_date: string
           status?: string
           total_capacity?: number
           updated_at?: string
@@ -582,9 +586,11 @@ export type Database = {
           branch_id?: string
           created_at?: string
           created_by_user_id?: string | null
+          end_date?: string
           id?: string
           merged_name?: string
           released_at?: string | null
+          start_date?: string
           status?: string
           total_capacity?: number
           updated_at?: string

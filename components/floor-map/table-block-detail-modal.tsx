@@ -18,6 +18,7 @@ import { TableBlockConfirmedScheduleTable } from "@/components/floor-map/table-b
 import { TableBlockWaitlistTable } from "@/components/floor-map/table-block-waitlist-table";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
 import { inferGuestTypeLabel, stripUnknownGuestTag } from "@/lib/booking-meta";
+import { formatMergeGroupDateRange } from "@/lib/merge-group-utils";
 import {
   type Booking,
   type DiningTable,
@@ -105,7 +106,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
           <Group justify="space-between" align="flex-start" wrap="wrap" gap="xs">
             <Text size="sm" c="dimmed">
               {mergeGroup
-                ? `Tổng ${mergeGroup.totalCapacity} chỗ · ${mergeGroup.tableIds.length} bàn · ${tableStatusLabel[displayStatus]}`
+                ? `Tổng ${mergeGroup.totalCapacity} chỗ · ${mergeGroup.tableIds.length} bàn · ${formatMergeGroupDateRange(mergeGroup.startDate, mergeGroup.endDate)} · ${tableStatusLabel[displayStatus]}`
                 : `${table!.seats} ghế · ${tableStatusLabel[displayStatus]}`}
             </Text>
             {blockLoading ? (

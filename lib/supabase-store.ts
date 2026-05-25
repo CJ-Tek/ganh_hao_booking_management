@@ -173,6 +173,14 @@ export async function releaseTableMergeGroupInSupabase(input: {
   return callStore("releaseTableMergeGroup", input);
 }
 
+export async function updateTableMergeGroupDatesInSupabase(input: {
+  groupId: string;
+  startDate: string;
+  endDate: string;
+}): Promise<Result> {
+  return callStore("updateTableMergeGroupDates", input);
+}
+
 export async function listTableMergeGroupsInSupabase(
   branchId: string
 ): Promise<TableMergeGroup[]> {

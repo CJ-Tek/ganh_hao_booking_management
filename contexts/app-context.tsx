@@ -28,6 +28,7 @@ import {
   isEmployeeUser,
 } from "@/lib/employee-access";
 import { mergeFloorMapSliceIntoState, reloadScopeForRealtimeTable } from "@/lib/floor-map-state-slice";
+import { resolveMergeGroupDateRange } from "@/lib/merge-group-utils";
 import { applyBookingPatchToSnapshot } from "@/lib/optimistic-booking-sync";
 import { clampFloorNodeSpacing } from "@/lib/floor-map-layout";
 import {
@@ -53,6 +54,7 @@ import {
   deleteTablesInSupabase,
   deleteCustomersInSupabase,
   releaseTableMergeGroupInSupabase,
+  updateTableMergeGroupDatesInSupabase,
   removeTableFromMergeGroupInSupabase,
   renewFloorLayoutLockInSupabase,
   releaseFloorLayoutLockInSupabase,
@@ -167,6 +169,8 @@ interface AppContextValue {
     branchId: string;
     areaId: string;
     tableIds: string[];
+    startDate: string;
+    endDate: string;
   }) => Promise<CreateTableMergeGroupResult>;
   addTableToMergeGroup: (input: {
     groupId: string;
@@ -179,6 +183,11 @@ interface AppContextValue {
     repackFloor?: boolean;
   }) => Promise<ActionResult>;
   releaseTableMergeGroup: (input: { groupId: string }) => Promise<ActionResult>;
+  updateTableMergeGroupDates: (input: {
+    groupId: string;
+    startDate: string;
+    endDate: string;
+  }) => Promise<ActionResult>;
   updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
   checkInBooking: (bookingId: string) => Promise<void>;
   deleteCustomers: (customerIds: string[]) => Promise<ActionResult>;
@@ -690,6 +699,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       const status = row.status;
       const createdAt = row.created_at;
       const releasedAt = row.released_at;
+      const startDateRaw = row.start_date;
+      const endDateRaw = row.end_date;
       if (
         typeof id !== "string" ||
         typeof branchId !== "string" ||
@@ -700,6 +711,11 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       ) {
         return null;
       }
+      const { startDate, endDate } = resolveMergeGroupDateRange({
+        created_at: createdAt,
+        start_date: typeof startDateRaw === "string" ? startDateRaw : null,
+        end_date: typeof endDateRaw === "string" ? endDateRaw : null,
+      });
       return {
         id,
         branchId,
@@ -709,6 +725,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         totalCapacity: typeof totalCapacity === "number" ? totalCapacity : 0,
         tableIds: [],
         status: status === "released" ? "released" : "active",
+        startDate,
+        endDate,
         createdAt,
         releasedAt: typeof releasedAt === "string" ? releasedAt : null,
       };
@@ -2023,7 +2041,13 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   }, [hasSupabase]);
 
   const createTableMergeGroup = useCallback(
-    async (input: { branchId: string; areaId: string; tableIds: string[] }) => {
+    async (input: {
+      branchId: string;
+      areaId: string;
+      tableIds: string[];
+      startDate: string;
+      endDate: string;
+    }) => {
       if (isEmployeeUser(currentUser)) {
         return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
       }
@@ -2096,6 +2120,23 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     [currentUser, hasSupabase, reload]
   );
 
+  const updateTableMergeGroupDates = useCallback(
+    async (input: { groupId: string; startDate: string; endDate: string }) => {
+      if (isEmployeeUser(currentUser)) {
+        return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+      }
+      if (!hasSupabase) {
+        return { ok: false, message: "Chưa kết nối Supabase." };
+      }
+      const result = await updateTableMergeGroupDatesInSupabase(input);
+      if (result.ok) {
+        await reload({ scope: "floor" });
+      }
+      return result;
+    },
+    [currentUser, hasSupabase, reload]
+  );
+
   const value: AppContextValue = {
     state,
     currentUser,
@@ -2116,6 +2157,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     addTableToMergeGroup,
     removeTableFromMergeGroup,
     releaseTableMergeGroup,
+    updateTableMergeGroupDates,
     updateBookingStatus,
     checkInBooking,
     deleteCustomers,
