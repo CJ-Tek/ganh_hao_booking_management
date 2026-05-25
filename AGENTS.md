@@ -14,7 +14,7 @@ npx gitnexus detect-changes --scope all --repo ganh_hao_booking_management
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **ganh_hao_booking_management** (2406 symbols, 4410 relationships, 210 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **ganh_hao_booking_management** (2476 symbols, 4554 relationships, 216 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
