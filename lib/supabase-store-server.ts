@@ -574,6 +574,62 @@ async function seatBookingForImmediateArrival(
  * Automated no-show (run_booking_maintenance) updates `bookings` in SQL without touching
  * `tables.status`. This reconciles affected tables so we do not leave "Giữ chỗ" with empty peek.
  */
+/** Vietnam local calendar (UTC+7, no DST) for end-of-day maintenance on Vercel (UTC). */
+const RESTAURANT_UTC_OFFSET_MINUTES = 7 * 60;
+
+function restaurantNow(): dayjs.Dayjs {
+  return dayjs().utcOffset(RESTAURANT_UTC_OFFSET_MINUTES);
+}
+
+/** True when `iso` falls on a calendar day before today in restaurant local time. */
+function isBeforeRestaurantToday(iso: string): boolean {
+  const parsed = dayjs(iso);
+  if (!parsed.isValid()) {
+    return false;
+  }
+  return parsed
+    .utcOffset(RESTAURANT_UTC_OFFSET_MINUTES)
+    .startOf("day")
+    .isBefore(restaurantNow().startOf("day"));
+}
+
+/**
+ * Auto-complete seated/checked-in bookings from prior business days so tables
+ * do not stay "Đã ngồi" when staff forget Hoàn thành.
+ */
+async function autoCompleteStaleSeatedBookings(
+  client: ReturnType<typeof ensureClient>
+): Promise<number> {
+  const { data: rows, error } = await client
+    .from("bookings")
+    .select("id, booking_at, checked_in_at")
+    .in("status", ["seated", "checked_in"])
+    .not("table_id", "is", null);
+  if (error || !rows?.length) {
+    return 0;
+  }
+
+  const staleIds = (rows as { id: string; booking_at: string; checked_in_at: string | null }[])
+    .filter((row) => {
+      if (isBeforeRestaurantToday(row.booking_at)) {
+        return true;
+      }
+      return row.checked_in_at ? isBeforeRestaurantToday(row.checked_in_at) : false;
+    })
+    .map((row) => row.id);
+
+  let completed = 0;
+  for (const bookingId of staleIds) {
+    try {
+      await updateBookingStatusInSupabase(bookingId, "completed");
+      completed += 1;
+    } catch {
+      // Keep processing other tables; maintenance will retry on the next run.
+    }
+  }
+  return completed;
+}
+
 async function refreshTablesTouchedByRecentNoShows(
   client: ReturnType<typeof ensureClient>,
   sinceIso: string
@@ -3169,9 +3225,11 @@ export async function runBookingMaintenanceInSupabase(): Promise<Result> {
     await refreshTablesTouchedByRecentNoShows(client, noShowWindowStart);
   }
 
+  const staleSeatedCompleted = await autoCompleteStaleSeatedBookings(client);
+
   return {
     ok: true,
-    message: `Bảo trì xong: ${noShowCount} no-show, ${expiredOfferCount} offer hết hạn, ${promotedCount} lượt promotion.`,
+    message: `Bảo trì xong: ${noShowCount} no-show, ${expiredOfferCount} offer hết hạn, ${promotedCount} lượt promotion, ${staleSeatedCompleted} bàn Đã ngồi tự hoàn thành.`,
   };
 }
 
