@@ -16,6 +16,7 @@ import {
 import { useEffect, useState } from "react";
 import { TableBlockConfirmedScheduleTable } from "@/components/floor-map/table-block-confirmed-schedule-table";
 import { TableBlockWaitlistTable } from "@/components/floor-map/table-block-waitlist-table";
+import { canChangeBookingTable } from "@/components/booking-management/shared";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
 import { inferGuestTypeLabel, stripUnknownGuestTag } from "@/lib/booking-meta";
 import { formatMergeGroupDateRange } from "@/lib/merge-group-utils";
@@ -46,6 +47,7 @@ export type TableBlockDetailModalProps = {
   onAssignPending: () => void;
   onCheckIn: () => void;
   onComplete: () => void;
+  onChangeTable: () => void;
   onCancelBooking: () => void;
   onConfirmWaitlistOffer: (entryId: string) => void;
 };
@@ -68,6 +70,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     onAssignPending,
     onCheckIn,
     onComplete,
+    onChangeTable,
     onCancelBooking,
     onConfirmWaitlistOffer,
   } = props;
@@ -189,6 +192,17 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                   ) : null
                 ) : (
                   <>
+                    {canChangeBookingTable(activeBooking) ? (
+                      <Button
+                        size="xs"
+                        variant="light"
+                        color="blue"
+                        loading={bookingActionLoading}
+                        onClick={onChangeTable}
+                      >
+                        Đổi bàn
+                      </Button>
+                    ) : null}
                     {!isOccupied
                       ? (() => {
                           const checkInDisabled = activeBooking.status !== "confirmed";

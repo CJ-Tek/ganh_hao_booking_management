@@ -52,11 +52,17 @@ import {
   type BookingCalendarPanelHandle,
 } from "@/components/booking-calendar-panel";
 import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
+import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import { FloorTableBlockView } from "@/components/floor-map/floor-table-block-view";
 import { RegisterPendingAssignTable } from "@/components/floor-map/register-pending-assign-table";
 import { TableBlockDetailModal } from "@/components/floor-map/table-block-detail-modal";
 import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
-import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
+import {
+  DUPLICATE_BOOKING_CODE,
+  isPlausibleVietnamPhone,
+  normalizeVietnamPhone,
+} from "@/lib/booking-duplicate";
+import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
 import {
   useCallback,
   useEffect,
@@ -421,6 +427,7 @@ export default function FloorMapPage() {
     updateTableStatus,
     createBooking,
     assignBookingToTable,
+    changeBookingTable,
     updateBookingStatus,
     checkInBooking,
     currentUser,
@@ -520,6 +527,7 @@ export default function FloorMapPage() {
   const [detailTableBlockLoading, setDetailTableBlockLoading] = useState(false);
   const [detailWaitlistActionId, setDetailWaitlistActionId] = useState<string | null>(null);
   const [detailBookingActionLoading, setDetailBookingActionLoading] = useState(false);
+  const [changeTableBooking, setChangeTableBooking] = useState<Booking | null>(null);
   /** Status menu uses portal — block canvas interaction while open */
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [floorMapSelectedDate, setFloorMapSelectedDate] = useState(() => dayjs());
@@ -1084,6 +1092,42 @@ export default function FloorMapPage() {
         color: "red",
         message: error instanceof Error ? error.message : "Không hoàn thành được booking.",
       });
+    } finally {
+      setDetailBookingActionLoading(false);
+    }
+  };
+
+  const openChangeTableForActiveBooking = () => {
+    if (!activeBookingForDetail) {
+      return;
+    }
+    setChangeTableBooking(activeBookingForDetail);
+  };
+
+  const handleSubmitChangeTable = async (target: {
+    areaId: string;
+    tableId: string | null;
+    mergeGroupId: string | null;
+  }) => {
+    if (!changeTableBooking) {
+      return;
+    }
+    setDetailBookingActionLoading(true);
+    try {
+      const result = await changeBookingTable({
+        bookingId: changeTableBooking.id,
+        areaId: target.areaId,
+        tableId: target.tableId,
+        mergeGroupId: target.mergeGroupId,
+      });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        setChangeTableBooking(null);
+        closeDetailModal();
+      }
     } finally {
       setDetailBookingActionLoading(false);
     }
@@ -2267,10 +2311,19 @@ export default function FloorMapPage() {
 
   const handleRegisterCustomer = async () => {
     const registerTarget = registerMergeGroup ?? registerTable;
-    if (!registerTarget || !registerCustomerName.trim() || !registerCustomerPhone.trim()) {
+    if (!registerTarget || !registerCustomerName.trim()) {
       notifications.show({
         color: "red",
-        message: "Vui lòng nhập tên khách và số điện thoại.",
+        message: "Vui lòng nhập tên khách.",
+      });
+      return;
+    }
+    const normalizedRegisterPhone = normalizeVietnamPhone(registerCustomerPhone.trim());
+    if (normalizedRegisterPhone && !isPlausibleVietnamPhone(normalizedRegisterPhone)) {
+      notifications.show({
+        color: "red",
+        message:
+          "Số điện thoại không đúng định dạng Việt Nam (ví dụ 0912345678, +84912345678).",
       });
       return;
     }
@@ -2379,8 +2432,8 @@ export default function FloorMapPage() {
     }
     const runCreate = async (allowDuplicate?: boolean) => {
       const result = await createBooking({
-        customerName: registerCustomerName.trim(),
-        customerPhone: registerCustomerPhone.trim(),
+        customerName: formatVietnamesePersonName(registerCustomerName.trim()),
+        customerPhone: normalizedRegisterPhone || undefined,
         branchId: registerTarget.branchId,
         areaId: registerTarget.areaId,
         tableId: registerMergeGroup ? null : registerTable!.id,
@@ -4421,11 +4474,14 @@ export default function FloorMapPage() {
                     placeholder="Họ và tên"
                     value={registerCustomerName}
                     onChange={(event) => setRegisterCustomerName(event.currentTarget.value)}
+                    onBlur={() =>
+                      setRegisterCustomerName((value) => formatVietnamesePersonName(value))
+                    }
                     disabled={registerSaving}
                   />
                   <TextInput
                     label="Số điện thoại"
-                    placeholder="09..."
+                    placeholder="09… (tùy chọn)"
                     inputMode="tel"
                     value={registerCustomerPhone}
                     onChange={(event) => setRegisterCustomerPhone(event.currentTarget.value)}
@@ -4572,8 +4628,33 @@ export default function FloorMapPage() {
         }}
         onCheckIn={() => void handleDetailCheckIn()}
         onComplete={() => void handleDetailComplete()}
+        onChangeTable={openChangeTableForActiveBooking}
         onCancelBooking={openDetailCancelBookingConfirm}
         onConfirmWaitlistOffer={(entryId: string) => void handleConfirmWaitlistOffer(entryId)}
+      />
+
+      <ChangeBookingTableModal
+        opened={changeTableBooking != null}
+        onClose={() => {
+          if (!detailBookingActionLoading) {
+            setChangeTableBooking(null);
+          }
+        }}
+        booking={changeTableBooking}
+        customerName={
+          changeTableBooking
+            ? (state.customers.find((item) => item.id === changeTableBooking.customerId)
+                ?.fullName ?? "")
+            : ""
+        }
+        customers={state.customers}
+        areas={state.areas}
+        tables={state.tables}
+        mergeGroups={state.mergeGroups}
+        bookings={state.bookings}
+        defaultAreaId={areaId}
+        loading={detailBookingActionLoading}
+        onConfirm={handleSubmitChangeTable}
       />
 
       <Modal

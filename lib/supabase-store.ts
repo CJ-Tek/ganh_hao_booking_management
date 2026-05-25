@@ -115,6 +115,12 @@ export async function updateBookingOrderInSupabase(
   return callStore("updateBookingOrder", input);
 }
 
+export async function changeBookingTableInSupabase(
+  input: Parameters<typeof import("./supabase-store-server").changeBookingTableInSupabase>[0]
+): Promise<Result> {
+  return callStore("changeBookingTable", input);
+}
+
 export async function updateBookingStatusInSupabase(
   bookingId: string,
   status: BookingStatus

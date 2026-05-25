@@ -21,6 +21,7 @@ import {
 } from "@/components/booking-management/assign-guest-bodies";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
+import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import {
   canEditBookingOrder,
   MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS,
@@ -58,6 +59,7 @@ export function useBookingManagement() {
     assignBookingToTable,
     updateBookingGuestCount,
     updateBookingOrder,
+    changeBookingTable,
     updateBookingStatus,
     checkInBooking,
     hasSupabase,
@@ -82,6 +84,8 @@ export function useBookingManagement() {
   const [assignAreaId, setAssignAreaId] = useState<string | null>(null);
   const [assignTableId, setAssignTableId] = useState<string | null>(null);
   const [isAssignSaving, setIsAssignSaving] = useState(false);
+  const [changeTableBooking, setChangeTableBooking] = useState<Booking | null>(null);
+  const [isChangeTableSaving, setIsChangeTableSaving] = useState(false);
 
   const branchBookings = useMemo(
     () => state.bookings.filter((booking) => filteredBranchIds.includes(booking.branchId)),
@@ -507,12 +511,44 @@ export function useBookingManagement() {
     [openManualAssignModal, state.customers, updateBookingGuestCount]
   );
 
+  const handleSubmitChangeTable = useCallback(
+    async (target: {
+      areaId: string;
+      tableId: string | null;
+      mergeGroupId: string | null;
+    }) => {
+      if (!changeTableBooking) {
+        return;
+      }
+      setIsChangeTableSaving(true);
+      try {
+        const result = await changeBookingTable({
+          bookingId: changeTableBooking.id,
+          areaId: target.areaId,
+          tableId: target.tableId,
+          mergeGroupId: target.mergeGroupId,
+        });
+        notifications.show({
+          color: result.ok ? "green" : "red",
+          message: result.message,
+        });
+        if (result.ok) {
+          setChangeTableBooking(null);
+        }
+      } finally {
+        setIsChangeTableSaving(false);
+      }
+    },
+    [changeBookingTable, changeTableBooking]
+  );
+
   const renderBookingActions = useCallback(
     (booking: Booking) => (
       <BookingRowActions
         booking={booking}
         busy={isBookingRowBusy(booking.id)}
         onEdit={openEditBookingModal}
+        onChangeTable={setChangeTableBooking}
         onAssign={openAssignOptions}
         onCheckIn={(bookingId) => void runCheckIn(bookingId)}
         onComplete={openCompleteBookingConfirm}
@@ -789,6 +825,29 @@ export function useBookingManagement() {
           </Stack>
         ) : null}
       </Modal>
+      <ChangeBookingTableModal
+        opened={changeTableBooking != null}
+        onClose={() => {
+          if (!isChangeTableSaving) {
+            setChangeTableBooking(null);
+          }
+        }}
+        booking={changeTableBooking}
+        customerName={
+          changeTableBooking
+            ? (state.customers.find((item) => item.id === changeTableBooking.customerId)
+                ?.fullName ?? "")
+            : ""
+        }
+        customers={state.customers}
+        areas={state.areas}
+        tables={state.tables}
+        mergeGroups={state.mergeGroups}
+        bookings={state.bookings}
+        loading={isChangeTableSaving}
+        onConfirm={handleSubmitChangeTable}
+      />
+
       {assignFormBooking ? (
         <Modal
           opened

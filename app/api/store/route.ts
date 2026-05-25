@@ -48,6 +48,10 @@ const handlers: Record<string, StoreHandler> = {
   },
   updateBookingOrder: (payload) =>
     store.updateBookingOrderInSupabase(payload as Parameters<typeof store.updateBookingOrderInSupabase>[0]),
+  changeBookingTable: (payload) =>
+    store.changeBookingTableInSupabase(
+      payload as Parameters<typeof store.changeBookingTableInSupabase>[0]
+    ),
   updateBookingStatus: (payload) => {
     const p = payload as { bookingId: string; status: Parameters<typeof store.updateBookingStatusInSupabase>[1] };
     return store.updateBookingStatusInSupabase(p.bookingId, p.status);

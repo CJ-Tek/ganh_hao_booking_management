@@ -1850,6 +1850,283 @@ export async function updateBookingOrderInSupabase(input: {
   return { ok: true, message: "Đã cập nhật booking." };
 }
 
+const CHANGE_TABLE_ALLOWED_STATUSES: BookingStatus[] = ["confirmed", "seated", "checked_in"];
+
+async function listMergeGroupMemberTableIds(
+  client: ReturnType<typeof ensureClient>,
+  mergeGroupId: string
+): Promise<string[]> {
+  const { data, error } = await (client as any)
+    .from("table_merge_members")
+    .select("table_id")
+    .eq("group_id", mergeGroupId);
+  if (error) {
+    throw new Error(error.message);
+  }
+  return ((data ?? []) as Array<{ table_id: string }>).map((row) => row.table_id);
+}
+
+export async function changeBookingTableInSupabase(input: {
+  bookingId: string;
+  areaId: string;
+  tableId?: string | null;
+  mergeGroupId?: string | null;
+  editedByUserId: string;
+}): Promise<Result> {
+  const client = ensureClient();
+  const nextTableId = input.tableId ?? null;
+  const nextMergeGroupId = input.mergeGroupId ?? null;
+  const hasNextTarget = Boolean(nextTableId) || Boolean(nextMergeGroupId);
+  if (!hasNextTarget) {
+    return { ok: false, message: "Vui lòng chọn bàn hoặc cụm bàn gộp đích." };
+  }
+  if (nextTableId && nextMergeGroupId) {
+    return { ok: false, message: "Chỉ chọn một trong hai: bàn lẻ hoặc cụm bàn gộp." };
+  }
+
+  const { data: booking, error: loadErr } = await (client as any)
+    .from("bookings")
+    .select(
+      "id, status, branch_id, area_id, table_id, merge_group_id, guest_count, booking_at, start_time, end_time"
+    )
+    .eq("id", input.bookingId)
+    .maybeSingle();
+  if (loadErr || !booking) {
+    return { ok: false, message: loadErr?.message ?? "Không tìm thấy booking." };
+  }
+
+  const status = booking.status as BookingStatus;
+  if (!CHANGE_TABLE_ALLOWED_STATUSES.includes(status)) {
+    return {
+      ok: false,
+      message:
+        "Chỉ đổi bàn khi booking đã xác nhận, đã check-in hoặc đang ngồi tại bàn.",
+    };
+  }
+
+  const previousTableId = (booking.table_id as string | null) ?? null;
+  const previousMergeGroupId = (booking.merge_group_id as string | null) ?? null;
+  if (!previousTableId && !previousMergeGroupId) {
+    return { ok: false, message: "Booking chưa được gán bàn — dùng Gán bàn thay vì Đổi bàn." };
+  }
+
+  const assignmentUnchanged =
+    (booking.area_id ?? null) === input.areaId &&
+    previousTableId === nextTableId &&
+    previousMergeGroupId === nextMergeGroupId;
+  if (assignmentUnchanged) {
+    return { ok: false, message: "Bàn đích trùng với bàn hiện tại." };
+  }
+
+  const editorUser = await getAppUserServer(input.editedByUserId);
+  if (!editorUser) {
+    return { ok: false, message: "Không xác định được tài khoản chỉnh sửa." };
+  }
+  if (
+    editorUser.role === "manager" &&
+    !editorUser.branchIds.includes(booking.branch_id)
+  ) {
+    return { ok: false, message: "Manager chỉ được sửa booking thuộc chi nhánh của mình." };
+  }
+
+  const effectiveGuestCount = Math.max(1, Math.round(booking.guest_count));
+  const normalizedStart = dayjs(booking.start_time ?? booking.booking_at).toISOString();
+  const normalizedEnd = dayjs(
+    booking.end_time ??
+      dayjs(normalizedStart)
+        .add((await getBookingRuntimeSettings(client)).standardTurnaroundMinutes, "minute")
+        .toISOString()
+  ).toISOString();
+
+  let mergeGroupContext: MergeGroupAssignContext | null = null;
+  if (nextMergeGroupId) {
+    mergeGroupContext = await assertMergeGroupBookingAllowed(client, {
+      mergeGroupId: nextMergeGroupId,
+      branchId: booking.branch_id,
+      areaId: input.areaId,
+      guestCount: effectiveGuestCount,
+      bookingAt: booking.booking_at,
+    });
+    if (!mergeGroupContext.ok) {
+      return { ok: false, message: mergeGroupContext.message };
+    }
+
+    const { data: groupBookings, error: groupBookingsErr } = await (client as any)
+      .from("bookings")
+      .select("id, booking_at, start_time, end_time, guest_count, customers(full_name)")
+      .eq("merge_group_id", nextMergeGroupId)
+      .neq("id", input.bookingId)
+      .in("status", TABLE_RESERVATION_BOOKING_STATUSES);
+    if (groupBookingsErr) {
+      return { ok: false, message: groupBookingsErr.message };
+    }
+    const candidate = {
+      bookingAt: normalizedStart,
+      startTime: normalizedStart,
+      endTime: normalizedEnd,
+    };
+    const groupConflict = ((groupBookings ?? []) as TableSlotConflictRow[]).find((row) =>
+      bookingsTimeSlotsOverlap(candidate, {
+        bookingAt: row.booking_at,
+        startTime: row.start_time ?? row.booking_at,
+        endTime: row.end_time ?? normalizedEnd,
+      })
+    );
+    if (groupConflict) {
+      const customerJoin = groupConflict.customers;
+      const conflictCustomerName = Array.isArray(customerJoin)
+        ? customerJoin[0]?.full_name
+        : customerJoin?.full_name;
+      return {
+        ok: false,
+        message:
+          formatTableSlotConflictMessage(
+            [
+              {
+                bookingAt: groupConflict.booking_at,
+                guestCount: groupConflict.guest_count,
+              },
+            ],
+            { tableName: mergeGroupContext.mergedName, customerName: conflictCustomerName }
+          ) ?? "Khung giờ trùng với booking khác trên cụm bàn gộp.",
+      };
+    }
+
+    for (const memberTableId of mergeGroupContext.memberTableIds) {
+      const memberConflicts = await findTableBookingSlotConflictsInSupabase(client, {
+        bookingId: input.bookingId,
+        tableId: memberTableId,
+        startTime: normalizedStart,
+        endTime: normalizedEnd,
+      });
+      if (memberConflicts.length > 0) {
+        const firstConflict = memberConflicts[0];
+        const customerJoin = firstConflict.customers;
+        const conflictCustomerName = Array.isArray(customerJoin)
+          ? customerJoin[0]?.full_name
+          : customerJoin?.full_name;
+        const { data: tableRow } = await client
+          .from("tables")
+          .select("name")
+          .eq("id", memberTableId)
+          .maybeSingle();
+        return {
+          ok: false,
+          message:
+            formatTableSlotConflictMessage(
+              memberConflicts.map((row) => ({
+                bookingAt: row.booking_at,
+                guestCount: row.guest_count,
+              })),
+              { tableName: tableRow?.name ?? "bàn thành viên", customerName: conflictCustomerName }
+            ) ?? "Khung giờ trùng với booking khác trên bàn trong cụm gộp.",
+        };
+      }
+    }
+  }
+
+  if (nextTableId) {
+    const { data: table, error: tableErr } = await client
+      .from("tables")
+      .select("id, branch_id, area_id, seats, status, name")
+      .eq("id", nextTableId)
+      .maybeSingle();
+    if (tableErr || !table) {
+      return { ok: false, message: tableErr?.message ?? "Không tìm thấy bàn." };
+    }
+    if (table.branch_id !== booking.branch_id) {
+      return { ok: false, message: "Bàn không thuộc cùng chi nhánh với booking." };
+    }
+    if (table.area_id !== input.areaId) {
+      return { ok: false, message: "Bàn không thuộc khu vực đã chọn." };
+    }
+    if ((table.status as TableStatus) === "locked") {
+      return { ok: false, message: "Bàn đang khóa, không thể đổi sang bàn này." };
+    }
+    if (!tableFitsGuestCount(table.seats, effectiveGuestCount)) {
+      return {
+        ok: false,
+        message: `Số khách không được vượt quá sức chứa bàn (${formatTableGuestCapacityHint(table.seats)}).`,
+      };
+    }
+
+    const tableConflicts = await findTableBookingSlotConflictsInSupabase(client, {
+      bookingId: input.bookingId,
+      tableId: nextTableId,
+      startTime: normalizedStart,
+      endTime: normalizedEnd,
+    });
+    if (tableConflicts.length > 0) {
+      const firstConflict = tableConflicts[0];
+      const customerJoin = firstConflict.customers;
+      const conflictCustomerName = Array.isArray(customerJoin)
+        ? customerJoin[0]?.full_name
+        : customerJoin?.full_name;
+      return {
+        ok: false,
+        message:
+          formatTableSlotConflictMessage(
+            tableConflicts.map((row) => ({
+              bookingAt: row.booking_at,
+              guestCount: row.guest_count,
+            })),
+            { tableName: table.name, customerName: conflictCustomerName }
+          ) ?? "Khung giờ trùng với booking khác trên bàn đích.",
+      };
+    }
+  }
+
+  const refreshTableIds = new Set<string>();
+  if (previousTableId) {
+    refreshTableIds.add(previousTableId);
+  }
+  if (nextTableId) {
+    refreshTableIds.add(nextTableId);
+  }
+  if (previousMergeGroupId) {
+    for (const tableId of await listMergeGroupMemberTableIds(client, previousMergeGroupId)) {
+      refreshTableIds.add(tableId);
+    }
+  }
+  if (mergeGroupContext?.ok) {
+    for (const tableId of mergeGroupContext.memberTableIds) {
+      refreshTableIds.add(tableId);
+    }
+  }
+
+  const updatePayload: Record<string, unknown> = {
+    area_id: input.areaId,
+    table_id: nextMergeGroupId ? mergeGroupContext!.fallbackTableId : nextTableId,
+    merge_group_id: nextMergeGroupId,
+    last_edited_at: dayjs().toISOString(),
+    last_edited_by_user_id: input.editedByUserId,
+  };
+
+  const { error } = await (client as any)
+    .from("bookings")
+    .update(updatePayload)
+    .eq("id", input.bookingId);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+
+  for (const tableId of refreshTableIds) {
+    const { data: tableRow } = await client
+      .from("tables")
+      .select("status")
+      .eq("id", tableId)
+      .maybeSingle();
+    if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+      await refreshTableAvailabilityForBooking(client, tableId);
+    }
+  }
+
+  const targetLabel = mergeGroupContext?.ok
+    ? `cụm ${mergeGroupContext.mergedName}`
+    : "bàn mới";
+  return { ok: true, message: `Đã chuyển khách sang ${targetLabel}.` };
+}
+
 export async function updateBookingStatusInSupabase(
   bookingId: string,
   status: BookingStatus

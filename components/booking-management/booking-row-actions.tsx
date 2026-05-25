@@ -2,7 +2,7 @@
 
 import { Button, Group } from "@mantine/core";
 import { BookingCheckInButton } from "@/components/booking-management/booking-check-in-button";
-import { canEditBookingOrder } from "@/components/booking-management/shared";
+import { canChangeBookingTable, canEditBookingOrder } from "@/components/booking-management/shared";
 import { type Booking } from "@/lib/types";
 
 export function BookingRowActions(props: {
@@ -12,6 +12,7 @@ export function BookingRowActions(props: {
   /** When false, hides the edit control (e.g. Booking hôm nay — edit lives in Danh sách booking). */
   showEdit?: boolean;
   onEdit: (booking: Booking) => void;
+  onChangeTable?: (booking: Booking) => void;
   onAssign: (booking: Booking) => void;
   onCheckIn: (bookingId: string) => void;
   onComplete: (booking: Booking) => void;
@@ -23,6 +24,7 @@ export function BookingRowActions(props: {
     size = "compact-xs",
     showEdit = true,
     onEdit,
+    onChangeTable,
     onAssign,
     onCheckIn,
     onComplete,
@@ -47,6 +49,17 @@ export function BookingRowActions(props: {
           onClick={() => onEdit(booking)}
         >
           Sửa
+        </Button>
+      ) : null}
+      {canChangeBookingTable(booking) && onChangeTable ? (
+        <Button
+          size={size}
+          variant="light"
+          color="blue"
+          disabled={busy}
+          onClick={() => onChangeTable(booking)}
+        >
+          Đổi bàn
         </Button>
       ) : null}
       {booking.status === "pending" ? (

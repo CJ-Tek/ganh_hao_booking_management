@@ -34,6 +34,7 @@ import {
 } from "@/components/booking-management/assign-guest-bodies";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
+import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import { MergeRecommendationCard } from "@/components/booking-management/merge-recommendation-card";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
@@ -123,6 +124,7 @@ function BookingsPageContent() {
     assignBookingToTable,
     updateBookingGuestCount,
     updateBookingOrder,
+    changeBookingTable,
     updateBookingStatus,
     checkInBooking,
     hasSupabase,
@@ -175,6 +177,8 @@ function BookingsPageContent() {
   const [assignAreaId, setAssignAreaId] = useState<string | null>(null);
   const [assignTableId, setAssignTableId] = useState<string | null>(null);
   const [isAssignSaving, setIsAssignSaving] = useState(false);
+  const [changeTableBooking, setChangeTableBooking] = useState<Booking | null>(null);
+  const [isChangeTableSaving, setIsChangeTableSaving] = useState(false);
   const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Booking>>({
     columnAccessor: "bookingAt",
     direction: "desc",
@@ -628,6 +632,37 @@ function BookingsPageContent() {
     setEditAreaId(booking.areaId);
     setEditTableId(booking.tableId);
     setEditMergeGroupId(booking.mergeGroupId ?? null);
+  };
+
+  const handleSubmitChangeTable = async (target: {
+    areaId: string;
+    tableId: string | null;
+    mergeGroupId: string | null;
+  }) => {
+    if (!changeTableBooking) {
+      return;
+    }
+    setIsChangeTableSaving(true);
+    try {
+      const result = await changeBookingTable({
+        bookingId: changeTableBooking.id,
+        areaId: target.areaId,
+        tableId: target.tableId,
+        mergeGroupId: target.mergeGroupId,
+      });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        setChangeTableBooking(null);
+        if (mobileDetailBooking?.id === changeTableBooking.id) {
+          setMobileDetailBooking(null);
+        }
+      }
+    } finally {
+      setIsChangeTableSaving(false);
+    }
   };
 
   const closeEditBookingModal = () => {
@@ -2531,6 +2566,10 @@ function BookingsPageContent() {
                   closeMobileBookingDetail();
                   openEditBookingModal(b);
                 }}
+                onChangeTable={(b) => {
+                  closeMobileBookingDetail();
+                  setChangeTableBooking(b);
+                }}
                 onAssign={(b) => {
                   closeMobileBookingDetail();
                   openAssignOptions(b);
@@ -2810,6 +2849,29 @@ function BookingsPageContent() {
           </Stack>
         ) : null}
       </Modal>
+      <ChangeBookingTableModal
+        opened={changeTableBooking != null}
+        onClose={() => {
+          if (!isChangeTableSaving) {
+            setChangeTableBooking(null);
+          }
+        }}
+        booking={changeTableBooking}
+        customerName={
+          changeTableBooking
+            ? (state.customers.find((item) => item.id === changeTableBooking.customerId)
+                ?.fullName ?? "")
+            : ""
+        }
+        customers={state.customers}
+        areas={state.areas}
+        tables={state.tables}
+        mergeGroups={state.mergeGroups}
+        bookings={state.bookings}
+        loading={isChangeTableSaving}
+        onConfirm={handleSubmitChangeTable}
+      />
+
       {assignFormBooking ? (
         <Modal
           opened

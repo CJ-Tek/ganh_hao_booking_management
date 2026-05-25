@@ -71,6 +71,7 @@ import {
   upsertTablesBatchInSupabase,
   updateBookingGuestCountInSupabase,
   updateBookingOrderInSupabase,
+  changeBookingTableInSupabase,
   updateBookingRuntimeSettingsInSupabase,
 } from "@/lib/supabase-store";
 import { getSupabaseBrowserClient, isSupabaseRealtimeConfigured } from "@/lib/supabase";
@@ -164,6 +165,12 @@ interface AppContextValue {
     tableId: string | null;
     mergeGroupId?: string | null;
     allowDuplicate?: boolean;
+  }) => Promise<ActionResult>;
+  changeBookingTable: (input: {
+    bookingId: string;
+    areaId: string;
+    tableId: string | null;
+    mergeGroupId?: string | null;
   }) => Promise<ActionResult>;
   createTableMergeGroup: (input: {
     branchId: string;
@@ -1410,6 +1417,44 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     return result;
   };
 
+  const changeBookingTable = async (input: {
+    bookingId: string;
+    areaId: string;
+    tableId: string | null;
+    mergeGroupId?: string | null;
+  }) => {
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    if (!hasSupabase) {
+      return { ok: false, message: "Chưa kết nối Supabase." };
+    }
+    if (!currentUser) {
+      return { ok: false, message: "Chưa đăng nhập." };
+    }
+    const booking = state.bookings.find((item) => item.id === input.bookingId);
+    if (!booking) {
+      return { ok: false, message: "Không tìm thấy booking." };
+    }
+    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+      return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
+    }
+    const result = await changeBookingTableInSupabase({
+      ...input,
+      editedByUserId: currentUser.id,
+    });
+    if (result.ok && !reloadInFlightRef.current) {
+      reloadInFlightRef.current = true;
+      lastReloadAtRef.current = Date.now();
+      try {
+        await reload({ scope: "floor" });
+      } finally {
+        reloadInFlightRef.current = false;
+      }
+    }
+    return result;
+  };
+
   const updateBookingStatus = async (bookingId: string, status: BookingStatus) => {
     if (!hasSupabase) {
       return;
@@ -2153,6 +2198,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     assignBookingToTable,
     updateBookingGuestCount,
     updateBookingOrder,
+    changeBookingTable,
     createTableMergeGroup,
     addTableToMergeGroup,
     removeTableFromMergeGroup,
