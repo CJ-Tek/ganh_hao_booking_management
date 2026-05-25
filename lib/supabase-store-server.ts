@@ -1869,12 +1869,19 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
 }
 
 export async function getTableBlockStateInSupabase(input: {
-  tableId: string;
+  tableId?: string | null;
+  mergeGroupId?: string | null;
   slotStartTime: string;
   slotEndTime?: string;
   /** `all` = every active waitlist row for this table; `day` = same calendar day; `slot` = exact window. */
   waitlistScope?: "slot" | "day" | "all";
 }): Promise<TableBlockState> {
+  const hasTable = Boolean(input.tableId);
+  const hasMergeGroup = Boolean(input.mergeGroupId);
+  if (hasTable === hasMergeGroup) {
+    throw new Error("Cần chỉ định tableId hoặc mergeGroupId.");
+  }
+
   const client = ensureClient();
   const runtimeSettings = await getBookingRuntimeSettings(client);
   const slotStartTime = dayjs(input.slotStartTime).toISOString();
@@ -1884,6 +1891,57 @@ export async function getTableBlockStateInSupabase(input: {
   ).toISOString();
 
   const scheduleFrom = dayjs().startOf("day").toISOString();
+
+  const mapBookingRow = (item: Record<string, unknown>): Booking => ({
+    id: item.id as string,
+    customerId: item.customer_id as string,
+    branchId: item.branch_id as string,
+    areaId: item.area_id as string,
+    tableId: (item.table_id as string | null) ?? null,
+    mergeGroupId: (item.merge_group_id as string | null) ?? null,
+    guestCount: item.guest_count as number,
+    bookingAt: item.booking_at as string,
+    startTime: (item.start_time as string | null) ?? (item.booking_at as string),
+    endTime:
+      (item.end_time as string | null) ??
+      dayjs((item.start_time as string | null) ?? (item.booking_at as string))
+        .add(runtimeSettings.standardTurnaroundMinutes, "minute")
+        .toISOString(),
+    checkedInAt: (item.checked_in_at as string | null) ?? undefined,
+    noShowMarkedAt: (item.no_show_marked_at as string | null) ?? undefined,
+    note: (item.note as string | null) ?? undefined,
+    createdByUserId: item.created_by_user_id as string,
+    lastEditedAt: (item.last_edited_at as string | null) ?? undefined,
+    lastEditedByUserId: (item.last_edited_by_user_id as string | null) ?? undefined,
+    status: item.status as BookingStatus,
+  });
+
+  if (hasMergeGroup) {
+    let confirmedQuery = (client as any)
+      .from("bookings")
+      .select("*")
+      .eq("merge_group_id", input.mergeGroupId)
+      .gte("start_time", scheduleFrom)
+      .in("status", ["confirmed", "seated", "checked_in"])
+      .order("start_time", { ascending: true });
+
+    const confirmedResult = await confirmedQuery;
+    if (confirmedResult.error) {
+      throw new Error(confirmedResult.error.message);
+    }
+
+    return {
+      tableId: null,
+      mergeGroupId: input.mergeGroupId ?? null,
+      slotStartTime,
+      slotEndTime,
+      confirmedSchedule:
+        (confirmedResult.data as any[] | null | undefined)?.map((item) =>
+          mapBookingRow(item as Record<string, unknown>)
+        ) ?? [],
+      waitlistQueue: [],
+    };
+  }
 
   const waitlistScope = input.waitlistScope ?? "all";
   let waitlistQuery = (client as any)
@@ -1923,32 +1981,14 @@ export async function getTableBlockStateInSupabase(input: {
   }
 
   return {
-    tableId: input.tableId,
+    tableId: input.tableId ?? null,
+    mergeGroupId: null,
     slotStartTime,
     slotEndTime,
     confirmedSchedule:
-      (confirmedResult.data as any[] | null | undefined)?.map((item) => ({
-        id: item.id,
-        customerId: item.customer_id,
-        branchId: item.branch_id,
-        areaId: item.area_id,
-        tableId: item.table_id,
-        guestCount: item.guest_count,
-        bookingAt: item.booking_at,
-        startTime: item.start_time ?? item.booking_at,
-        endTime:
-          item.end_time ??
-          dayjs(item.start_time ?? item.booking_at)
-            .add(runtimeSettings.standardTurnaroundMinutes, "minute")
-            .toISOString(),
-        checkedInAt: item.checked_in_at,
-        noShowMarkedAt: item.no_show_marked_at,
-        note: item.note ?? undefined,
-        createdByUserId: item.created_by_user_id,
-        lastEditedAt: item.last_edited_at ?? undefined,
-        lastEditedByUserId: item.last_edited_by_user_id ?? undefined,
-        status: item.status as BookingStatus,
-      })) ?? [],
+      (confirmedResult.data as any[] | null | undefined)?.map((item) =>
+        mapBookingRow(item as Record<string, unknown>)
+      ) ?? [],
     waitlistQueue:
       (waitlistResult.data as any[] | null | undefined)?.map(
         (item): BookingWaitlistEntry => ({

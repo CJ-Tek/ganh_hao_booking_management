@@ -114,7 +114,8 @@ export interface BookingRuntimeSettings {
 }
 
 export interface TableBlockState {
-  tableId: string;
+  tableId: string | null;
+  mergeGroupId?: string | null;
   slotStartTime: string;
   slotEndTime: string;
   confirmedSchedule: Booking[];

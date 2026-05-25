@@ -12,6 +12,7 @@ import {
   type BookingStatus,
   type DiningTable,
   type TableMergeGroup,
+  type TableStatus,
 } from "@/lib/types";
 
 const UNKNOWN_GUEST_TAG = "[[guest_count_unknown]]";
@@ -279,6 +280,14 @@ function slotStartMs(booking: Pick<Booking, "startTime" | "bookingAt">): number 
   return Number.isFinite(t) ? t : 0;
 }
 
+function isActiveFloorBooking(booking: Booking): boolean {
+  return (
+    booking.status !== "cancelled" &&
+    booking.status !== "completed" &&
+    booking.status !== "no_show"
+  );
+}
+
 /** Prefer in-table seated guest, else soonest confirmed, else any active booking on the table. */
 export function pickPrimaryBookingOnTable(
   tableId: string,
@@ -305,6 +314,59 @@ export function pickPrimaryBookingOnTable(
     return sorted[sorted.length - 1] ?? null;
   }
   return sorted[0] ?? null;
+}
+
+/** Prefer seated/checked-in on the merge group, else soonest confirmed, else any active booking. */
+export function pickPrimaryBookingOnMergeGroup(
+  mergeGroupId: string,
+  bookings: readonly Booking[]
+): Booking | null {
+  const onGroup = bookings.filter(
+    (booking) => booking.mergeGroupId === mergeGroupId && isActiveFloorBooking(booking)
+  );
+  if (onGroup.length === 0) {
+    return null;
+  }
+  const checkedIn = onGroup.filter(
+    (booking) => booking.status === "checked_in" || booking.status === "seated"
+  );
+  const pool =
+    checkedIn.length > 0
+      ? checkedIn
+      : onGroup.filter((booking) => booking.status === "confirmed");
+  const finalPool = pool.length > 0 ? pool : onGroup;
+  const sorted = [...finalPool].sort((a, b) => slotStartMs(a) - slotStartMs(b));
+  if (checkedIn.length > 0) {
+    return sorted[sorted.length - 1] ?? null;
+  }
+  return sorted[0] ?? null;
+}
+
+/** True when the merge group has at least one active booking on the selected calendar day. */
+export function mergeGroupHasBookingOnDay(
+  mergeGroupId: string,
+  dayBookings: readonly Booking[]
+): boolean {
+  return dayBookings.some(
+    (booking) => booking.mergeGroupId === mergeGroupId && isActiveFloorBooking(booking)
+  );
+}
+
+/** Floor-map calendar preview: derive merge-bar color from bookings on the selected day. */
+export function deriveMergeGroupStatusFromDayBookings(
+  mergeGroupId: string,
+  dayBookings: readonly Booking[]
+): TableStatus {
+  const onGroup = dayBookings.filter(
+    (booking) => booking.mergeGroupId === mergeGroupId && isActiveFloorBooking(booking)
+  );
+  if (onGroup.length === 0) {
+    return "available";
+  }
+  const hasSeated = onGroup.some(
+    (booking) => booking.status === "seated" || booking.status === "checked_in"
+  );
+  return hasSeated ? "occupied" : "hold";
 }
 
 /** Floor-map calendar preview: derive block color from bookings on the selected day. */
@@ -449,6 +511,44 @@ export function pickNonOverlappingBookingsForTable(
     }
     const candidateOnTable: Booking = { ...booking, tableId };
     if (hasAssignableSlotConflictAtTable(candidateOnTable, tableId, allBookings)) {
+      skippedTableConflict.push(booking);
+      continue;
+    }
+    assignable.push(booking);
+  }
+
+  return { assignable, skippedSelectionOverlap, skippedTableConflict, skippedOverCapacity };
+}
+
+/** Pick pending bookings that can share one merge group without overlapping. */
+export function pickNonOverlappingBookingsForMergeGroup(
+  candidates: readonly Booking[],
+  group: Pick<TableMergeGroup, "id" | "tableIds" | "totalCapacity">,
+  allBookings: readonly Booking[]
+): PendingTableAssignPickResult {
+  const skippedSelectionOverlap: Booking[] = [];
+  const skippedTableConflict: Booking[] = [];
+  const skippedOverCapacity: Booking[] = [];
+  const assignable: Booking[] = [];
+  const maxSeats = getMergeGroupEffectiveGuestCapacity(group.totalCapacity);
+
+  const sorted = [...candidates].sort((left, right) => {
+    const leftStart = normalizeBookingSlotMs(left).startMs;
+    const rightStart = normalizeBookingSlotMs(right).startMs;
+    return leftStart - rightStart;
+  });
+
+  for (const booking of sorted) {
+    if (booking.guestCount > maxSeats) {
+      skippedOverCapacity.push(booking);
+      continue;
+    }
+    if (assignable.some((picked) => bookingsTimeSlotsOverlap(picked, booking))) {
+      skippedSelectionOverlap.push(booking);
+      continue;
+    }
+    const candidateOnGroup: Booking = { ...booking, mergeGroupId: group.id, tableId: null };
+    if (hasAssignableSlotConflictAtMergeGroup(candidateOnGroup, group, allBookings)) {
       skippedTableConflict.push(booking);
       continue;
     }

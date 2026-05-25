@@ -52,6 +52,7 @@ import {
   type BookingCalendarPanelHandle,
 } from "@/components/booking-calendar-panel";
 import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
+import { FloorMergeGroupBlockView } from "@/components/floor-map/floor-merge-group-block-view";
 import { FloorTableBlockView } from "@/components/floor-map/floor-table-block-view";
 import { RegisterPendingAssignTable } from "@/components/floor-map/register-pending-assign-table";
 import { TableBlockDetailModal } from "@/components/floor-map/table-block-detail-modal";
@@ -98,8 +99,13 @@ import {
   findAssignableSlotConflictsAtTable,
   formatTableSlotConflictMessage,
   getAssignableCandidateTables,
+  pickNonOverlappingBookingsForMergeGroup,
   pickNonOverlappingBookingsForTable,
+  deriveMergeGroupStatusFromDayBookings,
   deriveTableStatusFromDayBookings,
+  hasAssignableSlotConflictAtMergeGroup,
+  mergeGroupHasBookingOnDay,
+  pickPrimaryBookingOnMergeGroup,
   pickPrimaryBookingOnTable,
 } from "@/lib/booking-meta";
 import {
@@ -477,6 +483,8 @@ export default function FloorMapPage() {
   const [openedMergeGroupId, setOpenedMergeGroupId] = useState<string | null>(null);
   const [releaseMergeGroupId, setReleaseMergeGroupId] = useState<string | null>(null);
   const [detailTable, setDetailTable] = useState<DiningTable | null>(null);
+  const [detailMergeGroup, setDetailMergeGroup] = useState<TableMergeGroup | null>(null);
+  const [registerMergeGroup, setRegisterMergeGroup] = useState<TableMergeGroup | null>(null);
   const [detailTableBlockState, setDetailTableBlockState] = useState<TableBlockState | null>(
     null
   );
@@ -488,7 +496,9 @@ export default function FloorMapPage() {
   const [floorMapSelectedDate, setFloorMapSelectedDate] = useState(() => dayjs());
   const [createBookingModalOpened, setCreateBookingModalOpened] = useState(false);
 
-  const blockCanvasForOverlay = Boolean(registerTable || detailTable) || statusMenuOpen;
+  const blockCanvasForOverlay =
+    Boolean(registerTable || registerMergeGroup || detailTable || detailMergeGroup) ||
+    statusMenuOpen;
   const isEditMode = mode === "edit";
   const editBlockedByOther = Boolean(layoutLockHolderName);
 
@@ -582,20 +592,36 @@ export default function FloorMapPage() {
 
   const bookingsForFloorTableDisplay = isEmployee ? state.bookings : floorMapDayBookings;
 
-  const activeBookingForDetailTable = useMemo((): Booking | null => {
+  const activeBookingForDetail = useMemo((): Booking | null => {
+    if (detailMergeGroup) {
+      return pickPrimaryBookingOnMergeGroup(
+        detailMergeGroup.id,
+        bookingsForFloorTableDisplay
+      );
+    }
     if (!detailTable) {
       return null;
     }
     return pickPrimaryBookingOnTable(detailTable.id, bookingsForFloorTableDisplay);
-  }, [bookingsForFloorTableDisplay, detailTable]);
+  }, [bookingsForFloorTableDisplay, detailMergeGroup, detailTable]);
 
   const activeBookingCustomerName = useMemo(() => {
-    if (!activeBookingForDetailTable) {
+    if (!activeBookingForDetail) {
       return "";
     }
-    const customer = state.customers.find((c) => c.id === activeBookingForDetailTable.customerId);
+    const customer = state.customers.find((c) => c.id === activeBookingForDetail.customerId);
     return customer?.fullName ?? "";
-  }, [activeBookingForDetailTable, state.customers]);
+  }, [activeBookingForDetail, state.customers]);
+
+  const detailMergeGroupStatus = useMemo((): TableStatus => {
+    if (!detailMergeGroup) {
+      return "available";
+    }
+    return deriveMergeGroupStatusFromDayBookings(
+      detailMergeGroup.id,
+      floorMapDayBookings
+    );
+  }, [detailMergeGroup, floorMapDayBookings]);
 
   const registerTableBranch = useMemo(() => {
     if (!registerTable) {
@@ -784,6 +810,21 @@ export default function FloorMapPage() {
 
   const effectiveMergeGroups = isEditMode ? editMergeGroupsInArea : mergeGroupsInArea;
 
+  /** View mode: only show merge bars that have an active booking on the selected calendar day. */
+  const floorViewMergeGroups = useMemo(() => {
+    if (isEditMode) {
+      return effectiveMergeGroups;
+    }
+    return effectiveMergeGroups.filter((group) =>
+      mergeGroupHasBookingOnDay(group.id, floorMapDayBookings)
+    );
+  }, [effectiveMergeGroups, floorMapDayBookings, isEditMode]);
+
+  const mergeGroupIdsVisibleOnFloor = useMemo(
+    () => new Set(floorViewMergeGroups.map((group) => group.id)),
+    [floorViewMergeGroups]
+  );
+
   /** All ids of tables currently belonging to an active group in this area — used for bbox layout + edit constraints. */
   const tablesInActiveGroupInArea = useMemo(() => {
     const ids = new Set<string>();
@@ -839,22 +880,30 @@ export default function FloorMapPage() {
 
   const closeDetailModal = () => {
     setDetailTable(null);
+    setDetailMergeGroup(null);
     setDetailTableBlockState(null);
     setDetailTableBlockLoading(false);
     setDetailWaitlistActionId(null);
   };
 
   useEffect(() => {
-    if (!detailTable || !hasSupabase) {
+    const detailTarget = detailMergeGroup
+      ? { mergeGroupId: detailMergeGroup.id }
+      : detailTable
+        ? { tableId: detailTable.id }
+        : null;
+    if (!detailTarget || !hasSupabase) {
       setDetailTableBlockState(null);
       setDetailTableBlockLoading(false);
       return;
     }
 
-    const primaryBooking = pickPrimaryBookingOnTable(
-      detailTable.id,
-      bookingsForFloorTableDisplay
-    );
+    const primaryBooking = detailMergeGroup
+      ? pickPrimaryBookingOnMergeGroup(
+          detailMergeGroup.id,
+          bookingsForFloorTableDisplay
+        )
+      : pickPrimaryBookingOnTable(detailTable!.id, bookingsForFloorTableDisplay);
     const slotStart =
       primaryBooking?.startTime ?? primaryBooking?.bookingAt ?? dayjs().toISOString();
     const slotEnd = primaryBooking?.endTime;
@@ -862,7 +911,7 @@ export default function FloorMapPage() {
     let cancelled = false;
     setDetailTableBlockLoading(true);
     void getTableBlockStateInSupabase({
-      tableId: detailTable.id,
+      ...detailTarget,
       slotStartTime: slotStart,
       slotEndTime: slotEnd,
       waitlistScope: "all",
@@ -891,7 +940,7 @@ export default function FloorMapPage() {
     return () => {
       cancelled = true;
     };
-  }, [bookingsForFloorTableDisplay, detailTable, hasSupabase]);
+  }, [bookingsForFloorTableDisplay, detailMergeGroup, detailTable, hasSupabase]);
 
   const handleConfirmWaitlistOffer = async (entryId: string) => {
     if (!hasSupabase || isEmployee) {
@@ -904,10 +953,12 @@ export default function FloorMapPage() {
         color: result.ok ? "green" : "red",
         message: result.message,
       });
-      if (result.ok && detailTable) {
+      if (result.ok && (detailTable || detailMergeGroup)) {
         await reload({ scope: "floor" });
         const blockState = await getTableBlockStateInSupabase({
-          tableId: detailTable.id,
+          ...(detailMergeGroup
+            ? { mergeGroupId: detailMergeGroup.id }
+            : { tableId: detailTable!.id }),
           slotStartTime: detailTableBlockState?.slotStartTime ?? dayjs().toISOString(),
           slotEndTime: detailTableBlockState?.slotEndTime,
           waitlistScope: "all",
@@ -925,7 +976,7 @@ export default function FloorMapPage() {
   };
 
   const openDetailCancelBookingConfirm = () => {
-    const b = activeBookingForDetailTable;
+    const b = activeBookingForDetail;
     if (
       !b ||
       b.status === "cancelled" ||
@@ -966,10 +1017,10 @@ export default function FloorMapPage() {
   };
 
   const handleDetailCheckIn = async () => {
-    if (!activeBookingForDetailTable) {
+    if (!activeBookingForDetail) {
       return;
     }
-    if (activeBookingForDetailTable.status !== "confirmed") {
+    if (activeBookingForDetail.status !== "confirmed") {
       return;
     }
     if (!hasSupabase) {
@@ -978,7 +1029,7 @@ export default function FloorMapPage() {
     }
     setDetailBookingActionLoading(true);
     try {
-      await checkInBooking(activeBookingForDetailTable.id);
+      await checkInBooking(activeBookingForDetail.id);
       notifications.show({ color: "green", message: "Đã check-in." });
       closeDetailModal();
     } catch (error) {
@@ -992,12 +1043,12 @@ export default function FloorMapPage() {
   };
 
   const handleDetailComplete = async () => {
-    if (!activeBookingForDetailTable) {
+    if (!activeBookingForDetail) {
       return;
     }
     if (
-      activeBookingForDetailTable.status !== "checked_in" &&
-      activeBookingForDetailTable.status !== "seated"
+      activeBookingForDetail.status !== "checked_in" &&
+      activeBookingForDetail.status !== "seated"
     ) {
       return;
     }
@@ -1007,7 +1058,7 @@ export default function FloorMapPage() {
     }
     setDetailBookingActionLoading(true);
     try {
-      await updateBookingStatus(activeBookingForDetailTable.id, "completed");
+      await updateBookingStatus(activeBookingForDetail.id, "completed");
       notifications.show({ color: "green", message: "Đã hoàn thành booking." });
       closeDetailModal();
     } catch (error) {
@@ -1320,6 +1371,28 @@ export default function FloorMapPage() {
     }
     return map;
   }, [bookingsForFloorTableDisplay, tablesForFloorView]);
+
+  const primaryBookingByMergeGroupId = useMemo(() => {
+    const map = new Map<string, Booking | null>();
+    for (const group of floorViewMergeGroups) {
+      map.set(
+        group.id,
+        pickPrimaryBookingOnMergeGroup(group.id, bookingsForFloorTableDisplay)
+      );
+    }
+    return map;
+  }, [bookingsForFloorTableDisplay, floorViewMergeGroups]);
+
+  const mergeGroupStatusById = useMemo(() => {
+    const map = new Map<string, TableStatus>();
+    for (const group of floorViewMergeGroups) {
+      map.set(
+        group.id,
+        deriveMergeGroupStatusFromDayBookings(group.id, floorMapDayBookings)
+      );
+    }
+    return map;
+  }, [floorMapDayBookings, floorViewMergeGroups]);
 
   const effectiveGridColumns =
     isEditMode && editLayout ? editLayout.gridColumns : gridColumns;
@@ -1901,6 +1974,7 @@ export default function FloorMapPage() {
 
   const closeRegistrationPanel = useCallback(() => {
     setRegisterTable(null);
+    setRegisterMergeGroup(null);
     setRegisterCustomerName("");
     setRegisterCustomerPhone("");
     setRegisterGuestCount(4);
@@ -1917,10 +1991,26 @@ export default function FloorMapPage() {
     panStateRef.current = null;
     placementTapRef.current = null;
     setDetailTable(null);
+    setDetailMergeGroup(null);
     setDetailTableBlockState(null);
     setDetailTableBlockLoading(false);
     setDetailWaitlistActionId(null);
+    setRegisterMergeGroup(null);
     setRegisterTable(table);
+    setRegisterPendingSelected([]);
+    setRegisterModalTab("assign");
+  };
+
+  const openAssignPendingForMergeGroup = (group: TableMergeGroup) => {
+    panStateRef.current = null;
+    placementTapRef.current = null;
+    setDetailTable(null);
+    setDetailMergeGroup(null);
+    setDetailTableBlockState(null);
+    setDetailTableBlockLoading(false);
+    setDetailWaitlistActionId(null);
+    setRegisterTable(null);
+    setRegisterMergeGroup(group);
     setRegisterPendingSelected([]);
     setRegisterModalTab("assign");
   };
@@ -1952,10 +2042,50 @@ export default function FloorMapPage() {
     [closeRegistrationPanel, router, state.customers]
   );
 
+  const openRegistrationForMergeGroup = (
+    group: TableMergeGroup,
+    options?: { preferHoldAfterOccupied?: boolean }
+  ) => {
+    panStateRef.current = null;
+    placementTapRef.current = null;
+    setDetailTable(null);
+    setDetailMergeGroup(null);
+    setRegisterTable(null);
+    setRegisterMergeGroup(group);
+    setRegisterGuestCount(
+      Math.max(1, getMergeGroupEffectiveGuestCapacity(group.totalCapacity))
+    );
+    setRegisterNote("");
+    setRegisterGuestType("Khách thường");
+    setRegisterCustomerName("");
+    setRegisterCustomerPhone("");
+    setRegisterPendingSelected([]);
+    setRegisterModalTab("book");
+
+    const status = mergeGroupStatusById.get(group.id) ?? "available";
+    const preferHold =
+      options?.preferHoldAfterOccupied && (status === "occupied" || status === "hold");
+    if (preferHold) {
+      const primaryBooking = pickPrimaryBookingOnMergeGroup(group.id, state.bookings);
+      const afterEnd = primaryBooking?.endTime
+        ? dayjs(primaryBooking.endTime).add(1, "minute")
+        : dayjs().add(1, "hour");
+      setRegisterArrivalMode("hold");
+      setRegisterBookingDate(afterEnd.format("YYYY-MM-DD"));
+      setRegisterBookingTime(afterEnd.format("HH:mm"));
+    } else {
+      setRegisterArrivalMode("immediate");
+      setRegisterBookingDate(dayjs().format("YYYY-MM-DD"));
+      setRegisterBookingTime(dayjs().format("HH:mm"));
+    }
+  };
+
   const openRegistrationForTable = (table: DiningTable, options?: { preferHoldAfterOccupied?: boolean }) => {
     panStateRef.current = null;
     placementTapRef.current = null;
     setDetailTable(null);
+    setDetailMergeGroup(null);
+    setRegisterMergeGroup(null);
     setRegisterTable(table);
     setRegisterGuestCount(Math.max(1, table.seats || 1));
     setRegisterNote("");
@@ -1991,11 +2121,32 @@ export default function FloorMapPage() {
     openRegistrationForTable(table, { preferHoldAfterOccupied: true });
   };
 
+  const openNewBookingForMergeGroup = (group: TableMergeGroup) => {
+    if (registerMergeGroup?.id === group.id) {
+      closeRegistrationPanel();
+      return;
+    }
+    closeDetailModal();
+    openRegistrationForMergeGroup(group, { preferHoldAfterOccupied: true });
+  };
+
   const openDetailForTable = (table: DiningTable) => {
     panStateRef.current = null;
     placementTapRef.current = null;
     setRegisterTable(null);
+    setRegisterMergeGroup(null);
+    setDetailMergeGroup(null);
     setDetailTable(table);
+  };
+
+  const openDetailForMergeGroup = (group: TableMergeGroup) => {
+    panStateRef.current = null;
+    placementTapRef.current = null;
+    setRegisterTable(null);
+    setRegisterMergeGroup(null);
+    setDetailTable(null);
+    setOpenedMergeGroupId(null);
+    setDetailMergeGroup(group);
   };
 
   const handleViewOrRegisterForTable = (table: DiningTable) => {
@@ -2029,8 +2180,41 @@ export default function FloorMapPage() {
     openDetailForTable(table);
   };
 
+  const handleViewOrRegisterForMergeGroup = (group: TableMergeGroup) => {
+    const status = mergeGroupStatusById.get(group.id) ?? "available";
+    if (isEmployee) {
+      if (status !== "occupied") {
+        notifications.show({
+          color: "yellow",
+          message: "Nhân viên chỉ xử lý cụm gộp đang có khách ngồi.",
+        });
+        return;
+      }
+      openDetailForMergeGroup(group);
+      return;
+    }
+    if (status === "occupied" || status === "hold") {
+      if (detailMergeGroup?.id === group.id) {
+        closeDetailModal();
+        return;
+      }
+      openDetailForMergeGroup(group);
+      return;
+    }
+    if (status === "available") {
+      if (registerMergeGroup?.id === group.id) {
+        closeRegistrationPanel();
+        return;
+      }
+      openRegistrationForMergeGroup(group);
+      return;
+    }
+    openDetailForMergeGroup(group);
+  };
+
   const handleRegisterCustomer = async () => {
-    if (!registerTable || !registerCustomerName.trim() || !registerCustomerPhone.trim()) {
+    const registerTarget = registerMergeGroup ?? registerTable;
+    if (!registerTarget || !registerCustomerName.trim() || !registerCustomerPhone.trim()) {
       notifications.show({
         color: "red",
         message: "Vui lòng nhập tên khách và số điện thoại.",
@@ -2038,10 +2222,22 @@ export default function FloorMapPage() {
       return;
     }
     const nextGuestCount = Math.max(1, Number(registerGuestCount || 1));
-    if (registerTable.seats > 0 && !tableFitsGuestCount(registerTable.seats, nextGuestCount)) {
+    if (registerMergeGroup) {
+      const maxGuests = getMergeGroupEffectiveGuestCapacity(registerMergeGroup.totalCapacity);
+      if (nextGuestCount > maxGuests) {
+        notifications.show({
+          color: "red",
+          message: `Số khách không được vượt quá sức chứa cụm (${maxGuests} khách).`,
+        });
+        return;
+      }
+    } else if (
+      registerTable!.seats > 0 &&
+      !tableFitsGuestCount(registerTable!.seats, nextGuestCount)
+    ) {
       notifications.show({
         color: "red",
-        message: `Số khách không được vượt quá sức chứa bàn (${formatTableGuestCapacityHint(registerTable.seats)}).`,
+        message: `Số khách không được vượt quá sức chứa bàn (${formatTableGuestCapacityHint(registerTable!.seats)}).`,
       });
       return;
     }
@@ -2052,14 +2248,47 @@ export default function FloorMapPage() {
       });
       return;
     }
-    if (registerTable.status === "occupied" && registerArrivalMode === "immediate") {
+    const registerStatus = registerMergeGroup
+      ? (mergeGroupStatusById.get(registerMergeGroup.id) ?? "available")
+      : registerTable!.status;
+    if (registerStatus === "occupied" && registerArrivalMode === "immediate") {
       notifications.show({
         color: "red",
-        message: "Bàn đang có khách — chọn Giữ chỗ và đặt khung giờ sau khi bàn trống.",
+        message: registerMergeGroup
+          ? "Cụm đang có khách — chọn Giữ chỗ và đặt khung giờ sau khi cụm trống."
+          : "Bàn đang có khách — chọn Giữ chỗ và đặt khung giờ sau khi bàn trống.",
       });
       return;
     }
-    if (registerTableSlotConflicts.length > 0) {
+    if (registerMergeGroup) {
+      const candidateBooking = {
+        id: "__register_candidate__",
+        customerId: "",
+        branchId: registerMergeGroup.branchId,
+        areaId: registerMergeGroup.areaId,
+        tableId: null,
+        mergeGroupId: registerMergeGroup.id,
+        guestCount: nextGuestCount,
+        bookingAt: dayjs().toISOString(),
+        startTime: dayjs().toISOString(),
+        endTime: dayjs().add(90, "minute").toISOString(),
+        status: "confirmed" as const,
+        createdByUserId: "",
+      };
+      if (
+        hasAssignableSlotConflictAtMergeGroup(
+          candidateBooking,
+          registerMergeGroup,
+          state.bookings
+        )
+      ) {
+        notifications.show({
+          color: "red",
+          message: "Khung giờ trùng với booking khác trên cụm gộp hoặc bàn thành viên.",
+        });
+        return;
+      }
+    } else if (registerTableSlotConflicts.length > 0) {
       notifications.show({
         color: "red",
         message: registerTableConflictMessage ?? "Khung giờ trùng với booking khác trên bàn này.",
@@ -2099,9 +2328,10 @@ export default function FloorMapPage() {
       const result = await createBooking({
         customerName: registerCustomerName.trim(),
         customerPhone: registerCustomerPhone.trim(),
-        branchId: registerTable.branchId,
-        areaId: registerTable.areaId,
-        tableId: registerTable.id,
+        branchId: registerTarget.branchId,
+        areaId: registerTarget.areaId,
+        tableId: registerMergeGroup ? null : registerTable!.id,
+        mergeGroupId: registerMergeGroup?.id ?? null,
         guestCount: nextGuestCount,
         bookingAt: bookingAtIso,
         note: registerNote.trim() || undefined,
@@ -2138,6 +2368,13 @@ export default function FloorMapPage() {
   };
 
   const registerPendingAssignPlan = useMemo(() => {
+    if (registerMergeGroup) {
+      return pickNonOverlappingBookingsForMergeGroup(
+        registerPendingSelected,
+        registerMergeGroup,
+        state.bookings
+      );
+    }
     if (!registerTable) {
       return null;
     }
@@ -2152,33 +2389,23 @@ export default function FloorMapPage() {
             : undefined,
       }
     );
-  }, [registerPendingSelected, registerTable, state.bookings]);
+  }, [registerMergeGroup, registerPendingSelected, registerTable, state.bookings]);
 
   const handleAssignPendingBookings = async () => {
-    if (!registerTable || registerPendingSelected.length === 0) {
+    if ((!registerTable && !registerMergeGroup) || registerPendingSelected.length === 0) {
       notifications.show({
         color: "red",
         message: "Vui lòng chọn ít nhất một booking chờ để gán.",
       });
       return;
     }
-    const plan =
-      registerPendingAssignPlan ??
-      pickNonOverlappingBookingsForTable(
-        registerPendingSelected,
-        registerTable.id,
-        state.bookings,
-        {
-          maxSeats:
-            registerTable.seats > 0
-              ? getTableEffectiveGuestCapacity(registerTable.seats)
-              : undefined,
-        }
-      );
-    if (plan.assignable.length === 0) {
+    const plan = registerPendingAssignPlan;
+    if (!plan || plan.assignable.length === 0) {
       notifications.show({
         color: "red",
-        message: "Không có booking nào trong lựa chọn có thể gán (trùng giờ hoặc vượt sức chứa bàn).",
+        message: registerMergeGroup
+          ? "Không có booking nào trong lựa chọn có thể gán (trùng giờ hoặc vượt sức chứa cụm)."
+          : "Không có booking nào trong lựa chọn có thể gán (trùng giờ hoặc vượt sức chứa bàn).",
       });
       return;
     }
@@ -2189,8 +2416,10 @@ export default function FloorMapPage() {
       for (const booking of plan.assignable) {
         const result = await assignBookingToTable({
           bookingId: booking.id,
-          areaId: registerTable.areaId,
-          tableId: registerTable.id,
+          areaId: registerMergeGroup?.areaId ?? registerTable!.areaId,
+          tableId: registerMergeGroup ? null : registerTable!.id,
+          mergeGroupId: registerMergeGroup?.id ?? null,
+          guestCount: booking.guestCount,
         });
         if (result.ok) {
           successCount += 1;
@@ -2294,6 +2523,9 @@ export default function FloorMapPage() {
         setReleaseMergeGroupId(null);
         if (openedMergeGroupId === groupId) {
           setOpenedMergeGroupId(null);
+        }
+        if (detailMergeGroup?.id === groupId) {
+          closeDetailModal();
         }
       }
     } finally {
@@ -3140,78 +3372,135 @@ export default function FloorMapPage() {
                   );
                 })}
               </svg>
-              {mergeBBoxes.map((bbox) => (
-                <div
-                  key={`merge-group-${bbox.groupId}`}
-                  className={`${classes.mergeGroupContainer} ${
-                    openedMergeGroupId === bbox.groupId ? classes.mergeGroupContainerActive : ""
-                  } ${
-                    mergeGroupDragState?.groupId === bbox.groupId
-                      ? classes.mergeGroupContainerDragging
-                      : ""
-                  }`}
-                  style={{
-                    left: bbox.x,
-                    top: bbox.y,
-                    width: bbox.width,
-                    height: bbox.height,
-                  }}
-                  onPointerDown={(event) => event.stopPropagation()}
-                >
+              {mergeBBoxes.map((bbox) => {
+                const mergeGroup = effectiveMergeGroups.find(
+                  (candidate) => candidate.id === bbox.groupId
+                );
+                if (!mergeGroup) {
+                  return null;
+                }
+                const mergeActive =
+                  (isEditMode && openedMergeGroupId === bbox.groupId) ||
+                  (!isEditMode && detailMergeGroup?.id === bbox.groupId);
+                return (
                   <div
-                    className={`${classes.mergeGroupContainerHeader} ${
-                      isEditMode ? classes.mergeGroupContainerHeaderDraggable : ""
+                    key={`merge-group-${bbox.groupId}`}
+                    className={`${classes.mergeGroupContainer} ${
+                      mergeActive ? classes.mergeGroupContainerActive : ""
+                    } ${
+                      mergeGroupDragState?.groupId === bbox.groupId
+                        ? classes.mergeGroupContainerDragging
+                        : ""
                     }`}
-                    style={{ height: bbox.headerHeight }}
-                    data-merge-group-header="true"
-                    onPointerDown={(event) => handleMergeGroupPointerDown(event, bbox.groupId)}
+                    style={{
+                      left: bbox.x,
+                      top: bbox.y,
+                      width: bbox.width,
+                      height: bbox.height,
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
                   >
-                    <button
-                      type="button"
-                      className={classes.mergeGroupContainerTitle}
-                      data-merge-no-drag="true"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setOpenedMergeGroupId(bbox.groupId);
+                    <div
+                      className={`${classes.mergeGroupContainerHeader} ${
+                        isEditMode ? classes.mergeGroupContainerHeaderDraggable : ""
+                      }`}
+                      style={{ height: bbox.headerHeight }}
+                      data-merge-group-header="true"
+                      onPointerDown={(event) => {
+                        if (isEditMode) {
+                          handleMergeGroupPointerDown(event, bbox.groupId);
+                        }
                       }}
                     >
-                      {bbox.mergedName}
-                    </button>
-                    <Group gap={6} wrap="nowrap">
-                      <span
-                        className={classes.mergeGroupContainerCapacity}
+                      <button
+                        type="button"
+                        className={classes.mergeGroupContainerTitle}
                         data-merge-no-drag="true"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (isEditMode) {
+                            setOpenedMergeGroupId(bbox.groupId);
+                          } else {
+                            handleViewOrRegisterForMergeGroup(mergeGroup);
+                          }
+                        }}
                       >
-                        Tổng: {bbox.totalCapacity} chỗ
-                      </span>
-                      {isEditMode ? (
-                        <Tooltip label="Bỏ gộp" withArrow>
-                          <ActionIcon
-                            type="button"
-                            size="sm"
-                            variant="subtle"
-                            color="red"
-                            className={classes.mergeGroupReleaseBtn}
-                            data-merge-no-drag="true"
-                            aria-label={`Bỏ gộp ${bbox.mergedName}`}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setReleaseMergeGroupId(bbox.groupId);
-                            }}
-                          >
-                            <X size={14} />
-                          </ActionIcon>
-                        </Tooltip>
-                      ) : null}
-                    </Group>
+                        {bbox.mergedName}
+                      </button>
+                      <Group gap={6} wrap="nowrap">
+                        <span
+                          className={classes.mergeGroupContainerCapacity}
+                          data-merge-no-drag="true"
+                        >
+                          Tổng: {bbox.totalCapacity} chỗ
+                        </span>
+                        {isEditMode ? (
+                          <Tooltip label="Bỏ gộp" withArrow>
+                            <ActionIcon
+                              type="button"
+                              size="sm"
+                              variant="subtle"
+                              color="red"
+                              className={classes.mergeGroupReleaseBtn}
+                              data-merge-no-drag="true"
+                              aria-label={`Bỏ gộp ${bbox.mergedName}`}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setReleaseMergeGroupId(bbox.groupId);
+                              }}
+                            >
+                              <X size={14} />
+                            </ActionIcon>
+                          </Tooltip>
+                        ) : null}
+                      </Group>
+                    </div>
+                    <div
+                      className={classes.mergeGroupContainerBody}
+                      style={{ top: bbox.headerHeight }}
+                    />
                   </div>
-                  <div
-                    className={classes.mergeGroupContainerBody}
-                    style={{ top: bbox.headerHeight }}
-                  />
-                </div>
-              ))}
+                );
+              })}
+              {!isEditMode
+                ? mergeBBoxes.map((bbox) => {
+                    if (
+                      !mergeGroupHasBookingOnDay(bbox.groupId, floorMapDayBookings)
+                    ) {
+                      return null;
+                    }
+                    const mergeGroup = effectiveMergeGroups.find(
+                      (candidate) => candidate.id === bbox.groupId
+                    );
+                    if (!mergeGroup) {
+                      return null;
+                    }
+                    const displayBooking =
+                      primaryBookingByMergeGroupId.get(mergeGroup.id) ?? null;
+                    const peekCustomer = displayBooking
+                      ? customerById.get(displayBooking.customerId)
+                      : undefined;
+                    const blockCenterX = bbox.x + bbox.width / 2;
+                    const blockCenterY = bbox.y + bbox.height / 2;
+                    return (
+                      <FloorMergeGroupBlockView
+                        key={`merge-block-${bbox.groupId}`}
+                        group={mergeGroup}
+                        status={mergeGroupStatusById.get(mergeGroup.id) ?? "available"}
+                        style={{
+                          left: blockCenterX,
+                          top: blockCenterY,
+                        }}
+                        displayBooking={displayBooking}
+                        customerName={peekCustomer?.fullName ?? ""}
+                        isBusy={false}
+                        isDragging={false}
+                        onOpen={() => handleViewOrRegisterForMergeGroup(mergeGroup)}
+                      />
+                    );
+                  })
+                : null}
               {mergeBBoxes.map((bbox) =>
                 bbox.plugSlot && isEditMode ? (
                   <div
@@ -3241,7 +3530,15 @@ export default function FloorMapPage() {
                     top: y + stackIndex * FLOOR_TABLE_STACK_OFFSET_PX,
                     transform: "translate(-50%, -50%)",
                   };
-                  const isMergeMember = tableToMergeGroupId.has(table.id);
+                  const mergeGroupId = tableToMergeGroupId.get(table.id) ?? null;
+                  const isMergeMember = Boolean(mergeGroupId);
+                  if (
+                    !isEditMode &&
+                    mergeGroupId &&
+                    mergeGroupIdsVisibleOnFloor.has(mergeGroupId)
+                  ) {
+                    return null;
+                  }
                   if (!isEditMode) {
                     const displayBooking = primaryBookingByTableId.get(table.id) ?? null;
                     const peekCustomer = displayBooking
@@ -3804,7 +4101,7 @@ export default function FloorMapPage() {
       </PortalSectionCard>
 
       <Modal
-        opened={Boolean(registerTable)}
+        opened={Boolean(registerTable || registerMergeGroup)}
         onClose={() => {
           if (!registerSaving) {
             closeRegistrationPanel();
@@ -3812,23 +4109,41 @@ export default function FloorMapPage() {
         }}
         closeOnClickOutside={!registerSaving}
         closeOnEscape={!registerSaving}
-        title={registerTable ? `Đăng ký - ${registerTable.name}` : "Đăng ký"}
+        title={
+          registerMergeGroup
+            ? `Đăng ký - ${registerMergeGroup.mergedName}`
+            : registerTable
+              ? `Đăng ký - ${registerTable.name}`
+              : "Đăng ký"
+        }
         size={registerModalTab === "assign" ? "xl" : "md"}
         centered
         overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
       >
-        {registerTable ? (
+        {registerTable || registerMergeGroup ? (
           <Stack gap="sm">
             <Group justify="space-between" align="flex-start" wrap="wrap" gap="xs">
               <Text size="sm" c="dimmed">
-                {formatTableGuestCapacityHint(registerTable.seats)} ·{" "}
-                {tableStatusLabel[registerTable.status]}
+                {registerMergeGroup
+                  ? `Tổng ${registerMergeGroup.totalCapacity} chỗ · ${tableStatusLabel[mergeGroupStatusById.get(registerMergeGroup.id) ?? "available"]}`
+                  : `${formatTableGuestCapacityHint(registerTable!.seats)} · ${tableStatusLabel[registerTable!.status]}`}
               </Text>
-              {registerTable.status === "occupied" || registerTable.status === "hold" ? (
+              {registerMergeGroup ? (
+                (mergeGroupStatusById.get(registerMergeGroup.id) === "occupied" ||
+                  mergeGroupStatusById.get(registerMergeGroup.id) === "hold") ? (
+                  <Button
+                    variant="subtle"
+                    size="compact-xs"
+                    onClick={() => openDetailForMergeGroup(registerMergeGroup)}
+                  >
+                    Lịch sử booking & hàng chờ
+                  </Button>
+                ) : null
+              ) : registerTable!.status === "occupied" || registerTable!.status === "hold" ? (
                 <Button
                   variant="subtle"
                   size="compact-xs"
-                  onClick={() => openDetailForTable(registerTable)}
+                  onClick={() => openDetailForTable(registerTable!)}
                 >
                   Lịch sử booking & hàng chờ
                 </Button>
@@ -3847,7 +4162,7 @@ export default function FloorMapPage() {
 
               <Tabs.Panel value="book" pt="sm">
                 <Stack gap="sm">
-                  {registerTableBranch ? (
+                  {registerMergeGroup ? null : registerTableBranch ? (
                     <Group justify="flex-start">
                       <VoiceBookingAssistant
                         branch={registerTableBranch}
@@ -3934,16 +4249,29 @@ export default function FloorMapPage() {
                       <Radio
                         value="immediate"
                         label="Vào bàn ngay"
-                        disabled={registerTable.status === "occupied"}
+                        disabled={
+                          registerMergeGroup
+                            ? (mergeGroupStatusById.get(registerMergeGroup.id) ?? "available") ===
+                              "occupied"
+                            : registerTable!.status === "occupied"
+                        }
                       />
                     </Stack>
                   </Radio.Group>
-                  {registerTable.status === "occupied" ? (
+                  {registerMergeGroup ? (
+                    (mergeGroupStatusById.get(registerMergeGroup.id) ?? "available") ===
+                    "occupied" ? (
+                      <Text size="xs" c="dimmed">
+                        Cụm đang có khách — chỉ đặt thêm booking ở khung giờ không trùng lịch hiện
+                        tại.
+                      </Text>
+                    ) : null
+                  ) : registerTable!.status === "occupied" ? (
                     <Text size="xs" c="dimmed">
                       Bàn đang có khách — chỉ đặt thêm booking ở khung giờ không trùng lịch hiện tại.
                     </Text>
                   ) : null}
-                  {registerTableConflictMessage ? (
+                  {!registerMergeGroup && registerTableConflictMessage ? (
                     <Alert color="red" variant="light" title="Trùng khung giờ trên bàn">
                       {registerTableConflictMessage}
                     </Alert>
@@ -3993,9 +4321,11 @@ export default function FloorMapPage() {
                     value={registerGuestCount}
                     onChange={(value) => setRegisterGuestCount(value ?? 1)}
                     max={
-                      registerTable.seats > 0
-                        ? getTableEffectiveGuestCapacity(registerTable.seats)
-                        : undefined
+                      registerMergeGroup
+                        ? getMergeGroupEffectiveGuestCapacity(registerMergeGroup.totalCapacity)
+                        : registerTable!.seats > 0
+                          ? getTableEffectiveGuestCapacity(registerTable!.seats)
+                          : undefined
                     }
                     disabled={registerSaving}
                   />
@@ -4028,7 +4358,7 @@ export default function FloorMapPage() {
                         !hasSupabase ||
                         isLoading ||
                         registerImmediateBlocked ||
-                        registerTableSlotConflicts.length > 0
+                        (!registerMergeGroup && registerTableSlotConflicts.length > 0)
                       }
                       onClick={() => void handleRegisterCustomer()}
                     >
@@ -4040,35 +4370,65 @@ export default function FloorMapPage() {
 
               <Tabs.Panel value="assign" pt="sm">
                 <Stack gap="sm">
-                  <RegisterPendingAssignTable
-                    records={pendingBookings}
-                    tableId={registerTable.id}
-                    tableSeats={getTableEffectiveGuestCapacity(registerTable.seats)}
-                    selectedBookings={registerPendingSelected}
-                    onSelectedBookingsChange={setRegisterPendingSelected}
-                    onNavigateToBookingList={confirmNavigateToDayBookingList}
-                    disabled={registerSaving}
-                  />
-                  <Group justify="flex-end" gap={8}>
-                    <Button variant="default" disabled={registerSaving} onClick={closeRegistrationPanel}>
-                      Hủy
-                    </Button>
-                    <Button
-                      variant="light"
-                      loading={registerSaving}
-                      disabled={
-                        registerSaving ||
-                        !hasSupabase ||
-                        isLoading ||
-                        (registerPendingAssignPlan?.assignable.length ?? 0) === 0
-                      }
-                      onClick={() => void handleAssignPendingBookings()}
-                    >
-                      {(registerPendingAssignPlan?.assignable.length ?? 0) > 1
-                        ? `Gán ${registerPendingAssignPlan?.assignable.length} booking`
-                        : "Gán booking chờ"}
-                    </Button>
-                  </Group>
+                  {registerMergeGroup ? (
+                    <MergeGroupAssignablePending
+                      group={registerMergeGroup}
+                      pendingBookings={pendingBookings}
+                      customers={state.customers}
+                      onAssign={async (booking, group) => {
+                        const result = await assignBookingToTable({
+                          bookingId: booking.id,
+                          areaId: group.areaId,
+                          tableId: null,
+                          mergeGroupId: group.id,
+                          guestCount: booking.guestCount,
+                        });
+                        notifications.show({
+                          color: result.ok ? "green" : "red",
+                          message: result.message,
+                        });
+                        if (result.ok) {
+                          closeRegistrationPanel();
+                        }
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <RegisterPendingAssignTable
+                        records={pendingBookings}
+                        tableId={registerTable!.id}
+                        tableSeats={getTableEffectiveGuestCapacity(registerTable!.seats)}
+                        selectedBookings={registerPendingSelected}
+                        onSelectedBookingsChange={setRegisterPendingSelected}
+                        onNavigateToBookingList={confirmNavigateToDayBookingList}
+                        disabled={registerSaving}
+                      />
+                      <Group justify="flex-end" gap={8}>
+                        <Button
+                          variant="default"
+                          disabled={registerSaving}
+                          onClick={closeRegistrationPanel}
+                        >
+                          Hủy
+                        </Button>
+                        <Button
+                          variant="light"
+                          loading={registerSaving}
+                          disabled={
+                            registerSaving ||
+                            !hasSupabase ||
+                            isLoading ||
+                            (registerPendingAssignPlan?.assignable.length ?? 0) === 0
+                          }
+                          onClick={() => void handleAssignPendingBookings()}
+                        >
+                          {(registerPendingAssignPlan?.assignable.length ?? 0) > 1
+                            ? `Gán ${registerPendingAssignPlan?.assignable.length} booking`
+                            : "Gán booking chờ"}
+                        </Button>
+                      </Group>
+                    </>
+                  )}
                 </Stack>
               </Tabs.Panel>
             </Tabs>
@@ -4077,18 +4437,32 @@ export default function FloorMapPage() {
       </Modal>
 
       <TableBlockDetailModal
-        opened={Boolean(detailTable)}
+        opened={Boolean(detailTable || detailMergeGroup)}
         onClose={closeDetailModal}
         table={detailTable}
+        mergeGroup={detailMergeGroup}
+        mergeStatus={detailMergeGroupStatus}
         blockState={detailTableBlockState}
         blockLoading={detailTableBlockLoading}
-        activeBooking={activeBookingForDetailTable}
+        activeBooking={activeBookingForDetail}
         activeBookingCustomerName={activeBookingCustomerName}
         isEmployee={isEmployee}
         bookingActionLoading={detailBookingActionLoading}
         waitlistConfirmLoadingId={detailWaitlistActionId}
-        onNewBooking={() => detailTable && openNewBookingForTable(detailTable)}
-        onAssignPending={() => detailTable && openAssignPendingForTable(detailTable)}
+        onNewBooking={() => {
+          if (detailMergeGroup) {
+            openNewBookingForMergeGroup(detailMergeGroup);
+          } else if (detailTable) {
+            openNewBookingForTable(detailTable);
+          }
+        }}
+        onAssignPending={() => {
+          if (detailMergeGroup) {
+            openAssignPendingForMergeGroup(detailMergeGroup);
+          } else if (detailTable) {
+            openAssignPendingForTable(detailTable);
+          }
+        }}
         onCheckIn={() => void handleDetailCheckIn()}
         onComplete={() => void handleDetailComplete()}
         onCancelBooking={openDetailCancelBookingConfirm}

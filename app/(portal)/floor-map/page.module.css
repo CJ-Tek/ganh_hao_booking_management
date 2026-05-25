@@ -656,6 +656,25 @@
   z-index: 5;
 }
 
+.mergeGroupBlockAnchor {
+  position: absolute;
+  z-index: 6;
+  transform: translate(-50%, -50%);
+}
+
+.mergeGroupBlock {
+  width: 100%;
+  min-width: 148px;
+  max-width: 200px;
+  cursor: pointer;
+  border: 2px solid rgba(12, 97, 164, 0.75);
+  text-align: left;
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupBlock {
+  border-color: rgba(116, 192, 252, 0.65);
+}
+
 /* ---- Edit-mode multi-select highlight for merge picking ---- */
 .tableBlockMergeSelected {
   outline: 3px solid rgba(12, 97, 164, 0.85);

@@ -18,7 +18,13 @@ import { TableBlockConfirmedScheduleTable } from "@/components/floor-map/table-b
 import { TableBlockWaitlistTable } from "@/components/floor-map/table-block-waitlist-table";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
 import { inferGuestTypeLabel, stripUnknownGuestTag } from "@/lib/booking-meta";
-import { type Booking, type DiningTable, type TableBlockState } from "@/lib/types";
+import {
+  type Booking,
+  type DiningTable,
+  type TableBlockState,
+  type TableMergeGroup,
+  type TableStatus,
+} from "@/lib/types";
 
 type HistorySubTab = "schedule" | "waitlist";
 
@@ -26,6 +32,8 @@ export type TableBlockDetailModalProps = {
   opened: boolean;
   onClose: () => void;
   table: DiningTable | null;
+  mergeGroup?: TableMergeGroup | null;
+  mergeStatus?: TableStatus;
   blockState: TableBlockState | null;
   blockLoading: boolean;
   activeBooking: Booking | null;
@@ -46,6 +54,8 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     opened,
     onClose,
     table,
+    mergeGroup = null,
+    mergeStatus = "available",
     blockState,
     blockLoading,
     activeBooking,
@@ -63,29 +73,40 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
 
   const [historySubTab, setHistorySubTab] = useState<HistorySubTab>("schedule");
   const waitlistCount = blockState?.waitlistQueue.length ?? 0;
+  const isMerge = Boolean(mergeGroup);
+  const displayStatus = isMerge ? mergeStatus : (table?.status ?? "available");
+  const isOccupied = displayStatus === "occupied";
 
   useEffect(() => {
     if (opened) {
       setHistorySubTab("schedule");
     }
-  }, [opened, table?.id]);
+  }, [opened, table?.id, mergeGroup?.id]);
+
+  const modalTitle = mergeGroup
+    ? `${mergeGroup.mergedName} · Lịch sử booking & hàng chờ`
+    : table
+      ? `Bàn ${table.name} · Lịch sử booking & hàng chờ`
+      : "Thông tin bàn";
+
+  const targetReady = Boolean(table || mergeGroup);
 
   return (
     <Modal
       opened={opened}
       onClose={onClose}
-      title={
-        table ? `Bàn ${table.name} · Lịch sử booking & hàng chờ` : "Thông tin bàn"
-      }
+      title={modalTitle}
       size="xl"
       centered
       overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
     >
-      {table ? (
+      {targetReady ? (
         <Stack gap="md">
           <Group justify="space-between" align="flex-start" wrap="wrap" gap="xs">
             <Text size="sm" c="dimmed">
-              {table.seats} ghế · {tableStatusLabel[table.status]}
+              {mergeGroup
+                ? `Tổng ${mergeGroup.totalCapacity} chỗ · ${mergeGroup.tableIds.length} bàn · ${tableStatusLabel[displayStatus]}`
+                : `${table!.seats} ghế · ${tableStatusLabel[displayStatus]}`}
             </Text>
             {blockLoading ? (
               <Group gap={6}>
@@ -94,29 +115,24 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                   Đang tải lịch...
                 </Text>
               </Group>
+            ) : blockState ? (
+              <Text size="xs" c="dimmed">
+                Khung giờ: {dayjs(blockState.slotStartTime).format("HH:mm DD/MM")} –{" "}
+                {dayjs(blockState.slotEndTime).format("HH:mm DD/MM")}
+              </Text>
             ) : null}
           </Group>
 
           {!isEmployee ? (
             <Group gap="xs">
-              {table.status === "occupied" || table.status === "hold" ? (
-                <Button
-                  variant="filled"
-                  color="brand"
-                  size="compact-sm"
-                  onClick={onNewBooking}
-                >
+              {displayStatus === "occupied" || displayStatus === "hold" ? (
+                <Button variant="filled" color="brand" size="compact-sm" onClick={onNewBooking}>
                   Đặt bàn mới
                 </Button>
               ) : null}
-              {table.status === "hold" ? (
-                <Button
-                  variant="filled"
-                  color="blue"
-                  size="compact-sm"
-                  onClick={onAssignPending}
-                >
-                  Gán booking chờ vào bàn này
+              {displayStatus === "hold" ? (
+                <Button variant="filled" color="blue" size="compact-sm" onClick={onAssignPending}>
+                  {isMerge ? "Gán booking chờ vào cụm này" : "Gán booking chờ vào bàn này"}
                 </Button>
               ) : null}
             </Group>
@@ -159,7 +175,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                 {isEmployee ? (
                   (activeBooking.status === "checked_in" ||
                     activeBooking.status === "seated") &&
-                  table.status === "occupied" ? (
+                  isOccupied ? (
                     <Button
                       size="xs"
                       variant="filled"
@@ -172,7 +188,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                   ) : null
                 ) : (
                   <>
-                    {table.status !== "occupied"
+                    {!isOccupied
                       ? (() => {
                           const checkInDisabled = activeBooking.status !== "confirmed";
                           const checkInBtn = (
@@ -237,7 +253,9 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
             </Stack>
           ) : (
             <Text size="sm" c="dimmed">
-              Không có booking đang hoạt động trên bàn này.
+              {isMerge
+                ? "Không có booking đang hoạt động trên cụm gộp này."
+                : "Không có booking đang hoạt động trên bàn này."}
             </Text>
           )}
 
@@ -255,13 +273,17 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
             >
               <Tabs.List grow>
                 <Tabs.Tab value="schedule">Lịch đặt bàn sắp tới</Tabs.Tab>
-                <Tabs.Tab value="waitlist">Hàng chờ ({waitlistCount})</Tabs.Tab>
+                {!isMerge ? (
+                  <Tabs.Tab value="waitlist">Hàng chờ ({waitlistCount})</Tabs.Tab>
+                ) : null}
               </Tabs.List>
 
               <Tabs.Panel value="schedule" pt="sm">
                 <Stack gap="xs">
                   <Text size="xs" c="dimmed">
-                    Các booking đã gán bàn từ hôm nay trở đi (đã xác nhận / đang phục vụ).
+                    {isMerge
+                      ? "Các booking đã gán cụm gộp từ hôm nay trở đi (đã xác nhận / đang phục vụ)."
+                      : "Các booking đã gán bàn từ hôm nay trở đi (đã xác nhận / đang phục vụ)."}
                   </Text>
                   <TableBlockConfirmedScheduleTable
                     records={blockState?.confirmedSchedule ?? []}
@@ -269,19 +291,21 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                 </Stack>
               </Tabs.Panel>
 
-              <Tabs.Panel value="waitlist" pt="sm">
-                <Stack gap="xs">
-                  <Text size="xs" c="dimmed">
-                    Khách xếp hàng khi khung giờ đã kín (khác với booking đã xác nhận ở trên).
-                  </Text>
-                  <TableBlockWaitlistTable
-                    records={blockState?.waitlistQueue ?? []}
-                    isEmployee={isEmployee}
-                    confirmLoadingId={waitlistConfirmLoadingId}
-                    onConfirmOffer={onConfirmWaitlistOffer}
-                  />
-                </Stack>
-              </Tabs.Panel>
+              {!isMerge ? (
+                <Tabs.Panel value="waitlist" pt="sm">
+                  <Stack gap="xs">
+                    <Text size="xs" c="dimmed">
+                      Khách xếp hàng khi khung giờ đã kín (khác với booking đã xác nhận ở trên).
+                    </Text>
+                    <TableBlockWaitlistTable
+                      records={blockState?.waitlistQueue ?? []}
+                      isEmployee={isEmployee}
+                      confirmLoadingId={waitlistConfirmLoadingId}
+                      onConfirmOffer={onConfirmWaitlistOffer}
+                    />
+                  </Stack>
+                </Tabs.Panel>
+              ) : null}
             </Tabs>
           </Stack>
         </Stack>
