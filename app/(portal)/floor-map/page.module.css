@@ -28,6 +28,8 @@
   border-radius: 12px;
   overflow: hidden;
   background: #f8fafc;
+  container-type: inline-size;
+  container-name: floor-map-canvas;
 }
 
 .canvasFramePendingPlacement {
@@ -204,10 +206,29 @@
 
 .toolbarPopoverAnchor {
   position: relative;
+  flex-shrink: 0;
+}
+
+.toolbarModeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
 }
 
 .toolbarModeControl {
   min-width: 180px;
+  flex: 1;
+}
+
+.toolbarAreaSelectRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
 }
 
 .toolbarAreaRow {
@@ -216,6 +237,7 @@
   gap: 8px;
   flex: 1;
   min-width: 0;
+  flex-wrap: wrap;
 }
 
 .toolbarAreaSecondary {
@@ -223,6 +245,8 @@
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .toolbarAreaPrimaryBtns {
@@ -355,21 +379,28 @@
   pointer-events: auto;
 }
 
-@media (max-width: 62em) {
-  .canvasFrame {
-    height: calc(100dvh - 190px - var(--manager-dock-reserve, 0px));
-    min-height: 560px;
-  }
-
-  .canvasViewport {
-    min-height: 0;
-  }
-
+/* Toolbar stacks by canvas width (sidebar-open “tablet” desktop is often <62em wide). */
+@container floor-map-canvas (max-width: 62em) {
   .canvasTopToolbar {
     width: 100%;
     max-width: 100%;
     padding: 10px;
     gap: 10px;
+    align-items: stretch;
+  }
+
+  .toolbarModeRow {
+    flex: 1 1 100%;
+    width: 100%;
+    align-items: center;
+    flex-wrap: nowrap;
+  }
+
+  .toolbarModeControl {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+    width: auto;
   }
 
   .toolbarAreaRow {
@@ -379,25 +410,47 @@
     gap: 10px;
   }
 
+  .toolbarAreaSelectRow {
+    width: 100%;
+    align-items: center;
+  }
+
   .toolbarAreaSelect {
     min-width: 0;
-    width: 100%;
-    flex: none;
+    flex: 1;
+    width: auto;
   }
 
   .toolbarAreaSecondary {
     width: 100%;
+    flex-direction: column;
     align-items: stretch;
     gap: 8px;
   }
 
+  .topToolbarCollapseBtn {
+    align-self: center;
+    margin-left: 0;
+    flex: 1 1 100%;
+  }
+
+  .canvasTopToolbar > .topToolbarCollapseBtn {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+  }
+
   .toolbarAreaPrimaryBtns {
-    flex: 1;
+    flex: none;
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
     min-width: 0;
   }
 
   .toolbarDayListBtn {
-    flex: 1;
+    flex: none;
+    width: 100%;
     min-width: 0;
     align-self: stretch;
     min-height: 42px;
@@ -414,14 +467,199 @@
     min-height: 42px;
   }
 
-  .toolbarModeControl {
-    flex: 1 1 auto;
-    min-width: 0;
-    max-width: 100%;
-  }
-
   .canvasZoomDockRaised {
     bottom: 156px;
+  }
+}
+
+/* Tablet canvas: pair action buttons on two rows (2×2). */
+@container floor-map-canvas (min-width: 48.01em) and (max-width: 62em) {
+  .toolbarAreaPrimaryBtns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    align-items: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .toolbarDayListBtn {
+    width: 100%;
+    flex: none;
+    min-height: 42px;
+    align-self: stretch;
+  }
+}
+
+@container floor-map-canvas (max-width: 48em) {
+  .canvasTopToolbar {
+    padding: 12px;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .toolbarAreaRow {
+    flex: 1 1 100%;
+    gap: 10px;
+  }
+
+  .toolbarModeRow {
+    width: 100%;
+    flex-wrap: nowrap;
+  }
+
+  .toolbarModeControl {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+    width: auto;
+  }
+
+  .toolbarAreaSelectRow {
+    width: 100%;
+  }
+
+  .toolbarAreaSecondary {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .topToolbarCollapseBtn {
+    align-self: center;
+    margin-left: 0;
+  }
+
+  .toolbarAreaPrimaryBtns {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .toolbarDayListBtn {
+    width: 100%;
+    min-height: 44px;
+    font-size: 0.875rem;
+  }
+
+  .toolbarAreaActionBtn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .canvasPopoverPanel {
+    width: min(260px, calc(100% - 26px));
+  }
+
+  .toolbarPopoverLeft {
+    left: 0;
+    right: auto;
+  }
+
+  .canvasPopoverPanelOpen {
+    max-height: 360px;
+  }
+}
+
+/* Wide canvas: row 1 = mode + area select; row 2 = actions + collapse (full width). */
+@container floor-map-canvas (min-width: 62.01em) {
+  .canvasTopToolbar {
+    display: grid;
+    grid-template-columns: minmax(200px, 0.38fr) minmax(360px, 0.62fr);
+    grid-template-areas:
+      "mode select"
+      "actions actions";
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 8px;
+  }
+
+  .toolbarModeRow {
+    grid-area: mode;
+    width: 100%;
+    min-width: 0;
+    align-self: center;
+    flex-wrap: nowrap;
+  }
+
+  .toolbarModeControl {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+  }
+
+  .toolbarAreaRow {
+    display: contents;
+  }
+
+  .toolbarAreaSelectRow {
+    grid-area: select;
+    width: 100%;
+    min-width: 0;
+    align-self: center;
+  }
+
+  .toolbarAreaSelect {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    flex: 1 1 auto;
+  }
+
+  .toolbarAreaSecondary {
+    grid-area: actions;
+    width: 100%;
+    min-width: 0;
+    flex-direction: row;
+    align-items: center;
+    padding-right: calc(var(--mantine-spacing-md) + 42px);
+    box-sizing: border-box;
+  }
+
+  .toolbarAreaPrimaryBtns {
+    flex: 1 1 auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .toolbarDayListBtn {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
+    align-self: stretch;
+    min-height: unset;
+  }
+
+  .topToolbarCollapseBtn {
+    grid-area: actions;
+    justify-self: end;
+    align-self: center;
+    margin-left: 0;
+    z-index: 1;
+  }
+
+  .canvasTopToolbar > .topToolbarCollapseBtn {
+    display: inline-flex;
+    justify-content: center;
+    width: auto;
+  }
+}
+
+@media (max-width: 62em) {
+  .canvasFrame {
+    height: calc(100dvh - 190px - var(--manager-dock-reserve, 0px));
+    min-height: 560px;
+  }
+
+  .canvasViewport {
+    min-height: 0;
   }
 }
 
@@ -441,53 +679,6 @@
 
   .canvasOverlay {
     padding: 8px;
-  }
-
-  .canvasTopToolbar {
-    padding: 12px;
-    gap: 10px;
-    flex-wrap: wrap;
-    align-items: stretch;
-  }
-
-  .toolbarAreaRow {
-    flex: 1 1 100%;
-    gap: 10px;
-  }
-
-  .toolbarModeControl {
-    flex: 1 1 100%;
-    min-width: 0;
-    max-width: 100%;
-  }
-
-  .toolbarAreaSecondary {
-    gap: 10px;
-  }
-
-  .toolbarDayListBtn {
-    min-height: 44px;
-    font-size: 0.875rem;
-  }
-
-  .toolbarAreaActionBtn {
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-    min-height: 44px;
-  }
-
-  .canvasPopoverPanel {
-    width: min(260px, calc(100vw - 26px));
-  }
-
-  .toolbarPopoverLeft {
-    left: 0;
-    right: auto;
-  }
-
-  .canvasPopoverPanelOpen {
-    max-height: 360px;
   }
 
   .canvasZoomDock {

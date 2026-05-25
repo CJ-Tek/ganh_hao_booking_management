@@ -52,6 +52,7 @@ import {
   type BookingCalendarPanelHandle,
 } from "@/components/booking-calendar-panel";
 import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
+import { MergeGroupsPanel } from "@/components/merge-groups/merge-groups-panel";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import { FloorTableBlockView } from "@/components/floor-map/floor-table-block-view";
 import { RegisterPendingAssignTable } from "@/components/floor-map/register-pending-assign-table";
@@ -504,6 +505,8 @@ export default function FloorMapPage() {
   const [registerSaving, setRegisterSaving] = useState(false);
   const { isBusy: isTableStatusBusy, run: runTableStatusAction } = useBusyId();
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
+  const [mergeGroupsListModalOpen, setMergeGroupsListModalOpen] = useState(false);
+  const [mergeGroupReleaseBusyId, setMergeGroupReleaseBusyId] = useState<string | null>(null);
   /** Modal multi-select of tables to merge (view-mode "Gộp bàn" flow). */
   const [mergeSelectedTableIds, setMergeSelectedTableIds] = useState<string[]>([]);
   const [mergeStartDate, setMergeStartDate] = useState<string | null>(() =>
@@ -2639,6 +2642,7 @@ export default function FloorMapPage() {
       return;
     }
     setMergeSaving(true);
+    setMergeGroupReleaseBusyId(groupId);
     try {
       const result = await releaseTableMergeGroup({ groupId });
       notifications.show({
@@ -2656,6 +2660,7 @@ export default function FloorMapPage() {
       }
     } finally {
       setMergeSaving(false);
+      setMergeGroupReleaseBusyId(null);
     }
   };
 
@@ -3817,6 +3822,7 @@ export default function FloorMapPage() {
           <div className={classes.canvasOverlay}>
             {isTopToolbarOpen ? (
               <div className={classes.canvasTopToolbar}>
+                <div className={classes.toolbarModeRow}>
                 {!isEditMode ? (
                   <div className={classes.toolbarPopoverAnchor}>
                     <ActionIcon
@@ -4039,24 +4045,56 @@ export default function FloorMapPage() {
                   className={classes.toolbarModeControl}
                 />
                 ) : null}
+                </div>
 
                 <div className={classes.toolbarAreaRow}>
-                  <Select
-                    value={areaId}
-                    onChange={setActiveAreaId}
-                    data={availableAreas.map((area) => ({
-                      value: area.id,
-                      label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
-                    }))}
-                    searchable
-                    className={classes.toolbarAreaSelect}
-                    comboboxProps={{ withinPortal: true }}
-                  />
+                  <div className={classes.toolbarAreaSelectRow}>
+                    <Select
+                      value={areaId}
+                      onChange={setActiveAreaId}
+                      data={availableAreas.map((area) => ({
+                        value: area.id,
+                        label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
+                      }))}
+                      searchable
+                      className={classes.toolbarAreaSelect}
+                      comboboxProps={{ withinPortal: true }}
+                    />
+                    {!isEmployee && !isBranchManager ? (
+                      <Group
+                        gap={isCompact ? 8 : 4}
+                        className={classes.toolbarAreaActions}
+                        wrap="nowrap"
+                      >
+                        <ActionIcon
+                          variant="transparent"
+                          size={isCompact ? "input-md" : "lg"}
+                          className={classes.toolbarAreaActionBtn}
+                          aria-label="Sửa khu vực"
+                          disabled={!areaId || !hasSupabase}
+                          onClick={openAreaMetadataEdit}
+                        >
+                          <Pencil size={16} />
+                        </ActionIcon>
+                        <ActionIcon
+                          variant="transparent"
+                          color="red"
+                          size={isCompact ? "input-md" : "lg"}
+                          className={classes.toolbarAreaActionBtn}
+                          aria-label="Xóa khu vực"
+                          disabled={!areaId || !hasSupabase}
+                          onClick={() => setAreaDeleteOpen(true)}
+                        >
+                          <Trash2 size={16} />
+                        </ActionIcon>
+                      </Group>
+                    ) : null}
+                  </div>
                   {!isEmployee ? (
                     <div className={classes.toolbarAreaSecondary}>
                       <Group
                         gap={isCompact ? 8 : 4}
-                        wrap="nowrap"
+                        wrap="wrap"
                         className={classes.toolbarAreaPrimaryBtns}
                       >
                         <Button
@@ -4099,36 +4137,16 @@ export default function FloorMapPage() {
                             Thêm bàn gộp
                           </Button>
                         )}
-                      </Group>
-                      {!isBranchManager ? (
-                        <Group
-                          gap={isCompact ? 8 : 4}
-                          className={classes.toolbarAreaActions}
-                          wrap="nowrap"
+                        <Button
+                          size={isCompact ? "sm" : "compact-sm"}
+                          variant="default"
+                          className={classes.toolbarDayListBtn}
+                          onClick={() => setMergeGroupsListModalOpen(true)}
+                          disabled={!activeAreaBranchId}
                         >
-                          <ActionIcon
-                            variant="light"
-                            size={isCompact ? "input-md" : "lg"}
-                            className={classes.toolbarAreaActionBtn}
-                            aria-label="Sửa khu vực"
-                            disabled={!areaId || !hasSupabase}
-                            onClick={openAreaMetadataEdit}
-                          >
-                            <Pencil size={16} />
-                          </ActionIcon>
-                          <ActionIcon
-                            variant="light"
-                            color="red"
-                            size={isCompact ? "input-md" : "lg"}
-                            className={classes.toolbarAreaActionBtn}
-                            aria-label="Xóa khu vực"
-                            disabled={!areaId || !hasSupabase}
-                            onClick={() => setAreaDeleteOpen(true)}
-                          >
-                            <Trash2 size={16} />
-                          </ActionIcon>
-                        </Group>
-                      ) : null}
+                          Danh sách bàn gộp
+                        </Button>
+                      </Group>
                     </div>
                   ) : null}
                 </div>
@@ -4656,6 +4674,29 @@ export default function FloorMapPage() {
         loading={detailBookingActionLoading}
         onConfirm={handleSubmitChangeTable}
       />
+
+      <Modal
+        opened={mergeGroupsListModalOpen}
+        onClose={() => setMergeGroupsListModalOpen(false)}
+        title="Danh sách bàn gộp"
+        size="xl"
+      >
+        <MergeGroupsPanel
+          key={areaId ?? "all-areas"}
+          embedded
+          mergeGroups={state.mergeGroups}
+          tables={state.tables}
+          areas={state.areas}
+          branches={state.branches}
+          bookings={state.bookings}
+          filteredBranchIds={filteredBranchIds}
+          busyGroupId={mergeGroupReleaseBusyId}
+          initialAreaFilter={areaId}
+          onRequestRelease={(groupId) => {
+            setReleaseMergeGroupId(groupId);
+          }}
+        />
+      </Modal>
 
       <Modal
         opened={mergeModalOpen}
