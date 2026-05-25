@@ -4,25 +4,23 @@ import dayjs from "dayjs";
 import {
   Alert,
   Button,
-  Group,
   Modal,
   Select,
   Stack,
   Text,
-  TextInput,
-  Textarea,
 } from "@mantine/core";
-import { DateTimePicker } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MergeRecommendationCard } from "@/components/booking-management/merge-recommendation-card";
-import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
+import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import {
   PortalSectionCard,
   PortalStickyAction,
 } from "@/components/portal-page";
-import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
-import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
+import {
+  VoiceBookingAssistant,
+  type VoiceBookingFormFields,
+} from "@/components/voice-booking/VoiceBookingAssistant";
 import { useAppContext } from "@/contexts/app-context";
 import {
   bookingSlotKey,
@@ -32,22 +30,11 @@ import {
   normalizeVietnamPhone,
   type BookingDuplicateInfo,
 } from "@/lib/booking-duplicate";
-import {
-  BOOKING_GUEST_TYPE_OPTIONS,
-  recommendMergeGroups,
-  type MergeRecommendation,
-} from "@/lib/booking-meta";
+import { recommendMergeGroups, type MergeRecommendation } from "@/lib/booking-meta";
 import { getTableEffectiveGuestCapacity } from "@/lib/table-capacity";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
-
-const CREATE_BOOKING_POPOVER_Z_INDEX = 700;
-
-const createBookingPopoverProps = {
-  zIndex: CREATE_BOOKING_POPOVER_Z_INDEX,
-  withinPortal: true,
-} as const;
 
 export type CreateBookingModalProps = {
   opened: boolean;
@@ -55,6 +42,17 @@ export type CreateBookingModalProps = {
   /** When user chooses to view an existing duplicate booking from the confirm dialog. */
   onFocusExistingBooking?: (booking: Booking) => void;
 };
+
+const emptyVoiceFields = (): VoiceBookingFormFields => ({
+  customerName: "",
+  customerPhone: "",
+  guestCount: null,
+  bookingAt: dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm"),
+  areaId: null,
+  tableId: null,
+  note: "",
+  guestType: "Khách thường",
+});
 
 export function CreateBookingModal({
   opened,
@@ -73,24 +71,12 @@ export function CreateBookingModal({
   const branchId = filteredBranchIds[0] ?? null;
 
   const [isCreating, setIsCreating] = useState(false);
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
   const [createBranchId, setCreateBranchId] = useState<string | null>(branchId);
-  const [guestCount, setGuestCount] = useState<number | undefined>(undefined);
-  const [bookingAt, setBookingAt] = useState<string | null>(
-    dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm")
-  );
-  const [note, setNote] = useState("");
-  const [guestType, setGuestType] = useState<string | null>("Khách thường");
+  const [voiceFields, setVoiceFields] = useState<VoiceBookingFormFields>(emptyVoiceFields);
   const [recommendationBusyKey, setRecommendationBusyKey] = useState<string | null>(null);
 
   const resetCreateForm = useCallback(() => {
-    setCustomerName("");
-    setCustomerPhone("");
-    setGuestCount(undefined);
-    setBookingAt(dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm"));
-    setNote("");
-    setGuestType("Khách thường");
+    setVoiceFields(emptyVoiceFields());
     setCreateBranchId(branchId);
   }, [branchId]);
 
@@ -107,6 +93,9 @@ export function CreateBookingModal({
     }
     setCreateBranchId(branchId);
   }, [branchId, opened]);
+
+  const { customerName, customerPhone, guestCount, bookingAt, note, guestType, areaId, tableId } =
+    voiceFields;
 
   const selectedBookingSlot = useMemo(() => (bookingAt ? bookingSlotKey(bookingAt) : null), [bookingAt]);
   const normalizedCustomerPhone = useMemo(
@@ -194,7 +183,7 @@ export function CreateBookingModal({
   );
 
   const submitCreateBooking = async (options?: { allowDuplicate?: boolean }) => {
-    if (!customerName || !createBranchId || !bookingAt) {
+    if (!customerName.trim() || !createBranchId || !bookingAt) {
       notifications.show({ color: "red", message: "Cần ít nhất tên khách và thời gian đến." });
       return;
     }
@@ -213,12 +202,14 @@ export function CreateBookingModal({
         customerName: formatVietnamesePersonName(customerName),
         customerPhone: normalizedCustomerPhone || undefined,
         branchId: createBranchId,
+        areaId: areaId ?? undefined,
+        tableId: tableId ?? undefined,
         guestCount:
           typeof guestCount === "number" && Number.isFinite(guestCount)
             ? Math.max(1, guestCount)
             : undefined,
         bookingAt: dayjs(bookingAt).toISOString(),
-        note,
+        note: note.trim() || undefined,
         guestType,
         allowDuplicate: options?.allowDuplicate,
       });
@@ -352,48 +343,25 @@ export function CreateBookingModal({
             disabled={createFormDisabled}
             size={isCompact ? "md" : "sm"}
           />
-          <Group justify="flex-start">
-            <VoiceBookingAssistant
-              branch={createBranchId ? { id: createBranchId, name: createBranchName } : null}
-              areas={createBranchAreas.map((a) => ({ id: a.id, name: a.name }))}
-              tables={createBranchTables.map((t) => ({
-                id: t.id,
-                name: t.name,
-                seats: t.seats,
-                areaId: t.areaId,
-                status: t.status,
-              }))}
-              onCreateBooking={createBooking}
-            />
-          </Group>
-          <TextInput
-            label="Tên khách"
-            placeholder="Họ và tên"
-            value={customerName}
-            onChange={(event) => setCustomerName(event.currentTarget.value)}
-            onBlur={() => setCustomerName((v) => formatVietnamesePersonName(v))}
+          {opened ? (
+          <VoiceBookingAssistant
+            key={createBranchId ?? "no-branch"}
+            embedded
+            hideSubmitButton
             disabled={createFormDisabled}
-            size={isCompact ? "md" : "sm"}
+            branch={createBranchId ? { id: createBranchId, name: createBranchName } : null}
+            areas={createBranchAreas.map((a) => ({ id: a.id, name: a.name }))}
+            tables={createBranchTables.map((t) => ({
+              id: t.id,
+              name: t.name,
+              seats: t.seats,
+              areaId: t.areaId,
+              status: t.status,
+            }))}
+            onFieldsChange={setVoiceFields}
+            onCreateBooking={createBooking}
           />
-          <TextInput
-            label="Số điện thoại"
-            placeholder="09… (tùy chọn)"
-            inputMode="tel"
-            value={customerPhone}
-            onChange={(event) => setCustomerPhone(event.currentTarget.value)}
-            disabled={createFormDisabled}
-            size={isCompact ? "md" : "sm"}
-          />
-          <Select
-            label="Loại khách"
-            placeholder="Chọn loại khách"
-            data={BOOKING_GUEST_TYPE_OPTIONS.map((label) => ({ value: label, label }))}
-            value={guestType}
-            onChange={setGuestType}
-            allowDeselect={false}
-            disabled={createFormDisabled}
-            size={isCompact ? "md" : "sm"}
-          />
+          ) : null}
           {duplicateWarningMessage ? (
             <Alert color="orange" variant="light" title="Cảnh báo trùng booking">
               {duplicateWarningMessage}
@@ -444,39 +412,8 @@ export function CreateBookingModal({
             />
           ) : null}
           <Text size="sm" c="dimmed">
-            Khu vực, trạng thái bàn và bàn gán sẽ được cấu hình ở mục <strong>Sơ đồ</strong>.
+            Booking tạo từ đây sẽ ở trạng thái <strong>Chờ xếp bàn</strong> (trừ khi đã chọn khu/bàn).
           </Text>
-          <Text size="sm" c="dimmed">
-            Booking tạo từ đây sẽ ở trạng thái <strong>Chờ xếp bàn</strong>.
-          </Text>
-          <DateTimePicker
-            value={bookingAt}
-            onChange={setBookingAt}
-            label="Thời gian đến"
-            valueFormat="DD/MM/YYYY HH:mm"
-            disabled={createFormDisabled}
-            size={isCompact ? "md" : "sm"}
-            popoverProps={createBookingPopoverProps}
-            timePickerProps={{ popoverProps: createBookingPopoverProps }}
-          />
-          <GuestCountNumberInput
-            label="Số khách (tùy chọn)"
-            value={guestCount}
-            onChange={setGuestCount}
-            placeholder="Để trống nếu chưa rõ"
-            disabled={createFormDisabled}
-            size={isCompact ? "md" : "sm"}
-          />
-          <Textarea
-            label="Ghi chú"
-            placeholder="Tùy chọn"
-            value={note}
-            onChange={(event) => setNote(event.currentTarget.value)}
-            autosize
-            minRows={2}
-            disabled={createFormDisabled}
-            size={isCompact ? "md" : "sm"}
-          />
           <PortalStickyAction>
             <Button
               fullWidth

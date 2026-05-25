@@ -53,6 +53,7 @@ import type { FloorMapStateSlice } from "./floor-map-state-slice";
 import {
   AppStateSnapshot,
   AppUser,
+  Booking,
   BookingRuntimeSettings,
   BookingStatus,
   BookingWaitlistEntry,
@@ -577,20 +578,19 @@ async function seatBookingForImmediateArrival(
 /** Vietnam local calendar (UTC+7, no DST) for end-of-day maintenance on Vercel (UTC). */
 const RESTAURANT_UTC_OFFSET_MINUTES = 7 * 60;
 
-function restaurantNow(): dayjs.Dayjs {
-  return dayjs().utcOffset(RESTAURANT_UTC_OFFSET_MINUTES);
+function restaurantCalendarDateKey(iso?: string): string {
+  const base = iso ? dayjs(iso) : dayjs();
+  if (!base.isValid()) {
+    return "";
+  }
+  return base.add(RESTAURANT_UTC_OFFSET_MINUTES, "minute").format("YYYY-MM-DD");
 }
 
 /** True when `iso` falls on a calendar day before today in restaurant local time. */
 function isBeforeRestaurantToday(iso: string): boolean {
-  const parsed = dayjs(iso);
-  if (!parsed.isValid()) {
-    return false;
-  }
-  return parsed
-    .utcOffset(RESTAURANT_UTC_OFFSET_MINUTES)
-    .startOf("day")
-    .isBefore(restaurantNow().startOf("day"));
+  const dateKey = restaurantCalendarDateKey(iso);
+  const todayKey = restaurantCalendarDateKey();
+  return dateKey.length > 0 && dateKey < todayKey;
 }
 
 /**

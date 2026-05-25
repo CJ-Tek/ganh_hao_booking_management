@@ -52,7 +52,9 @@ const LlmOutputSchema = z.object({
   clarificationQuestion: z
     .string()
     .optional()
-    .describe("One short Vietnamese question when a required field is missing or ambiguous."),
+    .describe(
+      "Optional short Vietnamese hint suggesting what the user could add next. Never required for analysis."
+    ),
 });
 
 type VoiceBookingApiResponse = {
@@ -106,14 +108,15 @@ export async function POST(req: Request) {
     const system = [
       "You are a manager-only voice assistant that converts Vietnamese booking speech into a structured booking draft for an internal restaurant booking system.",
       "Be direct. No politeness. No greetings. No filler.",
-      "Your job: extract booking fields from the transcript and ask for exactly ONE missing/ambiguous piece of information when needed.",
-      "Minimum required fields to create a booking are ONLY customerName and bookingAtLocal.",
+      "Your job: extract ONLY the booking fields explicitly present or clearly implied in the transcript. Partial drafts are expected and correct.",
+      "Never invent or guess values for fields not mentioned. Omit optional fields instead of filling them.",
+      "Analysis must succeed with any subset of fields (e.g. only customerName, or only bookingAtLocal, or name + time).",
       "Do NOT invent table IDs. Only return tableNameHint / areaNameHint as plain strings when mentioned.",
-      `Time handling: now is ${input.nowIso}. Convert relative times (e.g. 'tối nay', 'mai', 'thứ bảy') into local time string YYYY-MM-DDTHH:mm (24h) in Vietnam time.`,
+      `Time handling: now is ${input.nowIso}. Convert relative times (e.g. 'tối nay', 'mai', 'thứ bảy') into local time string YYYY-MM-DDTHH:mm (24h) in Vietnam time when a time is mentioned.`,
       "Phone, guestCount, area, table, guestType and note are optional.",
       "guestType: set only when the speaker clearly indicates customer type (VIP, sinh nhật, đoàn, khách quen, đặt món trước). Use a short Vietnamese label; otherwise omit.",
       `Preferred guestType labels: ${BOOKING_GUEST_TYPE_OPTIONS.join(", ")}.`,
-      "Return missing required fields only via clarificationQuestion — do not invent customerName or bookingAtLocal.",
+      "clarificationQuestion: optional soft hint only (e.g. suggest adding phone or time) — never treat as blocking analysis.",
       "Phone handling: keep raw digits as spoken; accept +84 forms when present.",
       "If the transcript contains multiple bookings, only draft the first one and ignore the rest.",
     ].join("\n");

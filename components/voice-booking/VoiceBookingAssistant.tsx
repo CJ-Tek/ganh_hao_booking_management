@@ -14,7 +14,7 @@ import {
 } from "@mantine/core";
 import { DateTimePicker } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { BOOKING_GUEST_TYPE_OPTIONS } from "@/lib/booking-meta";
@@ -102,7 +102,26 @@ function getSpeechRecognition(ww: SpeechApi) {
   return ww.SpeechRecognition ?? ww.webkitSpeechRecognition ?? null;
 }
 
+export type VoiceBookingFormFields = {
+  customerName: string;
+  customerPhone: string;
+  guestCount: number | null;
+  bookingAt: string | null;
+  areaId: string | null;
+  tableId: string | null;
+  note: string;
+  guestType: string | null;
+};
+
 export function VoiceBookingAssistant(props: {
+  /** Inline form (no trigger button / nested modal). */
+  embedded?: boolean;
+  /** Hide built-in submit row — parent provides create action (e.g. CreateBookingModal). */
+  hideSubmitButton?: boolean;
+  /** Sync field values to parent for duplicate checks, merge hints, etc. */
+  onFieldsChange?: (fields: VoiceBookingFormFields) => void;
+  /** Disable inputs (e.g. while parent is creating booking). */
+  disabled?: boolean;
   branch: { id: string; name: string } | null;
   areas: AreaLite[];
   tables: TableLite[];
@@ -119,7 +138,16 @@ export function VoiceBookingAssistant(props: {
     allowDuplicate?: boolean;
   }) => Promise<ActionResult>;
 }) {
-  const { branch, areas, tables, onCreateBooking } = props;
+  const {
+    branch,
+    areas,
+    tables,
+    onCreateBooking,
+    embedded = false,
+    hideSubmitButton = false,
+    onFieldsChange,
+    disabled: disabledProp = false,
+  } = props;
 
   const [opened, setOpened] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -146,6 +174,29 @@ export function VoiceBookingAssistant(props: {
   const [note, setNote] = useState("");
   const [guestType, setGuestType] = useState<string | null>("Khách thường");
   const [clarify, setClarify] = useState<string | null>(null);
+
+  useEffect(() => {
+    onFieldsChange?.({
+      customerName,
+      customerPhone,
+      guestCount,
+      bookingAt,
+      areaId,
+      tableId,
+      note,
+      guestType,
+    });
+  }, [
+    areaId,
+    bookingAt,
+    customerName,
+    customerPhone,
+    guestCount,
+    guestType,
+    note,
+    onFieldsChange,
+    tableId,
+  ]);
 
   const defaultBookingAt = useCallback(
     () => dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm"),
@@ -218,6 +269,7 @@ export function VoiceBookingAssistant(props: {
   }, [tables, areaId]);
 
   const hasSpeech = typeof window !== "undefined" && Boolean(getSpeechRecognition(window as SpeechApi));
+  const formDisabled = disabledProp || isSubmitting;
 
   const startListening = async () => {
     if (!hasSpeech) {
@@ -320,8 +372,6 @@ export function VoiceBookingAssistant(props: {
 
     if (matchedAreaId) setAreaId(matchedAreaId);
     if (matchedTableId) setTableId(matchedTableId);
-
-    if (data.clarificationQuestion) setClarify(data.clarificationQuestion);
   };
 
   const parseTranscript = async () => {
@@ -352,6 +402,11 @@ export function VoiceBookingAssistant(props: {
         const data = (await res.json()) as VoiceBookingResponse;
         if (res.ok && !("error" in data)) {
           applyParsedDraft(data);
+          if (data.missing.length > 0 && data.clarificationQuestion) {
+            setClarify(data.clarificationQuestion);
+          } else {
+            setClarify(null);
+          }
           return;
         }
 
@@ -429,13 +484,7 @@ export function VoiceBookingAssistant(props: {
     }
   };
 
-  return (
-    <>
-      <Button variant="light" onClick={() => setOpened(true)}>
-        Đặt bàn bằng giọng nói
-      </Button>
-
-      <Modal opened={opened} onClose={closeModal} title="Đặt bàn bằng giọng nói" size="lg">
+  const formBody = (
         <Stack gap="md">
           {!branch ? (
             <Text c="dimmed">Chưa có chi nhánh trong scope hiện tại.</Text>
@@ -447,8 +496,8 @@ export function VoiceBookingAssistant(props: {
                 <Text fw={600}>{branch.name}</Text>
                 </Group>
                 <Text size="sm" c="dimmed">
-                  Bấm <strong>Ghi âm</strong> (có thể nhiều lần để thêm câu) → bấm <strong>Phân tích</strong> → kiểm tra lại →
-                  tạo booking.
+                  Bấm <strong>Ghi âm</strong> (có thể nhiều lần) hoặc gõ nội dung → <strong>Phân tích</strong> điền các
+                  trường có trong câu (không cần đủ thông tin) → kiểm tra lại → tạo booking.
                 </Text>
               </Stack>
               <Group gap="xs" align="center">
@@ -464,7 +513,7 @@ export function VoiceBookingAssistant(props: {
                 <Button
                   onClick={() => void parseTranscript()}
                   loading={isParsing}
-                  disabled={!transcript.trim() || isListening || isWarmingMic}
+                  disabled={formDisabled || !transcript.trim() || isListening || isWarmingMic}
                 >
                   Phân tích
                 </Button>
@@ -474,7 +523,7 @@ export function VoiceBookingAssistant(props: {
                     setTranscript("");
                     setClarify(null);
                   }}
-                  disabled={isListening || isParsing || !transcript.trim()}
+                  disabled={formDisabled || isListening || isParsing || !transcript.trim()}
                 >
                   Xóa
                 </Button>
@@ -488,7 +537,7 @@ export function VoiceBookingAssistant(props: {
             onChange={(e) => setTranscript(e.currentTarget.value)}
             autosize
             minRows={3}
-            disabled={isSubmitting}
+            disabled={formDisabled}
             placeholder="Ví dụ: đặt bàn VIP 4 người lúc 19:30 tối nay, khu A, bàn 3, tên Huy, số 0912..."
           />
 
@@ -499,8 +548,8 @@ export function VoiceBookingAssistant(props: {
           ) : null}
 
           {clarify ? (
-            <Text size="sm" c="orange.7">
-              Cần bổ sung: {clarify}
+            <Text size="sm" c="dimmed">
+              Gợi ý: {clarify}
             </Text>
           ) : null}
 
@@ -511,14 +560,14 @@ export function VoiceBookingAssistant(props: {
               value={customerName}
               onChange={(e) => setCustomerName(e.currentTarget.value)}
               onBlur={() => setCustomerName((v) => formatVietnamesePersonName(v))}
-              disabled={isSubmitting}
+              disabled={formDisabled}
             />
             <TextInput
               label="Số điện thoại"
               placeholder="09… / +84…"
               value={customerPhone}
               onChange={(e) => setCustomerPhone(e.currentTarget.value)}
-              disabled={isSubmitting}
+              disabled={formDisabled}
             />
           </Group>
 
@@ -529,7 +578,7 @@ export function VoiceBookingAssistant(props: {
             value={guestType}
             onChange={setGuestType}
             allowDeselect={false}
-            disabled={isSubmitting}
+            disabled={formDisabled}
           />
 
           <Group grow align="flex-start">
@@ -538,7 +587,7 @@ export function VoiceBookingAssistant(props: {
               value={guestCount ?? undefined}
               onChange={(value) => setGuestCount(value ?? null)}
               placeholder="Tùy chọn"
-              disabled={isSubmitting}
+              disabled={formDisabled}
             />
             <DateTimePicker
               label="Thời gian đến"
@@ -546,7 +595,7 @@ export function VoiceBookingAssistant(props: {
               onChange={(d) => setBookingAt(d ? dayjs(d).format("YYYY-MM-DDTHH:mm") : null)}
               valueFormat="DD/MM/YYYY HH:mm"
               clearable={false}
-              disabled={isSubmitting}
+              disabled={formDisabled}
             />
           </Group>
 
@@ -561,7 +610,7 @@ export function VoiceBookingAssistant(props: {
               }}
               searchable
               clearable
-              disabled={isSubmitting}
+              disabled={formDisabled}
             />
             <Select
               label="Bàn"
@@ -570,7 +619,7 @@ export function VoiceBookingAssistant(props: {
               onChange={setTableId}
               searchable
               clearable
-              disabled={isSubmitting}
+              disabled={formDisabled}
             />
           </Group>
 
@@ -589,22 +638,40 @@ export function VoiceBookingAssistant(props: {
             onChange={(e) => setNote(e.currentTarget.value)}
             autosize
             minRows={2}
-            disabled={isSubmitting}
+            disabled={formDisabled}
           />
 
-          <Group justify="flex-end">
-            <Button variant="default" disabled={isSubmitting} onClick={closeModal}>
-              Đóng
-            </Button>
-            <Button
-              onClick={() => void submit()}
-              loading={isSubmitting}
-              disabled={!branch || isListening || isParsing || isSubmitting}
-            >
-              Xác nhận & tạo booking
-            </Button>
-          </Group>
+          {!hideSubmitButton ? (
+            <Group justify="flex-end">
+              {!embedded ? (
+                <Button variant="default" disabled={isSubmitting} onClick={closeModal}>
+                  Đóng
+                </Button>
+              ) : null}
+              <Button
+                onClick={() => void submit()}
+                loading={isSubmitting}
+                disabled={!branch || isListening || isParsing || isSubmitting}
+              >
+                Xác nhận & tạo booking
+              </Button>
+            </Group>
+          ) : null}
         </Stack>
+  );
+
+  if (embedded) {
+    return formBody;
+  }
+
+  return (
+    <>
+      <Button variant="light" onClick={() => setOpened(true)}>
+        Đặt bàn bằng giọng nói
+      </Button>
+
+      <Modal opened={opened} onClose={closeModal} title="Đặt bàn bằng giọng nói" size="lg">
+        {formBody}
       </Modal>
     </>
   );
