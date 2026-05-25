@@ -83,8 +83,10 @@ import {
   FLOOR_TABLE_STACK_OFFSET_PX,
 } from "@/lib/floor-map-layout";
 import {
+  findMergeStripAnchorForMemberCells,
   findMergeStripAnchorForPlug,
   getMergeGroupStripCells,
+  getMergeMemberPositionsAtAnchor,
   packMergeGroupTablePositions,
 } from "@/lib/floor-map-merge-layout";
 import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
@@ -263,6 +265,13 @@ type DragState = {
   col: number;
 };
 
+type MergeGroupDragState = {
+  pointerId: number;
+  groupId: string;
+  anchorRow: number;
+  anchorCol: number;
+};
+
 type PanState = {
   pointerId: number;
   startX: number;
@@ -419,6 +428,9 @@ export default function FloorMapPage() {
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 24, y: 24 });
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [mergeGroupDragState, setMergeGroupDragState] = useState<MergeGroupDragState | null>(
+    null
+  );
   const [isSearchPanelOpen, setIsSearchPanelOpen] = useState(false);
   const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(true);
@@ -808,6 +820,8 @@ export default function FloorMapPage() {
   useEffect(() => {
     if (!isEditMode) {
       setEditSelectedTableIds([]);
+      setMergeGroupDragState(null);
+      setDragState(null);
     }
   }, [isEditMode]);
 
@@ -1417,47 +1431,67 @@ export default function FloorMapPage() {
     return grouped;
   }, [effectiveGridColumns, effectiveGridRows, placedTables]);
 
-  const tableByNode = useMemo(() => {
-    const grouped = new Map<string, DiningTable[]>();
-    for (const [key, tables] of basePositionMap.entries()) {
-      grouped.set(key, [...tables]);
-    }
-    if (dragState) {
-      for (const [key, tables] of grouped.entries()) {
-        grouped.set(
-          key,
-          tables.filter((table) => table.id !== dragState.tableId)
-        );
-      }
-      const previewKey = `${dragState.row}-${dragState.col}`;
-      const targetTables = grouped.get(previewKey) ?? [];
-      const movingTable = tableMap[dragState.tableId];
-      if (movingTable) {
-        grouped.set(previewKey, [...targetTables, movingTable]);
-      }
-    }
-    return grouped;
-  }, [basePositionMap, dragState, tableMap]);
-
   /**
-   * Effective row/col of each visible table on the canvas — accounts for an in-progress drag in edit mode.
-   * Used by the bbox overlay so the rectangle tracks a table that's being moved into/out of a group.
+   * Effective row/col of each visible table on the canvas — accounts for in-progress table or merge-group drags.
    */
   const effectiveTablePositions = useMemo(() => {
     const result = new Map<string, { row: number; col: number }>();
-    for (const [key, tables] of basePositionMap.entries()) {
-      const [rowStr, colStr] = key.split("-");
-      const row = Number.parseInt(rowStr ?? "0", 10);
-      const col = Number.parseInt(colStr ?? "0", 10);
-      for (const table of tables) {
-        result.set(table.id, { row, col });
-      }
+    for (const table of placedTables) {
+      const mapped = getTableGridPosition(table, effectiveGridColumns, effectiveGridRows);
+      result.set(table.id, { row: mapped.row, col: mapped.col });
     }
     if (dragState) {
       result.set(dragState.tableId, { row: dragState.row, col: dragState.col });
     }
+    if (mergeGroupDragState && editLayout) {
+      const group = effectiveMergeGroups.find(
+        (candidate) => candidate.id === mergeGroupDragState.groupId
+      );
+      if (group) {
+        const memberIds = mergeMemberIdsForEdit(
+          group,
+          editLayout.pendingMergeAdds,
+          editLayout.pendingMergeRemoves
+        );
+        const preview = getMergeMemberPositionsAtAnchor(
+          memberIds,
+          mergeGroupDragState.anchorRow,
+          mergeGroupDragState.anchorCol,
+          effectiveGridColumns,
+          effectiveGridRows
+        );
+        if (preview) {
+          for (const [tableId, pos] of preview) {
+            result.set(tableId, pos);
+          }
+        }
+      }
+    }
     return result;
-  }, [basePositionMap, dragState]);
+  }, [
+    dragState,
+    editLayout,
+    effectiveGridColumns,
+    effectiveGridRows,
+    effectiveMergeGroups,
+    mergeGroupDragState,
+    placedTables,
+  ]);
+
+  const tableByNode = useMemo(() => {
+    const grouped = new Map<string, DiningTable[]>();
+    for (const table of placedTables) {
+      const pos = effectiveTablePositions.get(table.id);
+      if (!pos) {
+        continue;
+      }
+      const key = `${pos.row}-${pos.col}`;
+      const current = grouped.get(key) ?? [];
+      current.push(table);
+      grouped.set(key, current);
+    }
+    return grouped;
+  }, [effectiveTablePositions, placedTables]);
 
   /**
    * Geometry for each active merge-group bbox in the current area.
@@ -1552,11 +1586,74 @@ export default function FloorMapPage() {
     effectiveNodeSpacing,
     effectiveTablePositions,
     effectiveMergeGroups,
+    mergeGroupDragState,
   ]);
+
+  const commitMergeGroupDrop = (groupId: string, anchorRow: number, anchorCol: number) => {
+    if (!editLayout) {
+      setMergeGroupDragState(null);
+      return;
+    }
+    const group = effectiveMergeGroups.find((candidate) => candidate.id === groupId);
+    if (!group) {
+      setMergeGroupDragState(null);
+      return;
+    }
+    const layoutPositions = new Map<string, { row: number; col: number }>();
+    for (const table of tablesInArea) {
+      const p = editLayout.positions[table.id];
+      layoutPositions.set(table.id, {
+        row: p?.y ?? table.positionY,
+        col: p?.x ?? table.positionX,
+      });
+    }
+    const memberIds = mergeMemberIdsForEdit(
+      group,
+      editLayout.pendingMergeAdds,
+      editLayout.pendingMergeRemoves
+    );
+    const currentAnchor = findMergeStripAnchorForMemberCells(
+      memberIds,
+      layoutPositions,
+      effectiveGridColumns,
+      effectiveGridRows
+    );
+    if (
+      currentAnchor &&
+      currentAnchor.row === anchorRow &&
+      currentAnchor.col === anchorCol
+    ) {
+      setMergeGroupDragState(null);
+      return;
+    }
+
+    setEditLayout((prev) => {
+      if (!prev) {
+        return prev;
+      }
+      const memberIds = mergeMemberIdsForEdit(
+        group,
+        prev.pendingMergeAdds,
+        prev.pendingMergeRemoves
+      );
+      if (memberIds.length === 0) {
+        return prev;
+      }
+      return applyMergePackToEditLayout(prev, memberIds, tablesInArea, {
+        row: anchorRow,
+        col: anchorCol,
+      });
+    });
+    setMergeGroupDragState(null);
+  };
 
   const commitDrop = (tableId: string, row: number, col: number) => {
     const source = tableMap[tableId];
     if (!source || !editLayout) {
+      setDragState(null);
+      return;
+    }
+    if (tableToMergeGroupId.has(tableId)) {
       setDragState(null);
       return;
     }
@@ -1697,6 +1794,13 @@ export default function FloorMapPage() {
 
   const removeTableToStorage = (table: DiningTable) => {
     if (!editLayout) {
+      return;
+    }
+    if (tableToMergeGroupId.has(table.id)) {
+      notifications.show({
+        color: "yellow",
+        message: `${table.name} đang trong cụm gộp — bỏ gộp hoặc tách bàn trước khi chuyển vào kho.`,
+      });
       return;
     }
     setEditLayout((prev) => {
@@ -2515,6 +2619,22 @@ export default function FloorMapPage() {
       return;
     }
 
+    if (mergeGroupDragState && event.pointerId === mergeGroupDragState.pointerId) {
+      const world = toWorldCoordinate(event.clientX, event.clientY);
+      const snapped = nearestNode(world.x, world.y);
+      if (
+        snapped.row !== mergeGroupDragState.anchorRow ||
+        snapped.col !== mergeGroupDragState.anchorCol
+      ) {
+        setMergeGroupDragState((prev) =>
+          prev
+            ? { ...prev, anchorRow: snapped.row, anchorCol: snapped.col }
+            : prev
+        );
+      }
+      return;
+    }
+
     if (dragState && event.pointerId === dragState.pointerId) {
       const world = toWorldCoordinate(event.clientX, event.clientY);
       const snapped = nearestNode(world.x, world.y);
@@ -2557,6 +2677,19 @@ export default function FloorMapPage() {
         void commitPlacement(pendingPlacementTableId, snapped.row, snapped.col);
         setPendingPlacementTableId(null);
       }
+      return;
+    }
+
+    if (
+      isEditMode &&
+      mergeGroupDragState &&
+      event.pointerId === mergeGroupDragState.pointerId
+    ) {
+      commitMergeGroupDrop(
+        mergeGroupDragState.groupId,
+        mergeGroupDragState.anchorRow,
+        mergeGroupDragState.anchorCol
+      );
       return;
     }
 
@@ -2611,6 +2744,59 @@ export default function FloorMapPage() {
     placementTapRef.current = null;
     paletteGestureRef.current = null;
     setDragState(null);
+    setMergeGroupDragState(null);
+  };
+
+  const handleMergeGroupPointerDown = (
+    event: React.PointerEvent<HTMLDivElement>,
+    groupId: string
+  ) => {
+    if (!isEditMode || !editLayout || event.button !== 0) {
+      return;
+    }
+    if ((event.target as HTMLElement).closest("[data-merge-no-drag]")) {
+      return;
+    }
+    const group = effectiveMergeGroups.find((candidate) => candidate.id === groupId);
+    if (!group) {
+      return;
+    }
+    const memberIds = mergeMemberIdsForEdit(
+      group,
+      editLayout.pendingMergeAdds,
+      editLayout.pendingMergeRemoves
+    );
+    if (memberIds.length === 0) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const anchor =
+      findMergeStripAnchorForMemberCells(
+        memberIds,
+        effectiveTablePositions,
+        effectiveGridColumns,
+        effectiveGridRows
+      ) ??
+      (() => {
+        const firstId = memberIds[0]!;
+        const pos = effectiveTablePositions.get(firstId);
+        return pos
+          ? { row: pos.row, col: pos.col }
+          : { row: 0, col: 0 };
+      })();
+    viewport.setPointerCapture(event.pointerId);
+    setMergeGroupDragState({
+      pointerId: event.pointerId,
+      groupId,
+      anchorRow: clamp(anchor.row, 0, effectiveGridRows - 1),
+      anchorCol: clamp(anchor.col, 0, effectiveGridColumns - 1),
+    });
+    setDragState(null);
   };
 
   const handleTablePointerDown = (
@@ -2618,6 +2804,9 @@ export default function FloorMapPage() {
     table: DiningTable
   ) => {
     if (!isEditMode) {
+      return;
+    }
+    if (tableToMergeGroupId.has(table.id)) {
       return;
     }
     if ((event.target as HTMLElement).closest("[data-table-remove]")) {
@@ -2956,6 +3145,10 @@ export default function FloorMapPage() {
                   key={`merge-group-${bbox.groupId}`}
                   className={`${classes.mergeGroupContainer} ${
                     openedMergeGroupId === bbox.groupId ? classes.mergeGroupContainerActive : ""
+                  } ${
+                    mergeGroupDragState?.groupId === bbox.groupId
+                      ? classes.mergeGroupContainerDragging
+                      : ""
                   }`}
                   style={{
                     left: bbox.x,
@@ -2966,12 +3159,17 @@ export default function FloorMapPage() {
                   onPointerDown={(event) => event.stopPropagation()}
                 >
                   <div
-                    className={classes.mergeGroupContainerHeader}
+                    className={`${classes.mergeGroupContainerHeader} ${
+                      isEditMode ? classes.mergeGroupContainerHeaderDraggable : ""
+                    }`}
                     style={{ height: bbox.headerHeight }}
+                    data-merge-group-header="true"
+                    onPointerDown={(event) => handleMergeGroupPointerDown(event, bbox.groupId)}
                   >
                     <button
                       type="button"
                       className={classes.mergeGroupContainerTitle}
+                      data-merge-no-drag="true"
                       onClick={(event) => {
                         event.stopPropagation();
                         setOpenedMergeGroupId(bbox.groupId);
@@ -2980,26 +3178,32 @@ export default function FloorMapPage() {
                       {bbox.mergedName}
                     </button>
                     <Group gap={6} wrap="nowrap">
-                      <span className={classes.mergeGroupContainerCapacity}>
+                      <span
+                        className={classes.mergeGroupContainerCapacity}
+                        data-merge-no-drag="true"
+                      >
                         Tổng: {bbox.totalCapacity} chỗ
                       </span>
-                      <Tooltip label="Bỏ gộp" withArrow>
-                        <ActionIcon
-                          type="button"
-                          size="sm"
-                          variant="subtle"
-                          color="red"
-                          className={classes.mergeGroupReleaseBtn}
-                          aria-label={`Bỏ gộp ${bbox.mergedName}`}
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            setReleaseMergeGroupId(bbox.groupId);
-                          }}
-                        >
-                          <X size={14} />
-                        </ActionIcon>
-                      </Tooltip>
+                      {isEditMode ? (
+                        <Tooltip label="Bỏ gộp" withArrow>
+                          <ActionIcon
+                            type="button"
+                            size="sm"
+                            variant="subtle"
+                            color="red"
+                            className={classes.mergeGroupReleaseBtn}
+                            data-merge-no-drag="true"
+                            aria-label={`Bỏ gộp ${bbox.mergedName}`}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setReleaseMergeGroupId(bbox.groupId);
+                            }}
+                          >
+                            <X size={14} />
+                          </ActionIcon>
+                        </Tooltip>
+                      ) : null}
                     </Group>
                   </div>
                   <div
@@ -3075,9 +3279,13 @@ export default function FloorMapPage() {
                       className={`${classes.tableBlock} ${classes.tableBlockEdit} ${dragState?.tableId === table.id ? classes.tableBlockDragging : ""
                         } ${isMergeMember ? classes.tableBlockMergeMember : ""} ${
                           isMergeSelected ? classes.tableBlockMergeSelected : ""
-                        }`}
+                        } ${isMergeMember ? classes.tableBlockMergeMemberLocked : ""}`}
                       style={style}
                       onPointerDown={(event) => {
+                        if (isMergeMember && !event.shiftKey) {
+                          event.stopPropagation();
+                          return;
+                        }
                         // Shift-click toggles a merge-pick selection without starting a drag.
                         if (event.shiftKey) {
                           event.stopPropagation();
@@ -3099,22 +3307,24 @@ export default function FloorMapPage() {
                         handleTablePointerDown(event, table);
                       }}
                     >
-                      <ActionIcon
-                        type="button"
-                        variant="subtle"
-                        color="gray"
-                        size="sm"
-                        className={classes.tableBlockRemove}
-                        data-table-remove="true"
-                        aria-label={`Chuyển ${table.name} vào kho`}
-                        onPointerDown={(event) => event.stopPropagation()}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          removeTableToStorage(table);
-                        }}
-                      >
-                        <X size={14} />
-                      </ActionIcon>
+                      {!isMergeMember ? (
+                        <ActionIcon
+                          type="button"
+                          variant="subtle"
+                          color="gray"
+                          size="sm"
+                          className={classes.tableBlockRemove}
+                          data-table-remove="true"
+                          aria-label={`Chuyển ${table.name} vào kho`}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            removeTableToStorage(table);
+                          }}
+                        >
+                          <X size={14} />
+                        </ActionIcon>
+                      ) : null}
                       <Text fw={600} size="sm" lineClamp={1}>
                         {table.name}
                       </Text>
@@ -3994,6 +4204,7 @@ export default function FloorMapPage() {
         customers={state.customers}
         pendingBookings={pendingBookings}
         currentUserId={currentUser?.id}
+        isEditMode={isEditMode}
         onClose={() => setOpenedMergeGroupId(null)}
         onRequestRelease={(groupId) => setReleaseMergeGroupId(groupId)}
         onRequestRemoveMember={async (groupId, tableId) => {
@@ -4068,6 +4279,7 @@ interface MergeGroupDetailModalProps {
   customers: Customer[];
   pendingBookings: Booking[];
   currentUserId?: string | null;
+  isEditMode: boolean;
   onClose: () => void;
   onRequestRelease: (groupId: string) => void;
   onRequestRemoveMember: (groupId: string, tableId: string) => Promise<void>;
@@ -4082,6 +4294,7 @@ function MergeGroupDetailModal({
   customers,
   pendingBookings,
   currentUserId: _currentUserId,
+  isEditMode,
   onClose,
   onRequestRelease,
   onRequestRemoveMember,
@@ -4132,9 +4345,11 @@ function MergeGroupDetailModal({
             </Text>
             <Text fw={600}>{group.totalCapacity} chỗ</Text>
           </Stack>
-          <Button color="red" variant="light" onClick={() => onRequestRelease(group.id)}>
-            Bỏ gộp
-          </Button>
+          {isEditMode ? (
+            <Button color="red" variant="light" onClick={() => onRequestRelease(group.id)}>
+              Bỏ gộp
+            </Button>
+          ) : null}
         </Group>
         <Divider label="Bàn thành viên" labelPosition="left" />
         <Stack gap="xs">

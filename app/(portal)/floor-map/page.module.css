@@ -565,6 +565,23 @@
   pointer-events: auto;
 }
 
+.mergeGroupContainerHeaderDraggable {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.mergeGroupContainerHeaderDraggable:active {
+  cursor: grabbing;
+}
+
+.mergeGroupContainerDragging {
+  border-style: solid;
+  border-color: rgba(12, 97, 164, 0.95);
+  box-shadow: 0 12px 28px rgba(12, 97, 164, 0.28);
+  opacity: 0.94;
+}
+
 :global([data-mantine-color-scheme="dark"]) .mergeGroupContainerHeader {
   background: rgba(30, 38, 50, 0.96);
   border-bottom-color: rgba(116, 192, 252, 0.25);
@@ -653,6 +670,10 @@
 /* Member of an active merge group — render above the container backdrop */
 .tableBlockMergeMember {
   z-index: 5;
+}
+
+.tableBlockMergeMemberLocked {
+  cursor: default;
 }
 
 /* Floating action bar for "Gộp đã chọn (N)" */

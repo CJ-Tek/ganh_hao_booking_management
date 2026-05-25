@@ -535,13 +535,13 @@ export function packMergeGroupTablePositions(input: {
   };
 }
 
-/** Member cells and the "+" plug cell derived from packed/wrapped layout. */
-export function getMergeGroupStripCells(
+/** Strip anchor (top-left of wrapped layout) that matches current member cell positions. */
+export function findMergeStripAnchorForMemberCells(
   memberTableIds: string[],
   positions: Map<string, { row: number; col: number }>,
   gridColumns: number,
   gridRows: number
-): { memberCells: Set<string>; plugRow: number; plugCol: number } | null {
+): { row: number; col: number } | null {
   const memberCells = new Set<string>();
   for (const tableId of memberTableIds) {
     const pos = positions.get(tableId);
@@ -555,7 +555,7 @@ export function getMergeGroupStripCells(
   }
 
   const slotCount = memberTableIds.length + 1;
-  let bestPlug: { row: number; col: number } | null = null;
+  let bestAnchor: { row: number; col: number } | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
 
   for (let anchorRow = 0; anchorRow < gridRows; anchorRow++) {
@@ -588,13 +588,84 @@ export function getMergeGroupStripCells(
       const score = anchorRow * 1000 + anchorCol;
       if (score < bestScore) {
         bestScore = score;
-        bestPlug = wrapped.layout[slotCount - 1]!;
+        bestAnchor = { row: anchorRow, col: anchorCol };
       }
     }
   }
 
-  if (!bestPlug) {
+  return bestAnchor;
+}
+
+/** Member grid positions for a strip anchored at `(anchorRow, anchorCol)` (preview while dragging). */
+export function getMergeMemberPositionsAtAnchor(
+  memberTableIds: string[],
+  anchorRow: number,
+  anchorCol: number,
+  gridColumns: number,
+  gridRows: number
+): Map<string, { row: number; col: number }> | null {
+  if (memberTableIds.length === 0) {
     return null;
   }
-  return { memberCells, plugRow: bestPlug.row, plugCol: bestPlug.col };
+  const wrapped = layoutWrappedMergeCellsWithRowGrowth(
+    anchorRow,
+    anchorCol,
+    memberTableIds.length + 1,
+    gridColumns,
+    gridRows
+  );
+  if (!wrapped) {
+    return null;
+  }
+  const result = new Map<string, { row: number; col: number }>();
+  memberTableIds.forEach((tableId, index) => {
+    const cell = wrapped.layout[index];
+    if (cell) {
+      result.set(tableId, cell);
+    }
+  });
+  return result;
+}
+
+/** Member cells and the "+" plug cell derived from packed/wrapped layout. */
+export function getMergeGroupStripCells(
+  memberTableIds: string[],
+  positions: Map<string, { row: number; col: number }>,
+  gridColumns: number,
+  gridRows: number
+): { memberCells: Set<string>; plugRow: number; plugCol: number } | null {
+  const memberCells = new Set<string>();
+  for (const tableId of memberTableIds) {
+    const pos = positions.get(tableId);
+    if (!pos) {
+      continue;
+    }
+    memberCells.add(cellKey(pos.row, pos.col));
+  }
+  if (memberCells.size === 0) {
+    return null;
+  }
+
+  const anchor = findMergeStripAnchorForMemberCells(
+    memberTableIds,
+    positions,
+    gridColumns,
+    gridRows
+  );
+  if (!anchor) {
+    return null;
+  }
+
+  const wrapped = layoutWrappedMergeCellsWithRowGrowth(
+    anchor.row,
+    anchor.col,
+    memberTableIds.length + 1,
+    gridColumns,
+    gridRows
+  );
+  const plug = wrapped?.layout[memberTableIds.length];
+  if (!plug) {
+    return null;
+  }
+  return { memberCells, plugRow: plug.row, plugCol: plug.col };
 }
