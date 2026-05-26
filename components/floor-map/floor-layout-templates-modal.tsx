@@ -35,6 +35,7 @@ type FloorLayoutTemplatesModalProps = {
     areaId: string,
     layoutDate: string
   ) => Promise<unknown>;
+  onClearDayLayout?: () => Promise<void>;
   onApplied: () => void;
 };
 
@@ -50,6 +51,7 @@ export function FloorLayoutTemplatesModal({
   createTemplate,
   deleteTemplate,
   applyTemplate,
+  onClearDayLayout,
   onApplied,
 }: FloorLayoutTemplatesModalProps) {
   const [templates, setTemplates] = useState<FloorLayoutTemplate[]>([]);
@@ -57,6 +59,7 @@ export function FloorLayoutTemplatesModal({
   const [newName, setNewName] = useState("");
   const [saving, setSaving] = useState(false);
   const [applyingId, setApplyingId] = useState<string | null>(null);
+  const [clearingDayLayout, setClearingDayLayout] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!areaId) {
@@ -149,6 +152,36 @@ export function FloorLayoutTemplatesModal({
     void runApply(template.id);
   };
 
+  const handleClearDayLayout = () => {
+    if (!onClearDayLayout || !hasDayOverride) {
+      return;
+    }
+    modals.openConfirmModal({
+      title: "Xóa sơ đồ riêng?",
+      children: (
+        <Text size="sm">
+          Xóa sơ đồ riêng cho ngày {layoutDateLabel} và dùng lại sơ đồ mặc định chung? Các mẫu đã
+          lưu không bị xóa.
+        </Text>
+      ),
+      labels: { confirm: "Xóa sơ đồ riêng", cancel: "Hủy" },
+      confirmProps: { color: "red" },
+      onConfirm: () => {
+        void (async () => {
+          setClearingDayLayout(true);
+          try {
+            await onClearDayLayout();
+            onApplied();
+          } catch {
+            /* Parent shows error notification. */
+          } finally {
+            setClearingDayLayout(false);
+          }
+        })();
+      },
+    });
+  };
+
   const handleDelete = (template: FloorLayoutTemplate) => {
     modals.openConfirmModal({
       title: "Xóa mẫu sơ đồ?",
@@ -185,9 +218,29 @@ export function FloorLayoutTemplatesModal({
     >
       <Stack gap="md">
         <Text size="sm" c="dimmed">
-          Lưu bố cục hiện (ngày {layoutDateLabel}) thành mẫu, hoặc áp dụng mẫu đã lưu cho ngày đang
-          xem.
+          Lưu bố cục hiện (ngày {layoutDateLabel}) thành mẫu, áp dụng hoặc xóa mẫu, và quản lý sơ
+          đồ riêng của ngày đang xem.
         </Text>
+
+        {hasDayOverride && onClearDayLayout ? (
+          <Stack gap="xs">
+            <Text fw={600} size="sm">
+              Sơ đồ riêng của ngày
+            </Text>
+            <Text size="sm" c="dimmed">
+              Ngày {layoutDateLabel} đang dùng bố cục khác sơ đồ mặc định chung.
+            </Text>
+            <Button
+              variant="subtle"
+              color="gray"
+              loading={clearingDayLayout}
+              disabled={!areaId}
+              onClick={handleClearDayLayout}
+            >
+              Xóa sơ đồ riêng
+            </Button>
+          </Stack>
+        ) : null}
 
         <Stack gap="xs">
           <TextInput
