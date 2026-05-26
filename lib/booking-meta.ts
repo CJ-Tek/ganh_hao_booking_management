@@ -806,10 +806,35 @@ const MAX_RECOMMENDATION_CANDIDATES = 5;
 const MAX_NEW_COMBINATION_TABLES = 4;
 const MAX_AREA_TABLES_FOR_FULL_SUBSET = 14;
 
+function isMergeGroupCandidateForRecommendation(
+  group: TableMergeGroup,
+  options: {
+    branchId: string;
+    areaId?: string | null;
+    candidateDayLabel: string | null;
+  }
+): boolean {
+  if (group.branchId !== options.branchId || group.status !== "active") {
+    return false;
+  }
+  if (options.areaId && group.areaId !== options.areaId) {
+    return false;
+  }
+  if (
+    options.candidateDayLabel &&
+    (options.candidateDayLabel < group.startDate ||
+      options.candidateDayLabel > group.endDate)
+  ) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Suggest ways to fit `targetSeats` guests when no single table works:
  * 1. Reuse existing active merge groups (already gộp) with enough capacity.
- * 2. Propose new combinations of 2..MAX_NEW_COMBINATION_TABLES available tables (no slot conflicts).
+ * 2. Propose new combinations of 2..MAX_NEW_COMBINATION_TABLES available tables (no slot conflicts,
+ *    excluding tables already in an active merge group on the booking day).
  *
  * Returns at most `MAX_RECOMMENDATION_CANDIDATES` ranked suggestions.
  * Ranking: existing groups first, then fewer tables, then least wasted seats, then tighter grid spread.
@@ -836,18 +861,21 @@ export function recommendMergeGroups(
       })
     : options.allBookings;
 
+  const mergeGroupScope = { branchId, areaId: options.areaId, candidateDayLabel };
+
+  const tableIdsInActiveMergeGroups = new Set<string>();
+  for (const group of options.mergeGroups) {
+    if (!isMergeGroupCandidateForRecommendation(group, mergeGroupScope)) {
+      continue;
+    }
+    for (const tableId of group.tableIds) {
+      tableIdsInActiveMergeGroups.add(tableId);
+    }
+  }
+
   const existingGroupSuggestions: MergeRecommendation[] = options.mergeGroups
     .filter((group) => {
-      if (group.branchId !== branchId || group.status !== "active") {
-        return false;
-      }
-      if (options.areaId && group.areaId !== options.areaId) {
-        return false;
-      }
-      if (
-        candidateDayLabel &&
-        (candidateDayLabel < group.startDate || candidateDayLabel > group.endDate)
-      ) {
+      if (!isMergeGroupCandidateForRecommendation(group, mergeGroupScope)) {
         return false;
       }
       if (getMergeGroupEffectiveGuestCapacity(group.totalCapacity) < targetSeats) {
@@ -871,6 +899,9 @@ export function recommendMergeGroups(
       return false;
     }
     if (table.positionX < 0 || table.positionY < 0) {
+      return false;
+    }
+    if (tableIdsInActiveMergeGroups.has(table.id)) {
       return false;
     }
     return !hasAssignableSlotConflictAtTable(booking, table.id, allBookingsOnCandidateDay);

@@ -36,7 +36,7 @@ export function openPortalConfirmModal(options: PortalConfirmOptions): Promise<b
 
 /** In-app alert dialog (replaces `window.alert`). */
 export function openPortalAlertModal(options: { title: string; message: ReactNode }) {
-  modals.openModal({
+  modals.open({
     title: options.title,
     centered: true,
     withCloseButton: true,
