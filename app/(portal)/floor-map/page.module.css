@@ -126,6 +126,7 @@
   background-color: #ffffff;
   border-color: rgba(148, 163, 184, 0.5);
   cursor: grab;
+  touch-action: none;
 }
 
 :global([data-mantine-color-scheme="dark"]) .tableBlockEdit {
@@ -214,25 +215,21 @@
   align-items: center;
   gap: 8px;
   flex: 1 1 auto;
+  width: 100%;
   min-width: 0;
   flex-wrap: nowrap;
 }
 
 .toolbarModeControl {
+  flex: 1 1 0;
   min-width: 180px;
-  flex: 1;
-}
-
-.toolbarSaveRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  flex-shrink: 0;
+  max-width: none;
+  width: 100%;
 }
 
 .toolbarSaveBtn {
   flex-shrink: 0;
+  align-self: center;
 }
 
 .toolbarAreaSelectRow {
@@ -373,6 +370,7 @@
   padding: 6px;
   background: #ffffff;
   cursor: grab;
+  touch-action: none;
   user-select: none;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
   transition:
@@ -409,12 +407,6 @@
     width: 100%;
     align-items: center;
     flex-wrap: wrap;
-  }
-
-  .toolbarSaveRow {
-    flex: 1 1 100%;
-    width: 100%;
-    order: 1;
   }
 
   .toolbarSaveBtn {
@@ -499,6 +491,72 @@
   }
 }
 
+/* Large tablet canvas: row 1 = mode tools + area select; row 2 = actions. */
+@container floor-map-canvas (min-width: 52.01em) and (max-width: 62em) {
+  .canvasTopToolbar {
+    display: grid;
+    grid-template-columns: minmax(200px, 0.44fr) minmax(220px, 0.56fr);
+    grid-template-areas:
+      "mode select"
+      "actions actions";
+    align-items: center;
+    column-gap: 10px;
+    row-gap: 8px;
+  }
+
+  .toolbarModeRow {
+    grid-area: mode;
+    width: 100%;
+    min-width: 0;
+    flex-wrap: nowrap;
+  }
+
+  .toolbarModeControl {
+    flex: 1 1 0;
+    min-width: 140px;
+    width: 100%;
+    max-width: none;
+  }
+
+  .toolbarAreaRow {
+    display: contents;
+  }
+
+  .toolbarAreaSelectRow {
+    grid-area: select;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .toolbarAreaSecondary {
+    grid-area: actions;
+    width: 100%;
+    flex-direction: row;
+    padding-right: calc(var(--mantine-spacing-md) + 42px);
+  }
+
+  .toolbarAreaPrimaryBtns {
+    flex-wrap: wrap;
+  }
+
+  .toolbarSaveBtn {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .topToolbarCollapseBtn {
+    grid-area: actions;
+    justify-self: end;
+    align-self: center;
+    margin-left: 0;
+  }
+
+  .canvasTopToolbar > .topToolbarCollapseBtn {
+    display: inline-flex;
+    width: auto;
+  }
+}
+
 /* Tablet canvas: pair action buttons on two rows (2×2). */
 @container floor-map-canvas (min-width: 48.01em) and (max-width: 62em) {
   .toolbarAreaPrimaryBtns {
@@ -534,12 +592,6 @@
   .toolbarModeRow {
     width: 100%;
     flex-wrap: wrap;
-  }
-
-  .toolbarSaveRow {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 10px;
   }
 
   .toolbarSaveBtn {
@@ -600,11 +652,11 @@
   }
 }
 
-/* Wide canvas: row 1 = mode + area select; row 2 = actions + collapse (full width). */
+/* Wide canvas: row 1 = mode tools + area select; row 2 = actions. */
 @container floor-map-canvas (min-width: 62.01em) {
   .canvasTopToolbar {
     display: grid;
-    grid-template-columns: minmax(200px, 0.38fr) minmax(360px, 0.62fr);
+    grid-template-columns: minmax(240px, 0.44fr) minmax(320px, 0.56fr);
     grid-template-areas:
       "mode select"
       "actions actions";
@@ -618,21 +670,17 @@
     width: 100%;
     min-width: 0;
     align-self: center;
-    flex-wrap: wrap;
-  }
-
-  .toolbarSaveRow {
-    flex: 1 1 auto;
-    order: 0;
+    flex-wrap: nowrap;
   }
 
   .toolbarSaveBtn {
     flex: 0 1 auto;
+    min-width: 0;
   }
 
   .toolbarModeControl {
     flex: 1 1 0;
-    min-width: 0;
+    min-width: 180px;
     max-width: none;
     width: 100%;
   }
@@ -1079,27 +1127,6 @@ button.mergeGroupContainerHeaderClickable:hover .mergeGroupContainerTitle {
   bottom: 0;
   border-radius: 0 0 14px 14px;
   pointer-events: none;
-}
-
-.mergeGroupPlugSlot {
-  position: absolute;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 152px;
-  height: 70px;
-  border: 2px dashed rgba(12, 97, 164, 0.55);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.55);
-  color: rgba(12, 97, 164, 0.75);
-  pointer-events: auto;
-}
-
-:global([data-mantine-color-scheme="dark"]) .mergeGroupPlugSlot {
-  background: rgba(20, 28, 40, 0.65);
-  border-color: rgba(116, 192, 252, 0.5);
-  color: rgba(116, 192, 252, 0.85);
 }
 
 .tableBlockInMergeGroup {

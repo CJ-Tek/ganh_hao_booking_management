@@ -109,8 +109,6 @@ import {
 } from "@/lib/floor-map-layout";
 import {
   findMergeStripAnchorForMemberCells,
-  findMergeStripAnchorForPlug,
-  getMergeGroupStripCells,
   getMergeMemberPositionsAtAnchor,
   packMergeGroupTablePositions,
 } from "@/lib/floor-map-merge-layout";
@@ -239,6 +237,12 @@ const FIT_VIEWPORT_MARGIN = 0.94;
 const FIT_TABLE_BOUNDS_PADDING = 40;
 const TAP_PLACE_THRESHOLD_PX = 14;
 const PALETTE_DRAG_THRESHOLD_PX = 12;
+/** Lower threshold on touch — easier to start drag without looking like a tap. */
+const TOUCH_DRAG_THRESHOLD_PX = 6;
+
+function getPointerDragThresholdPx(pointerType: string) {
+  return pointerType === "touch" ? TOUCH_DRAG_THRESHOLD_PX : PALETTE_DRAG_THRESHOLD_PX;
+}
 
 function isTableBlockTarget(target: EventTarget | null) {
   const el = target as HTMLElement | null;
@@ -522,7 +526,6 @@ export default function FloorMapPage() {
     Record<string, AreaFloorLayoutByDate | null | undefined>
   >({});
   const [layoutTemplatesOpen, setLayoutTemplatesOpen] = useState(false);
-  const [clearingDayLayout, setClearingDayLayout] = useState(false);
   const [registerTable, setRegisterTable] = useState<DiningTable | null>(null);
   /** Giữ chỗ = future slot (show datetime); Vào bàn ngay = now (hide datetime) */
   const [registerArrivalMode, setRegisterArrivalMode] = useState<"hold" | "immediate">(
@@ -1899,18 +1902,8 @@ export default function FloorMapPage() {
       width: number;
       height: number;
       headerHeight: number;
-      plugSlot: { left: number; top: number; row: number; col: number } | null;
     }> = [];
     for (const group of effectiveMergeGroups) {
-      const strip = getMergeGroupStripCells(
-        group.tableIds,
-        effectiveTablePositions,
-        effectiveGridColumns,
-        effectiveGridRows
-      );
-      if (!strip) {
-        continue;
-      }
       let memberCount = 0;
       let minRow = Number.POSITIVE_INFINITY;
       let maxRow = Number.NEGATIVE_INFINITY;
@@ -1930,10 +1923,6 @@ export default function FloorMapPage() {
       if (memberCount === 0) {
         continue;
       }
-      minRow = Math.min(minRow, strip.plugRow);
-      maxRow = Math.max(maxRow, strip.plugRow);
-      minCol = Math.min(minCol, strip.plugCol);
-      maxCol = Math.max(maxCol, strip.plugCol);
       const tableXMin = CANVAS_PADDING + minCol * effectiveNodeSpacing - halfW;
       const tableXMax = CANVAS_PADDING + maxCol * effectiveNodeSpacing + halfW;
       const tableYMin = CANVAS_PADDING + minRow * effectiveNodeSpacing - halfH;
@@ -1960,12 +1949,6 @@ export default function FloorMapPage() {
           yMax - yMin + MERGE_GROUP_BBOX_HEIGHT_ADJUST_PX
         ),
         headerHeight,
-        plugSlot: {
-          left: CANVAS_PADDING + strip.plugCol * effectiveNodeSpacing,
-          top: CANVAS_PADDING + strip.plugRow * effectiveNodeSpacing,
-          row: strip.plugRow,
-          col: strip.plugCol,
-        },
       });
     }
     return rects;
@@ -2053,108 +2036,14 @@ export default function FloorMapPage() {
       setDragState(null);
       return;
     }
-    const dropKey = `${row}-${col}`;
-    const currentGroupId = tableToMergeGroupId.get(tableId) ?? null;
-
     setEditLayout((prev) => {
       if (!prev) {
         return prev;
       }
-      let next: FloorEditLayout = {
+      return {
         ...prev,
         positions: { ...prev.positions, [source.id]: { x: col, y: row } },
       };
-
-      if (effectiveMergeGroups.length === 0) {
-        return next;
-      }
-
-      if (!currentGroupId) {
-        for (const group of effectiveMergeGroups) {
-          const positionsForStrip = new Map(effectiveTablePositions);
-          positionsForStrip.set(tableId, { row, col });
-          const strip = getMergeGroupStripCells(
-            group.tableIds,
-            positionsForStrip,
-            next.gridColumns,
-            next.gridRows
-          );
-          if (!strip) {
-            continue;
-          }
-          if (row !== strip.plugRow || col !== strip.plugCol) {
-            continue;
-          }
-          const pendingMergeRemoves = next.pendingMergeRemoves.filter(
-            (item) => !(item.groupId === group.id && item.tableId === tableId)
-          );
-          const alreadyPending = next.pendingMergeAdds.some(
-            (item) => item.groupId === group.id && item.tableId === tableId
-          );
-          const pendingMergeAdds = alreadyPending
-            ? next.pendingMergeAdds
-            : [...next.pendingMergeAdds, { groupId: group.id, tableId }];
-          next = { ...next, pendingMergeAdds, pendingMergeRemoves };
-          const memberIds = mergeMemberIdsForEdit(group, pendingMergeAdds, pendingMergeRemoves);
-          const preferredAnchor =
-            findMergeStripAnchorForPlug(
-              row,
-              col,
-              memberIds.length + 1,
-              next.gridColumns,
-              next.gridRows
-            ) ?? undefined;
-          next = applyMergePackToEditLayout(
-            next,
-            memberIds,
-            tablesInArea,
-            preferredAnchor
-          );
-          break;
-        }
-        return next;
-      }
-
-      const currentGroup = effectiveMergeGroups.find((group) => group.id === currentGroupId);
-      if (!currentGroup) {
-        return next;
-      }
-      const positionsForStrip = new Map(effectiveTablePositions);
-      positionsForStrip.set(tableId, { row, col });
-      const strip = getMergeGroupStripCells(
-        currentGroup.tableIds,
-        positionsForStrip,
-        next.gridColumns,
-        next.gridRows
-      );
-      if (!strip) {
-        return next;
-      }
-      const stillOnStrip =
-        strip.memberCells.has(dropKey) || (row === strip.plugRow && col === strip.plugCol);
-      if (stillOnStrip) {
-        return next;
-      }
-
-      const pendingMergeAdds = next.pendingMergeAdds.filter(
-        (item) => !(item.groupId === currentGroupId && item.tableId === tableId)
-      );
-      const alreadyPending = next.pendingMergeRemoves.some(
-        (item) => item.groupId === currentGroupId && item.tableId === tableId
-      );
-      const pendingMergeRemoves = alreadyPending
-        ? next.pendingMergeRemoves
-        : [...next.pendingMergeRemoves, { groupId: currentGroupId, tableId }];
-      next = { ...next, pendingMergeAdds, pendingMergeRemoves };
-      const memberIds = mergeMemberIdsForEdit(
-        currentGroup,
-        pendingMergeAdds,
-        pendingMergeRemoves
-      );
-      if (memberIds.length >= 2) {
-        next = applyMergePackToEditLayout(next, memberIds, tablesInArea);
-      }
-      return next;
     });
     setDragState(null);
   };
@@ -3000,19 +2889,10 @@ export default function FloorMapPage() {
     }
   };
 
-  const handleClearDayLayout = async () => {
+  const clearDayLayoutOverride = async () => {
     if (!areaId || !hasSupabase) {
-      return;
+      throw new Error("Chưa chọn khu vực hoặc chưa kết nối Supabase.");
     }
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        `Xóa sơ đồ riêng cho ngày ${floorMapSelectedDate.format("DD/MM/YYYY")} và dùng lại sơ đồ mặc định chung?`
-      )
-    ) {
-      return;
-    }
-    setClearingDayLayout(true);
     try {
       await deleteAreaFloorLayoutForDate(areaId, selectedLayoutDate);
       if (dayLayoutCacheKey) {
@@ -3022,13 +2902,13 @@ export default function FloorMapPage() {
         color: "green",
         message: "Đã xóa sơ đồ riêng — đang dùng sơ đồ mặc định chung.",
       });
+      await refreshDayLayout();
     } catch (error) {
       notifications.show({
         color: "red",
         message: error instanceof Error ? error.message : "Không xóa được sơ đồ riêng.",
       });
-    } finally {
-      setClearingDayLayout(false);
+      throw error;
     }
   };
 
@@ -3408,21 +3288,58 @@ export default function FloorMapPage() {
     };
   }, [areaId, mode]);
 
+  const beginCanvasTableDrag = (
+    pointerId: number,
+    table: DiningTable,
+    clientX: number,
+    clientY: number,
+    snapToPointer: boolean
+  ) => {
+    tablePickGestureRef.current = null;
+    paletteGestureRef.current = null;
+    let row: number;
+    let col: number;
+    if (snapToPointer) {
+      const world = toWorldCoordinate(clientX, clientY);
+      const snapped = nearestNode(world.x, world.y);
+      row = snapped.row;
+      col = snapped.col;
+    } else {
+      const base = getTableGridPosition(table, effectiveGridColumns, effectiveGridRows);
+      row = clamp(base.row, 0, effectiveGridRows - 1);
+      col = clamp(base.col, 0, effectiveGridColumns - 1);
+    }
+    setDragState({
+      pointerId,
+      tableId: table.id,
+      row,
+      col,
+    });
+  };
+
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!isEditMode && blockCanvasForOverlay) {
       return;
     }
+    const dragThreshold = getPointerDragThresholdPx(event.pointerType);
+
     const tablePick = tablePickGestureRef.current;
     if (tablePick && event.pointerId === tablePick.pointerId) {
       const dist = Math.hypot(
         event.clientX - tablePick.startX,
         event.clientY - tablePick.startY
       );
-      if (dist > PALETTE_DRAG_THRESHOLD_PX) {
+      if (dist > dragThreshold) {
         const pickedTable = layoutTablesInArea.find((t) => t.id === tablePick.tableId);
         tablePickGestureRef.current = null;
         if (pickedTable) {
-          startTableDrag(event, pickedTable);
+          beginCanvasTableDrag(
+            event.pointerId,
+            pickedTable,
+            event.clientX,
+            event.clientY,
+            true
+          );
         }
       }
       return;
@@ -3536,7 +3453,7 @@ export default function FloorMapPage() {
         event.clientX - tablePick.startX,
         event.clientY - tablePick.startY
       );
-      if (dist <= PALETTE_DRAG_THRESHOLD_PX) {
+      if (dist <= getPointerDragThresholdPx(event.pointerType)) {
         const pickedTable = layoutTablesInArea.find((t) => t.id === tablePick.tableId);
         if (pickedTable) {
           toggleEditMergeTableSelection(pickedTable.id, pickedTable.name);
@@ -3617,9 +3534,7 @@ export default function FloorMapPage() {
     if (memberIds.length === 0) {
       return;
     }
-    if (event.pointerType !== "touch") {
-      event.preventDefault();
-    }
+    event.preventDefault();
     event.stopPropagation();
     const viewport = viewportRef.current;
     if (!viewport) {
@@ -3665,23 +3580,14 @@ export default function FloorMapPage() {
     if (event.button !== 0) {
       return;
     }
-    tablePickGestureRef.current = null;
-    if (event.pointerType !== "touch") {
-      event.preventDefault();
-    }
+    event.preventDefault();
     event.stopPropagation();
     const viewport = viewportRef.current;
     if (!viewport) {
       return;
     }
-    const base = getTableGridPosition(table, effectiveGridColumns, effectiveGridRows);
     viewport.setPointerCapture(event.pointerId);
-    setDragState({
-      pointerId: event.pointerId,
-      tableId: table.id,
-      row: clamp(base.row, 0, effectiveGridRows - 1),
-      col: clamp(base.col, 0, effectiveGridColumns - 1),
-    });
+    beginCanvasTableDrag(event.pointerId, table, event.clientX, event.clientY, false);
   };
 
   const toggleEditMergeTableSelection = (tableId: string, tableName: string) => {
@@ -3706,6 +3612,7 @@ export default function FloorMapPage() {
     }
     event.preventDefault();
     event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
     paletteGestureRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -3727,24 +3634,18 @@ export default function FloorMapPage() {
       return;
     }
     const dist = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
-    if (dist <= PALETTE_DRAG_THRESHOLD_PX) {
+    if (dist <= getPointerDragThresholdPx(event.pointerType)) {
       return;
     }
     const viewport = viewportRef.current;
     if (!viewport) {
       return;
     }
-    paletteGestureRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     viewport.setPointerCapture(event.pointerId);
-    const centerWorldX = (viewport.clientWidth / 2 - offset.x) / scale;
-    const centerWorldY = (viewport.clientHeight / 2 - offset.y) / scale;
-    const centerNode = nearestNode(centerWorldX, centerWorldY);
-    setDragState({
-      pointerId: event.pointerId,
-      tableId: table.id,
-      row: centerNode.row,
-      col: centerNode.col,
-    });
+    beginCanvasTableDrag(event.pointerId, table, event.clientX, event.clientY, true);
   };
 
   const handlePalettePointerUp = (
@@ -3759,9 +3660,12 @@ export default function FloorMapPage() {
     ) {
       return;
     }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     paletteGestureRef.current = null;
     const dist = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
-    if (dist <= PALETTE_DRAG_THRESHOLD_PX) {
+    if (dist <= getPointerDragThresholdPx(event.pointerType)) {
       setPendingPlacementTableId((current) => {
         if (current === table.id) {
           notifications.show({ color: "blue", message: "Đã bỏ chọn đặt bàn." });
@@ -3786,6 +3690,9 @@ export default function FloorMapPage() {
       gesture.tableId === table.id &&
       gesture.pointerId === event.pointerId
     ) {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
       paletteGestureRef.current = null;
     }
   };
@@ -4074,23 +3981,6 @@ export default function FloorMapPage() {
                   </div>
                 );
               })}
-              {mergeBBoxes.map((bbox) =>
-                bbox.plugSlot && isEditMode ? (
-                  <div
-                    key={`merge-plug-${bbox.groupId}`}
-                    className={classes.mergeGroupPlugSlot}
-                    style={{
-                      left: bbox.plugSlot.left,
-                      top: bbox.plugSlot.top,
-                      transform: "translate(-50%, -50%)",
-                    }}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    title="Kéo bàn vào đây để gộp"
-                  >
-                    <Plus size={28} strokeWidth={2} />
-                  </div>
-                ) : null
-              )}
               {gridNodes.map((node) => {
                 const key = `${node.row}-${node.col}`;
                 const tables = tableByNode.get(key) ?? [];
@@ -4169,7 +4059,12 @@ export default function FloorMapPage() {
                           toggleEditMergeTableSelection(table.id, table.name);
                           return;
                         }
+                        event.preventDefault();
                         event.stopPropagation();
+                        const viewport = viewportRef.current;
+                        if (viewport) {
+                          viewport.setPointerCapture(event.pointerId);
+                        }
                         tablePickGestureRef.current = {
                           pointerId: event.pointerId,
                           startX: event.clientX,
@@ -4391,89 +4286,64 @@ export default function FloorMapPage() {
                   </div>
                 ) : null}
 
-                {isEditMode ? (
-                  <div className={classes.toolbarSaveRow}>
-                    <Button
-                      size="sm"
-                      leftSection={<Save size={16} />}
-                      loading={isSavingLayout}
-                      disabled={!editLayout || !isLayoutDirty}
-                      onClick={() => void handleSaveFloorLayout()}
-                      className={classes.toolbarSaveBtn}
-                    >
-                      Lưu sơ đồ ({floorMapSelectedDate.format("DD/MM")})
-                    </Button>
-                    <Button
-                      size="sm"
-                      leftSection={<Save size={16} />}
-                      variant="light"
-                      loading={isSavingLayout}
-                      disabled={!editLayout || !isLayoutDirty}
-                      onClick={() => void handleSaveFloorLayoutAsGlobal()}
-                      className={classes.toolbarSaveBtn}
-                    >
-                      Lưu sơ đồ mặc định
-                    </Button>
-                  </div>
-                ) : null}
-
                 {!isEmployee ? (
-                <SegmentedControl
-                  value={mode}
-                  onChange={(value) => {
-                    const nextMode = value as CanvasMode;
-                    if (nextMode === "edit") {
-                      if (editBlockedByOther) {
-                        notifications.show({
-                          color: "yellow",
-                          message: `${layoutLockHolderName ?? "Người khác"} đang chỉnh sửa sơ đồ. Chỉ xem được.`,
-                        });
-                        return;
-                      }
-                      if (!areaId) {
-                        return;
-                      }
-                      void (async () => {
-                        const acquired = await acquireFloorLayoutEditLock(areaId);
-                        if (!acquired.ok) {
+                  <SegmentedControl
+                    fullWidth
+                    value={mode}
+                    onChange={(value) => {
+                      const nextMode = value as CanvasMode;
+                      if (nextMode === "edit") {
+                        if (editBlockedByOther) {
                           notifications.show({
                             color: "yellow",
-                            message: `${acquired.holderFullName} đang chỉnh sửa sơ đồ. Thử lại sau.`,
+                            message: `${layoutLockHolderName ?? "Người khác"} đang chỉnh sửa sơ đồ. Chỉ xem được.`,
                           });
                           return;
                         }
-                        setMode("edit");
-                        setPendingPlacementTableId(null);
-                      })();
-                      return;
-                    }
-                    if (mode === "edit" && isLayoutDirty) {
-                      if (
-                        typeof window !== "undefined" &&
-                        !window.confirm("Bỏ các thay đổi sơ đồ chưa lưu?")
-                      ) {
+                        if (!areaId) {
+                          return;
+                        }
+                        void (async () => {
+                          const acquired = await acquireFloorLayoutEditLock(areaId);
+                          if (!acquired.ok) {
+                            notifications.show({
+                              color: "yellow",
+                              message: `${acquired.holderFullName} đang chỉnh sửa sơ đồ. Thử lại sau.`,
+                            });
+                            return;
+                          }
+                          setMode("edit");
+                          setPendingPlacementTableId(null);
+                        })();
                         return;
                       }
-                    }
-                    setMode("view");
-                    setPendingPlacementTableId(null);
-                    setIsToolsPanelOpen(false);
-                    setIsSearchPanelOpen(false);
-                    setDragState(null);
-                    if (areaId) {
-                      void releaseFloorLayoutEditLock(areaId);
-                    }
-                  }}
-                  data={[
-                    { label: "View", value: "view" },
-                    {
-                      label: "Edit",
-                      value: "edit",
-                      disabled: editBlockedByOther,
-                    },
-                  ]}
-                  className={classes.toolbarModeControl}
-                />
+                      if (mode === "edit" && isLayoutDirty) {
+                        if (
+                          typeof window !== "undefined" &&
+                          !window.confirm("Bỏ các thay đổi sơ đồ chưa lưu?")
+                        ) {
+                          return;
+                        }
+                      }
+                      setMode("view");
+                      setPendingPlacementTableId(null);
+                      setIsToolsPanelOpen(false);
+                      setIsSearchPanelOpen(false);
+                      setDragState(null);
+                      if (areaId) {
+                        void releaseFloorLayoutEditLock(areaId);
+                      }
+                    }}
+                    data={[
+                      { label: "View", value: "view" },
+                      {
+                        label: "Edit",
+                        value: "edit",
+                        disabled: editBlockedByOther,
+                      },
+                    ]}
+                    className={classes.toolbarModeControl}
+                  />
                 ) : null}
                 </div>
 
@@ -4569,6 +4439,27 @@ export default function FloorMapPage() {
                         {isEditMode ? (
                           <>
                             <Button
+                              size="sm"
+                              leftSection={<Save size={16} />}
+                              loading={isSavingLayout}
+                              disabled={!editLayout || !isLayoutDirty}
+                              onClick={() => void handleSaveFloorLayout()}
+                              className={classes.toolbarSaveBtn}
+                            >
+                              Lưu sơ đồ ({floorMapSelectedDate.format("DD/MM")})
+                            </Button>
+                            <Button
+                              size="sm"
+                              leftSection={<Save size={16} />}
+                              variant="light"
+                              loading={isSavingLayout}
+                              disabled={!editLayout || !isLayoutDirty}
+                              onClick={() => void handleSaveFloorLayoutAsGlobal()}
+                              className={classes.toolbarSaveBtn}
+                            >
+                              Lưu sơ đồ mặc định
+                            </Button>
+                            <Button
                               size={isCompact ? "sm" : "compact-sm"}
                               variant="default"
                               className={classes.toolbarDayListBtn}
@@ -4577,19 +4468,6 @@ export default function FloorMapPage() {
                             >
                               Mẫu sơ đồ…
                             </Button>
-                            {resolvedLayout.hasDayOverride ? (
-                              <Button
-                                size={isCompact ? "sm" : "compact-sm"}
-                                variant="subtle"
-                                color="gray"
-                                className={classes.toolbarDayListBtn}
-                                loading={clearingDayLayout}
-                                onClick={() => void handleClearDayLayout()}
-                                disabled={!areaId || !hasSupabase}
-                              >
-                                Xóa sơ đồ riêng
-                              </Button>
-                            ) : null}
                           </>
                         ) : null}
                       </Group>
@@ -5193,6 +5071,7 @@ export default function FloorMapPage() {
         createTemplate={createFloorLayoutTemplate}
         deleteTemplate={deleteFloorLayoutTemplate}
         applyTemplate={applyFloorLayoutTemplateToDate}
+        onClearDayLayout={clearDayLayoutOverride}
         onApplied={() => void refreshDayLayout()}
       />
 
