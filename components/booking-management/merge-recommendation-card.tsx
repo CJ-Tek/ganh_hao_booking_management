@@ -22,6 +22,8 @@ export interface MergeRecommendationCardProps {
   areaName?: string | null;
   maxItems?: number;
   applyLabel?: string;
+  /** Override helper text under the alert title. */
+  description?: string;
   busyKey?: string | null;
   onUseExisting: (group: MergeRecommendation) => void | Promise<void>;
   onMergeAndApply: (combo: MergeRecommendation) => void | Promise<void>;
@@ -34,6 +36,7 @@ export function MergeRecommendationCard({
   targetSeats,
   areaName,
   maxItems = 3,
+  description,
   busyKey,
   onUseExisting,
   onMergeAndApply,
@@ -70,8 +73,8 @@ export function MergeRecommendationCard({
     <Alert color="blue" variant="light" title={`Gợi ý gộp bàn cho ${titleBasics}`}>
       <Stack gap="xs">
         <Text size="xs" c="dimmed">
-          Không có bàn lẻ nào đủ chỗ. Áp dụng một trong các gợi ý dưới đây để gộp bàn và gán booking
-          ngay.
+          {description ??
+            "Không có bàn lẻ nào đủ chỗ. Áp dụng một trong các gợi ý dưới đây để gộp bàn và gán booking ngay."}
         </Text>
         {items.map((rec) => {
           const joinedNames = rec.tableIds.map((id) => tableMap.get(id)?.name ?? "?").join(" + ");

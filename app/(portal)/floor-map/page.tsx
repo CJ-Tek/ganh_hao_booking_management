@@ -78,6 +78,7 @@ const emptyRegisterVoiceFields = (): VoiceBookingFormFields => ({
   bookingAt: dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm"),
   areaId: null,
   tableId: null,
+  mergeGroupId: null,
   note: "",
   guestType: "Khách thường",
 });
@@ -3830,7 +3831,7 @@ export default function FloorMapPage() {
         </Alert>
       ) : null}
 
-      {!isEmployee ? (
+      {!isEmployee && !isEditMode ? (
         <Accordion
           variant="separated"
           defaultValue="floor-map-calendar"
@@ -4486,6 +4487,7 @@ export default function FloorMapPage() {
                         label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
                       }))}
                       searchable
+                      disabled={isEditMode}
                       className={classes.toolbarAreaSelect}
                       comboboxProps={{ withinPortal: true }}
                     />
@@ -4526,55 +4528,44 @@ export default function FloorMapPage() {
                         wrap="wrap"
                         className={classes.toolbarAreaPrimaryBtns}
                       >
-                        <Button
-                          color="brand"
-                          size={isCompact ? "sm" : "compact-sm"}
-                          className={classes.toolbarDayListBtn}
-                          onClick={() => setCreateBookingModalOpened(true)}
-                        >
-                          Tạo booking
-                        </Button>
-                        <Button
-                          size={isCompact ? "sm" : "compact-sm"}
-                          variant="filled"
-                          className={classes.toolbarDayListBtn}
-                          onClick={() => calendarPanelRef.current?.openDayListModal()}
-                        >
-                          Danh sách booking
-                        </Button>
                         {!isEditMode ? (
-                          <Button
-                            size={isCompact ? "sm" : "compact-sm"}
-                            variant="light"
-                            className={classes.toolbarDayListBtn}
-                            onClick={() => setMergeModalOpen(true)}
-                            disabled={!activeAreaBranchId}
-                          >
-                            Gộp bàn
-                          </Button>
-                        ) : (
-                          <Button
-                            size={isCompact ? "sm" : "compact-sm"}
-                            variant="light"
-                            className={classes.toolbarDayListBtn}
-                            onClick={() => {
-                              setMergeSelectedTableIds(editSelectedTableIds);
-                              setMergeModalOpen(true);
-                            }}
-                            disabled={!activeAreaBranchId}
-                          >
-                            Thêm bàn gộp
-                          </Button>
-                        )}
-                        <Button
-                          size={isCompact ? "sm" : "compact-sm"}
-                          variant="default"
-                          className={classes.toolbarDayListBtn}
-                          onClick={() => setMergeGroupsListModalOpen(true)}
-                          disabled={!activeAreaBranchId}
-                        >
-                          Danh sách bàn gộp
-                        </Button>
+                          <>
+                            <Button
+                              color="brand"
+                              size={isCompact ? "sm" : "compact-sm"}
+                              className={classes.toolbarDayListBtn}
+                              onClick={() => setCreateBookingModalOpened(true)}
+                            >
+                              Tạo booking
+                            </Button>
+                            <Button
+                              size={isCompact ? "sm" : "compact-sm"}
+                              variant="filled"
+                              className={classes.toolbarDayListBtn}
+                              onClick={() => calendarPanelRef.current?.openDayListModal()}
+                            >
+                              Danh sách booking
+                            </Button>
+                            <Button
+                              size={isCompact ? "sm" : "compact-sm"}
+                              variant="light"
+                              className={classes.toolbarDayListBtn}
+                              onClick={() => setMergeModalOpen(true)}
+                              disabled={!activeAreaBranchId}
+                            >
+                              Gộp bàn
+                            </Button>
+                            <Button
+                              size={isCompact ? "sm" : "compact-sm"}
+                              variant="default"
+                              className={classes.toolbarDayListBtn}
+                              onClick={() => setMergeGroupsListModalOpen(true)}
+                              disabled={!activeAreaBranchId}
+                            >
+                              Danh sách bàn gộp
+                            </Button>
+                          </>
+                        ) : null}
                         {isEditMode ? (
                           <>
                             <Button

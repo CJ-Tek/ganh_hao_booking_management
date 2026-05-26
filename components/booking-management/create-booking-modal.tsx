@@ -19,6 +19,7 @@ import {
 } from "@/components/portal-page";
 import {
   VoiceBookingAssistant,
+  type VoiceBookingFieldPatch,
   type VoiceBookingFormFields,
 } from "@/components/voice-booking/VoiceBookingAssistant";
 import { useAppContext } from "@/contexts/app-context";
@@ -50,6 +51,7 @@ const emptyVoiceFields = (): VoiceBookingFormFields => ({
   bookingAt: dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm"),
   areaId: null,
   tableId: null,
+  mergeGroupId: null,
   note: "",
   guestType: "Khách thường",
 });
@@ -74,6 +76,7 @@ export function CreateBookingModal({
   const [createBranchId, setCreateBranchId] = useState<string | null>(branchId);
   const [voiceFields, setVoiceFields] = useState<VoiceBookingFormFields>(emptyVoiceFields);
   const [recommendationBusyKey, setRecommendationBusyKey] = useState<string | null>(null);
+  const [voiceFieldPatch, setVoiceFieldPatch] = useState<VoiceBookingFieldPatch | null>(null);
 
   const resetCreateForm = useCallback(() => {
     setVoiceFields(emptyVoiceFields());
@@ -94,8 +97,17 @@ export function CreateBookingModal({
     setCreateBranchId(branchId);
   }, [branchId, opened]);
 
-  const { customerName, customerPhone, guestCount, bookingAt, note, guestType, areaId, tableId } =
-    voiceFields;
+  const {
+    customerName,
+    customerPhone,
+    guestCount,
+    bookingAt,
+    note,
+    guestType,
+    areaId,
+    tableId,
+    mergeGroupId,
+  } = voiceFields;
 
   const selectedBookingSlot = useMemo(() => (bookingAt ? bookingSlotKey(bookingAt) : null), [bookingAt]);
   const normalizedCustomerPhone = useMemo(
@@ -181,10 +193,35 @@ export function CreateBookingModal({
     () => state.tables.filter((table) => table.branchId === createBranchId),
     [createBranchId, state.tables]
   );
+  const createBranchMergeGroups = useMemo(
+    () => state.mergeGroups.filter((group) => group.branchId === createBranchId),
+    [createBranchId, state.mergeGroups]
+  );
+
+  const applyCreateFormTableSelection = useCallback(
+    (selection: VoiceBookingFieldPatch) => {
+      setVoiceFieldPatch(selection);
+    },
+    []
+  );
 
   const submitCreateBooking = async (options?: { allowDuplicate?: boolean }) => {
     if (!customerName.trim() || !createBranchId || !bookingAt) {
       notifications.show({ color: "red", message: "Cần ít nhất tên khách và thời gian đến." });
+      return;
+    }
+    const hasTable = Boolean(tableId);
+    const hasMergeGroup = Boolean(mergeGroupId);
+    if (
+      (areaId && !hasTable && !hasMergeGroup) ||
+      (!areaId && (hasTable || hasMergeGroup)) ||
+      (hasTable && hasMergeGroup)
+    ) {
+      notifications.show({
+        color: "red",
+        message:
+          "Chọn khu vực kèm một bàn hoặc một cụm gộp, hoặc để trống cả hai để chờ xếp bàn.",
+      });
       return;
     }
     if (normalizedCustomerPhone && !isPlausibleVietnamPhone(normalizedCustomerPhone)) {
@@ -203,7 +240,8 @@ export function CreateBookingModal({
         customerPhone: normalizedCustomerPhone || undefined,
         branchId: createBranchId,
         areaId: areaId ?? undefined,
-        tableId: tableId ?? undefined,
+        tableId: mergeGroupId ? undefined : tableId ?? undefined,
+        mergeGroupId: mergeGroupId ?? undefined,
         guestCount:
           typeof guestCount === "number" && Number.isFinite(guestCount)
             ? Math.max(1, guestCount)
@@ -358,6 +396,14 @@ export function CreateBookingModal({
               areaId: t.areaId,
               status: t.status,
             }))}
+            mergeGroups={createBranchMergeGroups.map((group) => ({
+              id: group.id,
+              mergedName: group.mergedName,
+              areaId: group.areaId,
+              totalCapacity: group.totalCapacity,
+            }))}
+            fieldPatch={voiceFieldPatch}
+            onFieldPatchConsumed={() => setVoiceFieldPatch(null)}
             onFieldsChange={setVoiceFields}
             onCreateBooking={createBooking}
           />
@@ -382,15 +428,26 @@ export function CreateBookingModal({
               targetSeats={guestCount}
               busyKey={recommendationBusyKey}
               maxItems={3}
-              onUseExisting={async () => {
+              description="Không có bàn lẻ nào đủ chỗ. Chọn gợi ý để điền khu vực / cụm gộp vào form; bấm Tạo booking để xác nhận."
+              onUseExisting={async (rec) => {
+                if (!rec.existingGroup) {
+                  return;
+                }
+                applyCreateFormTableSelection({
+                  areaId: rec.existingGroup.areaId,
+                  tableId: null,
+                  mergeGroupId: rec.existingGroup.id,
+                });
+                const areaLabel =
+                  state.areas.find((area) => area.id === rec.existingGroup?.areaId)?.name ?? "";
                 notifications.show({
                   color: "blue",
-                  message: 'Sau khi tạo booking, dùng "Gán" trên danh sách rồi chọn cụm gộp.',
+                  message: `Đã chọn ${areaLabel ? `${areaLabel} · ` : ""}${rec.existingGroup.mergedName}. Bấm Tạo booking để xác nhận.`,
                 });
               }}
               onMergeAndApply={async (rec) => {
                 const firstTable = state.tables.find((table) => table.id === rec.tableIds[0]);
-                if (!firstTable || !firstTable.areaId) {
+                if (!firstTable?.areaId) {
                   notifications.show({
                     color: "red",
                     message: "Không xác định được khu vực để gộp bàn.",
@@ -400,18 +457,34 @@ export function CreateBookingModal({
                 setRecommendationBusyKey(`combo:${rec.tableIds.join(",")}`);
                 try {
                   const mergeDay = dayjs(bookingAt ?? undefined).format("YYYY-MM-DD");
-                  const result = await createTableMergeGroup({
+                  const createResult = await createTableMergeGroup({
                     branchId: createBranchId!,
                     areaId: firstTable.areaId,
                     tableIds: rec.tableIds,
                     startDate: mergeDay,
                     endDate: mergeDay,
                   });
+                  if (!createResult.ok || !createResult.groupId) {
+                    notifications.show({
+                      color: "red",
+                      message: createResult.message,
+                    });
+                    return;
+                  }
+                  applyCreateFormTableSelection({
+                    areaId: firstTable.areaId,
+                    tableId: null,
+                    mergeGroupId: createResult.groupId,
+                  });
+                  const mergedLabel =
+                    createResult.mergedName ??
+                    createResult.group?.mergedName ??
+                    "Bàn gộp";
+                  const areaLabel =
+                    state.areas.find((area) => area.id === firstTable.areaId)?.name ?? "";
                   notifications.show({
-                    color: result.ok ? "green" : "red",
-                    message: result.ok
-                      ? `${result.message}. Tạo booking xong, hệ thống sẽ ưu tiên gán vào cụm này.`
-                      : result.message,
+                    color: "green",
+                    message: `${createResult.message} · Đã chọn ${areaLabel ? `${areaLabel} · ` : ""}${mergedLabel}. Bấm Tạo booking để xác nhận.`,
                   });
                 } finally {
                   setRecommendationBusyKey(null);

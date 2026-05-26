@@ -110,8 +110,20 @@ export type VoiceBookingFormFields = {
   bookingAt: string | null;
   areaId: string | null;
   tableId: string | null;
+  mergeGroupId: string | null;
   note: string;
   guestType: string | null;
+};
+
+export type VoiceBookingFieldPatch = Partial<
+  Pick<VoiceBookingFormFields, "areaId" | "tableId" | "mergeGroupId">
+>;
+
+export type VoiceBookingMergeGroupLite = {
+  id: string;
+  mergedName: string;
+  areaId: string;
+  totalCapacity: number;
 };
 
 export function VoiceBookingAssistant(props: {
@@ -121,6 +133,11 @@ export function VoiceBookingAssistant(props: {
   hideSubmitButton?: boolean;
   /** Sync field values to parent for duplicate checks, merge hints, etc. */
   onFieldsChange?: (fields: VoiceBookingFormFields) => void;
+  /** Parent-driven area/table/merge selection (e.g. merge recommendations). */
+  fieldPatch?: VoiceBookingFieldPatch | null;
+  onFieldPatchConsumed?: () => void;
+  /** Merge groups for the current branch (optional Cụm gộp picker). */
+  mergeGroups?: VoiceBookingMergeGroupLite[];
   /** Disable inputs (e.g. while parent is creating booking). */
   disabled?: boolean;
   /** Giữ chỗ vs Ngồi ngay (floor-map table registration). */
@@ -149,6 +166,7 @@ export function VoiceBookingAssistant(props: {
     branchId: string;
     areaId?: string | null;
     tableId?: string | null;
+    mergeGroupId?: string | null;
     guestCount?: number;
     bookingAt: string;
     note?: string;
@@ -164,6 +182,9 @@ export function VoiceBookingAssistant(props: {
     embedded = false,
     hideSubmitButton = false,
     onFieldsChange,
+    fieldPatch = null,
+    onFieldPatchConsumed,
+    mergeGroups = [],
     disabled: disabledProp = false,
     arrivalMode = "immediate",
     onArrivalModeChange,
@@ -199,6 +220,7 @@ export function VoiceBookingAssistant(props: {
   );
   const [areaId, setAreaId] = useState<string | null>(null);
   const [tableId, setTableId] = useState<string | null>(null);
+  const [mergeGroupId, setMergeGroupId] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [guestType, setGuestType] = useState<string | null>("Khách thường");
   const [clarify, setClarify] = useState<string | null>(null);
@@ -231,6 +253,22 @@ export function VoiceBookingAssistant(props: {
   }, [maxGuestCount]);
 
   useEffect(() => {
+    if (!fieldPatch) {
+      return;
+    }
+    if (fieldPatch.areaId !== undefined) {
+      setAreaId(fieldPatch.areaId);
+    }
+    if (fieldPatch.tableId !== undefined) {
+      setTableId(fieldPatch.tableId);
+    }
+    if (fieldPatch.mergeGroupId !== undefined) {
+      setMergeGroupId(fieldPatch.mergeGroupId);
+    }
+    onFieldPatchConsumed?.();
+  }, [fieldPatch, onFieldPatchConsumed]);
+
+  useEffect(() => {
     onFieldsChange?.({
       customerName,
       customerPhone,
@@ -238,6 +276,7 @@ export function VoiceBookingAssistant(props: {
       bookingAt,
       areaId,
       tableId,
+      mergeGroupId,
       note,
       guestType,
     });
@@ -248,6 +287,7 @@ export function VoiceBookingAssistant(props: {
     customerPhone,
     guestCount,
     guestType,
+    mergeGroupId,
     note,
     onFieldsChange,
     tableId,
@@ -277,6 +317,7 @@ export function VoiceBookingAssistant(props: {
     setBookingAt(defaultBookingAt());
     setAreaId(null);
     setTableId(null);
+    setMergeGroupId(null);
     setNote("");
     setGuestType("Khách thường");
     setClarify(null);
@@ -322,6 +363,29 @@ export function VoiceBookingAssistant(props: {
       }`,
     }));
   }, [tables, areaId]);
+
+  const mergeGroupOptions = useMemo(() => {
+    const filtered = areaId
+      ? mergeGroups.filter((group) => group.areaId === areaId)
+      : mergeGroups;
+    const options = filtered.map((group) => ({
+      value: group.id,
+      label: `${group.mergedName} · ${group.totalCapacity} chỗ`,
+    }));
+    if (
+      mergeGroupId &&
+      !options.some((item) => item.value === mergeGroupId)
+    ) {
+      const current = mergeGroups.find((group) => group.id === mergeGroupId);
+      if (current) {
+        options.unshift({
+          value: current.id,
+          label: `${current.mergedName} · ${current.totalCapacity} chỗ`,
+        });
+      }
+    }
+    return options;
+  }, [areaId, mergeGroupId, mergeGroups]);
 
   const hasSpeech = typeof window !== "undefined" && Boolean(getSpeechRecognition(window as SpeechApi));
   const formDisabled = disabledProp || isSubmitting;
@@ -511,7 +575,8 @@ export function VoiceBookingAssistant(props: {
         customerPhone: phoneNorm || undefined,
         branchId: branch.id,
         areaId: areaId ?? undefined,
-        tableId: tableId ?? undefined,
+        tableId: mergeGroupId ? undefined : tableId ?? undefined,
+        mergeGroupId: mergeGroupId ?? undefined,
         guestCount: typeof guestCount === "number" && Number.isFinite(guestCount) ? guestCount : undefined,
         bookingAt:
           showArrivalModeRadios && arrivalMode === "immediate"
@@ -695,29 +760,54 @@ export function VoiceBookingAssistant(props: {
           </Group>
 
           {hideAreaTablePickers ? null : (
-            <Group grow align="flex-start">
-              <Select
-                label="Khu vực"
-                data={areaOptions}
-                value={areaId}
-                onChange={(v) => {
-                  setAreaId(v);
-                  setTableId(null);
-                }}
-                searchable
-                clearable
-                disabled={formDisabled || Boolean(lockAreaId)}
-              />
-              <Select
-                label="Bàn"
-                data={tableOptions}
-                value={tableId}
-                onChange={setTableId}
-                searchable
-                clearable
-                disabled={formDisabled || Boolean(lockTableId)}
-              />
-            </Group>
+            <Stack gap="sm">
+              <Group grow align="flex-start">
+                <Select
+                  label="Khu vực"
+                  data={areaOptions}
+                  value={areaId}
+                  onChange={(v) => {
+                    setAreaId(v);
+                    setTableId(null);
+                    setMergeGroupId(null);
+                  }}
+                  searchable
+                  clearable
+                  disabled={formDisabled || Boolean(lockAreaId)}
+                />
+                <Select
+                  label="Bàn"
+                  data={tableOptions}
+                  value={tableId}
+                  onChange={(value) => {
+                    setTableId(value);
+                    if (value) {
+                      setMergeGroupId(null);
+                    }
+                  }}
+                  searchable
+                  clearable
+                  disabled={formDisabled || Boolean(lockTableId) || Boolean(mergeGroupId)}
+                />
+              </Group>
+              {areaId && mergeGroupOptions.length > 0 ? (
+                <Select
+                  label="Cụm gộp (Bàn gộp)"
+                  placeholder="Chọn cụm gộp thay cho bàn lẻ"
+                  data={mergeGroupOptions}
+                  value={mergeGroupId}
+                  onChange={(value) => {
+                    setMergeGroupId(value);
+                    if (value) {
+                      setTableId(null);
+                    }
+                  }}
+                  searchable
+                  clearable
+                  disabled={formDisabled}
+                />
+              ) : null}
+            </Stack>
           )}
 
           {hideAreaTablePickers || !areaAvailability ? null : (
