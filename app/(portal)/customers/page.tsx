@@ -22,6 +22,7 @@ import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { displayCustomerPhone, formatBookingAreaTable } from "@/lib/booking-meta";
+import { openPortalAlertModal, openPortalConfirmModal } from "@/lib/portal-confirm-modal";
 import { Customer } from "@/lib/types";
 
 const DRAWER_BOOKING_PAGE_SIZE = 8;
@@ -213,16 +214,27 @@ export default function CustomersPage() {
                   const ids = selectedCustomers.map((c) => c.id);
                   const hasBooking = state.bookings.some((b) => ids.includes(b.customerId));
                   if (hasBooking) {
-                    window.alert("Không thể xóa: có khách hàng đã có booking.");
+                    openPortalAlertModal({
+                      title: "Không thể xóa",
+                      message: "Không thể xóa: có khách hàng đã có booking.",
+                    });
                     return;
                   }
-                  const ok = window.confirm(
-                    `Xóa ${selectedCustomers.length} khách hàng? (Chỉ xóa khách chưa có booking)`
-                  );
-                  if (!ok) return;
+                  const ok = await openPortalConfirmModal({
+                    title: "Xóa khách hàng",
+                    message: `Xóa ${selectedCustomers.length} khách hàng? (Chỉ xóa khách chưa có booking)`,
+                    confirmLabel: "Xóa",
+                    confirmColor: "red",
+                  });
+                  if (!ok) {
+                    return;
+                  }
                   const result = await deleteCustomers(ids);
                   if (!result.ok) {
-                    window.alert(result.message);
+                    openPortalAlertModal({
+                      title: "Không thể xóa",
+                      message: result.message,
+                    });
                     return;
                   }
                   setSelectedCustomers([]);

@@ -41,6 +41,7 @@ const theme = createTheme({
   components: {
     Modal: Modal.extend({
       defaultProps: {
+        centered: true,
         overlayProps: modalOverlayBlur,
       },
     }),

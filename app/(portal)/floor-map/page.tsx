@@ -109,10 +109,12 @@ import {
 } from "@/lib/floor-map-layout";
 import {
   findMergeStripAnchorForMemberCells,
-  getMergeMemberPositionsAtAnchor,
   packMergeGroupTablePositions,
+  resolveMergeGroupLayoutAtAnchor,
+  resolveTableDropAtCell,
 } from "@/lib/floor-map-merge-layout";
 import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
+import { openPortalConfirmModal } from "@/lib/portal-confirm-modal";
 import {
   applySnapshotToTablesInArea,
   floorLayoutDayKey,
@@ -1826,8 +1828,23 @@ export default function FloorMapPage() {
       const mapped = getTableGridPosition(table, effectiveGridColumns, effectiveGridRows);
       result.set(table.id, { row: mapped.row, col: mapped.col });
     }
-    if (dragState) {
-      result.set(dragState.tableId, { row: dragState.row, col: dragState.col });
+    if (dragState && editLayout) {
+      const dropLayout = resolveTableDropAtCell({
+        tableId: dragState.tableId,
+        targetRow: dragState.row,
+        targetCol: dragState.col,
+        areaTables: buildAreaTablesForMergePack(tablesInArea, editLayout.positions),
+        gridColumns: effectiveGridColumns,
+        gridRows: effectiveGridRows,
+        protectedTableIds: allActiveMergedTableIds,
+      });
+      if (dropLayout.ok) {
+        for (const [tableId, pos] of dropLayout.positions) {
+          result.set(tableId, pos);
+        }
+      } else {
+        result.set(dragState.tableId, { row: dragState.row, col: dragState.col });
+      }
     }
     if (mergeGroupDragState && editLayout) {
       const group = effectiveMergeGroups.find(
@@ -1839,15 +1856,16 @@ export default function FloorMapPage() {
           editLayout.pendingMergeAdds,
           editLayout.pendingMergeRemoves
         );
-        const preview = getMergeMemberPositionsAtAnchor(
-          memberIds,
-          mergeGroupDragState.anchorRow,
-          mergeGroupDragState.anchorCol,
-          effectiveGridColumns,
-          effectiveGridRows
-        );
+        const preview = resolveMergeGroupLayoutAtAnchor({
+          memberTableIds: memberIds,
+          anchorRow: mergeGroupDragState.anchorRow,
+          anchorCol: mergeGroupDragState.anchorCol,
+          areaTables: buildAreaTablesForMergePack(tablesInArea, editLayout.positions),
+          gridColumns: effectiveGridColumns,
+          gridRows: effectiveGridRows,
+        });
         if (preview) {
-          for (const [tableId, pos] of preview) {
+          for (const [tableId, pos] of preview.positions) {
             result.set(tableId, pos);
           }
         }
@@ -1862,6 +1880,8 @@ export default function FloorMapPage() {
     effectiveMergeGroups,
     mergeGroupDragState,
     placedTables,
+    tablesInArea,
+    allActiveMergedTableIds,
   ]);
 
   const tableByNode = useMemo(() => {
@@ -2040,10 +2060,23 @@ export default function FloorMapPage() {
       if (!prev) {
         return prev;
       }
-      return {
-        ...prev,
-        positions: { ...prev.positions, [source.id]: { x: col, y: row } },
-      };
+      const dropLayout = resolveTableDropAtCell({
+        tableId: source.id,
+        targetRow: row,
+        targetCol: col,
+        areaTables: buildAreaTablesForMergePack(tablesInArea, prev.positions),
+        gridColumns: effectiveGridColumns,
+        gridRows: effectiveGridRows,
+        protectedTableIds: allActiveMergedTableIds,
+      });
+      if (!dropLayout.ok) {
+        return prev;
+      }
+      const nextPositions = { ...prev.positions };
+      for (const [tableId, pos] of dropLayout.positions) {
+        nextPositions[tableId] = { x: pos.col, y: pos.row };
+      }
+      return { ...prev, positions: nextPositions };
     });
     setDragState(null);
   };
@@ -2097,6 +2130,31 @@ export default function FloorMapPage() {
     });
   };
 
+  const exitEditModeToView = useCallback(() => {
+    setMode("view");
+    setPendingPlacementTableId(null);
+    setIsToolsPanelOpen(false);
+    setIsSearchPanelOpen(false);
+    setDragState(null);
+    setMergeGroupDragState(null);
+    if (areaId) {
+      void releaseFloorLayoutEditLock(areaId);
+    }
+  }, [areaId, releaseFloorLayoutEditLock]);
+
+  const confirmDiscardLayoutEdits = useCallback(() => {
+    modals.openConfirmModal({
+      title: "Thay đổi chưa lưu",
+      centered: true,
+      children: (
+        <Text size="sm">Bỏ các thay đổi sơ đồ chưa lưu?</Text>
+      ),
+      labels: { cancel: "Tiếp tục sửa", confirm: "Bỏ thay đổi" },
+      confirmProps: { color: "red" },
+      onConfirm: exitEditModeToView,
+    });
+  }, [exitEditModeToView]);
+
   const handleSaveFloorLayoutAsGlobal = async () => {
     if (!areaId || !editLayout || !isLayoutDirty) {
       return;
@@ -2131,14 +2189,14 @@ export default function FloorMapPage() {
         if (mergeGroupId) {
           await saveFloorLayout(areaId, layoutInput, { layoutDate: selectedLayoutDate });
         } else {
-          if (
-            typeof window !== "undefined" &&
-            !window.confirm(
-              `Lưu sơ đồ mặc định và xóa sơ đồ riêng cho ngày ${floorMapSelectedDate.format(
-                "DD/MM/YYYY"
-              )}?`
-            )
-          ) {
+          const dateLabel = floorMapSelectedDate.format("DD/MM/YYYY");
+          const confirmed = await openPortalConfirmModal({
+            title: "Xóa sơ đồ riêng theo ngày",
+            message: `Lưu sơ đồ mặc định và xóa sơ đồ riêng cho ngày ${dateLabel}?`,
+            confirmLabel: "Lưu và xóa",
+            confirmColor: "red",
+          });
+          if (!confirmed) {
             return;
           }
           await deleteAreaFloorLayoutForDate(areaId, selectedLayoutDate);
@@ -4318,21 +4376,10 @@ export default function FloorMapPage() {
                         return;
                       }
                       if (mode === "edit" && isLayoutDirty) {
-                        if (
-                          typeof window !== "undefined" &&
-                          !window.confirm("Bỏ các thay đổi sơ đồ chưa lưu?")
-                        ) {
-                          return;
-                        }
+                        confirmDiscardLayoutEdits();
+                        return;
                       }
-                      setMode("view");
-                      setPendingPlacementTableId(null);
-                      setIsToolsPanelOpen(false);
-                      setIsSearchPanelOpen(false);
-                      setDragState(null);
-                      if (areaId) {
-                        void releaseFloorLayoutEditLock(areaId);
-                      }
+                      exitEditModeToView();
                     }}
                     data={[
                       { label: "View", value: "view" },
