@@ -444,11 +444,7 @@ export function useBookingManagement() {
   );
 
   const handleSubmitChangeTable = useCallback(
-    async (target: {
-      areaId: string;
-      tableId: string | null;
-      mergeGroupId: string | null;
-    }) => {
+    async (target: { areaId: string; tableId: string }) => {
       if (!changeTableBooking) {
         return;
       }
@@ -458,7 +454,6 @@ export function useBookingManagement() {
           bookingId: changeTableBooking.id,
           areaId: target.areaId,
           tableId: target.tableId,
-          mergeGroupId: target.mergeGroupId,
         });
         notifications.show({
           color: result.ok ? "green" : "red",
@@ -774,7 +769,6 @@ export function useBookingManagement() {
         customers={state.customers}
         areas={state.areas}
         tables={state.tables}
-        mergeGroups={state.mergeGroups}
         bookings={state.bookings}
         loading={isChangeTableSaving}
         onConfirm={handleSubmitChangeTable}

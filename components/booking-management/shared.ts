@@ -13,15 +13,18 @@ export function canEditBookingOrder(booking: Pick<Booking, "status">): boolean {
   return booking.status === "pending" || booking.status === "confirmed";
 }
 
-/** Active reservation already tied to a table or merge group — eligible for Đổi bàn. */
+/** Active reservation on a single table — eligible for Đổi bàn (not merge groups). */
 export function canChangeBookingTable(
   booking: Pick<Booking, "status" | "tableId" | "mergeGroupId">
 ): boolean {
+  if (booking.mergeGroupId) {
+    return false;
+  }
   return (
     (booking.status === "confirmed" ||
       booking.status === "seated" ||
       booking.status === "checked_in") &&
-    Boolean(booking.tableId || booking.mergeGroupId)
+    Boolean(booking.tableId)
   );
 }
 

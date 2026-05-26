@@ -543,15 +543,35 @@ async function refreshTableAvailabilityForBooking(
   if ((tableRow?.status as TableStatus | undefined) === "locked") {
     return;
   }
-  const { data: rows, error } = await client
+  const { data: directRows, error: directErr } = await client
     .from("bookings")
     .select("id, status")
     .eq("table_id", tableId)
     .in("status", TABLE_RESERVATION_BOOKING_STATUSES);
-  if (error || !rows?.length) {
-    if (!error) {
-      await client.from("tables").update({ status: "available" }).eq("id", tableId);
+  if (directErr) {
+    return;
+  }
+
+  let mergeRows: Array<{ id: string; status: string }> = [];
+  const { data: memberRows, error: memberErr } = await (client as any)
+    .from("table_merge_members")
+    .select("group_id")
+    .eq("table_id", tableId);
+  if (!memberErr && memberRows?.length) {
+    const groupIds = (memberRows as Array<{ group_id: string }>).map((row) => row.group_id);
+    const { data: mergeBookings, error: mergeErr } = await client
+      .from("bookings")
+      .select("id, status")
+      .in("merge_group_id", groupIds)
+      .in("status", TABLE_RESERVATION_BOOKING_STATUSES);
+    if (!mergeErr && mergeBookings) {
+      mergeRows = mergeBookings as Array<{ id: string; status: string }>;
     }
+  }
+
+  const rows = [...(directRows ?? []), ...mergeRows];
+  if (rows.length === 0) {
+    await client.from("tables").update({ status: "available" }).eq("id", tableId);
     return;
   }
   const hasSeated = rows.some(
@@ -1963,12 +1983,11 @@ export async function changeBookingTableInSupabase(input: {
   const client = ensureClient();
   const nextTableId = input.tableId ?? null;
   const nextMergeGroupId = input.mergeGroupId ?? null;
-  const hasNextTarget = Boolean(nextTableId) || Boolean(nextMergeGroupId);
-  if (!hasNextTarget) {
-    return { ok: false, message: "Vui lòng chọn bàn hoặc cụm bàn gộp đích." };
+  if (nextMergeGroupId) {
+    return { ok: false, message: "Không hỗ trợ đổi sang cụm bàn gộp." };
   }
-  if (nextTableId && nextMergeGroupId) {
-    return { ok: false, message: "Chỉ chọn một trong hai: bàn lẻ hoặc cụm bàn gộp." };
+  if (!nextTableId) {
+    return { ok: false, message: "Vui lòng chọn bàn đích." };
   }
 
   const { data: booking, error: loadErr } = await (client as any)
@@ -1993,7 +2012,10 @@ export async function changeBookingTableInSupabase(input: {
 
   const previousTableId = (booking.table_id as string | null) ?? null;
   const previousMergeGroupId = (booking.merge_group_id as string | null) ?? null;
-  if (!previousTableId && !previousMergeGroupId) {
+  if (previousMergeGroupId) {
+    return { ok: false, message: "Không hỗ trợ đổi bàn cho booking trên cụm bàn gộp." };
+  }
+  if (!previousTableId) {
     return { ok: false, message: "Booking chưa được gán bàn — dùng Gán bàn thay vì Đổi bàn." };
   }
 
@@ -2298,7 +2320,7 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
   const client = ensureClient();
   const { data: target, error: loadErr } = await client
     .from("bookings")
-    .select("id, branch_id, table_id")
+    .select("id, branch_id, table_id, merge_group_id")
     .eq("id", bookingId)
     .maybeSingle();
   if (loadErr) {
@@ -2307,7 +2329,9 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
   if (!target) {
     throw new Error("Không tìm thấy booking.");
   }
-  if (!target.table_id) {
+  const tableId = (target.table_id as string | null) ?? null;
+  const mergeGroupId = (target.merge_group_id as string | null) ?? null;
+  if (!tableId && !mergeGroupId) {
     throw new Error("Booking chưa được gán bàn. Vui lòng gán trong mục Sơ đồ trước.");
   }
 
@@ -2319,23 +2343,51 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
     throw new Error(bookingErr.message);
   }
 
-  const { data: tableRow, error: tableReadErr } = await client
-    .from("tables")
-    .select("status, name")
-    .eq("id", target.table_id)
-    .maybeSingle();
-  if (tableReadErr) {
-    throw new Error(tableReadErr.message);
+  const refreshTableIds = new Set<string>();
+  if (tableId) {
+    refreshTableIds.add(tableId);
   }
-  if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-    await refreshTableAvailabilityForBooking(client, target.table_id);
+  if (mergeGroupId) {
+    for (const memberTableId of await listMergeGroupMemberTableIds(client, mergeGroupId)) {
+      refreshTableIds.add(memberTableId);
+    }
+  }
+  for (const refreshId of refreshTableIds) {
+    const { data: tableRow, error: tableReadErr } = await client
+      .from("tables")
+      .select("status")
+      .eq("id", refreshId)
+      .maybeSingle();
+    if (tableReadErr) {
+      throw new Error(tableReadErr.message);
+    }
+    if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+      await refreshTableAvailabilityForBooking(client, refreshId);
+    }
   }
 
-  const tableName =
-    typeof tableRow?.name === "string" ? tableRow.name.trim() : "";
+  let targetLabel = "";
+  if (mergeGroupId) {
+    const { data: groupRow } = await (client as any)
+      .from("table_merge_groups")
+      .select("merged_name")
+      .eq("id", mergeGroupId)
+      .maybeSingle();
+    const mergedName =
+      typeof groupRow?.merged_name === "string" ? groupRow.merged_name.trim() : "";
+    targetLabel = mergedName.length > 0 ? `Cụm ${mergedName}` : "Cụm bàn gộp";
+  } else if (tableId) {
+    const { data: tableRow } = await client
+      .from("tables")
+      .select("name")
+      .eq("id", tableId)
+      .maybeSingle();
+    const tableName = typeof tableRow?.name === "string" ? tableRow.name.trim() : "";
+    targetLabel = tableName.length > 0 ? `Bàn ${tableName}` : "Bàn";
+  }
   const checkInMessage =
-    tableName.length > 0
-      ? `Đã check-in thành công. Bàn ${tableName} chuyển sang trạng thái có khách.`
+    targetLabel.length > 0
+      ? `Đã check-in thành công. ${targetLabel} chuyển sang trạng thái có khách.`
       : "Đã check-in thành công. Bàn chuyển sang trạng thái có khách.";
 
   const { error: notifErr } = await client.from("internal_notifications").insert({

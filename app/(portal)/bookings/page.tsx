@@ -721,11 +721,7 @@ function BookingsPageContent() {
     setEditMergeGroupId(booking.mergeGroupId ?? null);
   };
 
-  const handleSubmitChangeTable = async (target: {
-    areaId: string;
-    tableId: string | null;
-    mergeGroupId: string | null;
-  }) => {
+  const handleSubmitChangeTable = async (target: { areaId: string; tableId: string }) => {
     if (!changeTableBooking) {
       return;
     }
@@ -735,7 +731,6 @@ function BookingsPageContent() {
         bookingId: changeTableBooking.id,
         areaId: target.areaId,
         tableId: target.tableId,
-        mergeGroupId: target.mergeGroupId,
       });
       notifications.show({
         color: result.ok ? "green" : "red",
@@ -2754,7 +2749,6 @@ function BookingsPageContent() {
         customers={state.customers}
         areas={state.areas}
         tables={state.tables}
-        mergeGroups={state.mergeGroups}
         bookings={state.bookings}
         loading={isChangeTableSaving}
         onConfirm={handleSubmitChangeTable}

@@ -1292,11 +1292,7 @@ export default function FloorMapPage() {
     setChangeTableBooking(activeBookingForDetail);
   };
 
-  const handleSubmitChangeTable = async (target: {
-    areaId: string;
-    tableId: string | null;
-    mergeGroupId: string | null;
-  }) => {
+  const handleSubmitChangeTable = async (target: { areaId: string; tableId: string }) => {
     if (!changeTableBooking) {
       return;
     }
@@ -1306,7 +1302,6 @@ export default function FloorMapPage() {
         bookingId: changeTableBooking.id,
         areaId: target.areaId,
         tableId: target.tableId,
-        mergeGroupId: target.mergeGroupId,
       });
       notifications.show({
         color: result.ok ? "green" : "red",
@@ -4892,7 +4887,6 @@ export default function FloorMapPage() {
         customers={state.customers}
         areas={state.areas}
         tables={state.tables}
-        mergeGroups={state.mergeGroups}
         bookings={state.bookings}
         defaultAreaId={areaId}
         loading={detailBookingActionLoading}
