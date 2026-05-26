@@ -64,6 +64,10 @@ const handlers: Record<string, StoreHandler> = {
     store.getTableBlockStateInSupabase(payload as Parameters<typeof store.getTableBlockStateInSupabase>[0]),
   confirmWaitlistOffer: (payload) =>
     store.confirmWaitlistOfferInSupabase(payload as string),
+  listBranchWaitlistEntries: (payload) =>
+    store.listBranchWaitlistEntriesInSupabase(
+      payload as Parameters<typeof store.listBranchWaitlistEntriesInSupabase>[0]
+    ),
   createTableMergeGroup: (payload) =>
     store.createTableMergeGroupInSupabase(payload as Parameters<typeof store.createTableMergeGroupInSupabase>[0]),
   addTableToMergeGroup: (payload) =>

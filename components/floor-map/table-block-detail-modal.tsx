@@ -288,9 +288,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
             >
               <Tabs.List grow>
                 <Tabs.Tab value="schedule">Lịch đặt bàn sắp tới</Tabs.Tab>
-                {!isMerge ? (
-                  <Tabs.Tab value="waitlist">Hàng chờ ({waitlistCount})</Tabs.Tab>
-                ) : null}
+                <Tabs.Tab value="waitlist">Hàng chờ ({waitlistCount})</Tabs.Tab>
               </Tabs.List>
 
               <Tabs.Panel value="schedule" pt="sm">
@@ -306,21 +304,21 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                 </Stack>
               </Tabs.Panel>
 
-              {!isMerge ? (
-                <Tabs.Panel value="waitlist" pt="sm">
-                  <Stack gap="xs">
-                    <Text size="xs" c="dimmed">
-                      Khách xếp hàng khi khung giờ đã kín (khác với booking đã xác nhận ở trên).
-                    </Text>
-                    <TableBlockWaitlistTable
-                      records={blockState?.waitlistQueue ?? []}
-                      isEmployee={isEmployee}
-                      confirmLoadingId={waitlistConfirmLoadingId}
-                      onConfirmOffer={onConfirmWaitlistOffer}
-                    />
-                  </Stack>
-                </Tabs.Panel>
-              ) : null}
+              <Tabs.Panel value="waitlist" pt="sm">
+                <Stack gap="xs">
+                  <Text size="xs" c="dimmed">
+                    {isMerge
+                      ? "Khách xếp hàng khi khung giờ cụm gộp đã kín (gồm hàng chờ trên từng bàn thành viên)."
+                      : "Khách xếp hàng khi khung giờ đã kín (khác với booking đã xác nhận ở trên)."}
+                  </Text>
+                  <TableBlockWaitlistTable
+                    records={blockState?.waitlistQueue ?? []}
+                    isEmployee={isEmployee}
+                    confirmLoadingId={waitlistConfirmLoadingId}
+                    onConfirmOffer={onConfirmWaitlistOffer}
+                  />
+                </Stack>
+              </Tabs.Panel>
             </Tabs>
           </Stack>
         </Stack>

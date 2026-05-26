@@ -36,10 +36,40 @@ export function TableBlockWaitlistTable(props: {
   isEmployee: boolean;
   confirmLoadingId: string | null;
   onConfirmOffer: (entryId: string) => void;
+  /** Show khu vực / bàn columns (branch-wide list). */
+  showLocationColumns?: boolean;
 }) {
-  const { records, isEmployee, confirmLoadingId, onConfirmOffer } = props;
+  const { records, isEmployee, confirmLoadingId, onConfirmOffer, showLocationColumns = false } =
+    props;
   const { state } = useAppContext();
   const [statusFilter, setStatusFilter] = useState<WaitlistStatus | null>(null);
+
+  const resolveTableLabel = useCallback(
+    (entry: BookingWaitlistEntry) => {
+      const table = state.tables.find((item) => item.id === entry.tableId);
+      const tableName = table?.name ?? "—";
+      const mergeGroup = state.mergeGroups.find(
+        (group) =>
+          group.status === "active" && group.tableIds.includes(entry.tableId)
+      );
+      if (mergeGroup) {
+        return `${tableName} · ${mergeGroup.mergedName}`;
+      }
+      return tableName;
+    },
+    [state.mergeGroups, state.tables]
+  );
+
+  const resolveAreaLabel = useCallback(
+    (entry: BookingWaitlistEntry) => {
+      const areaId = entry.areaId ?? state.tables.find((item) => item.id === entry.tableId)?.areaId;
+      if (!areaId) {
+        return "—";
+      }
+      return state.areas.find((item) => item.id === areaId)?.name ?? "—";
+    },
+    [state.areas, state.tables]
+  );
 
   const filteredRecords = useMemo(
     () => (statusFilter ? records.filter((entry) => entry.status === statusFilter) : records),
@@ -54,6 +84,8 @@ export function TableBlockWaitlistTable(props: {
         dayjs(entry.desiredStartTime).format("HH:mm"),
         dayjs(entry.desiredEndTime).format("HH:mm"),
         customer?.fullName,
+        showLocationColumns ? resolveAreaLabel(entry) : null,
+        showLocationColumns ? resolveTableLabel(entry) : null,
         entry.partySize,
         waitlistStatusLabel[entry.status],
         entry.offerExpiresAt
@@ -63,7 +95,7 @@ export function TableBlockWaitlistTable(props: {
         .filter(Boolean)
         .join(" ");
     },
-    [state.customers]
+    [resolveAreaLabel, resolveTableLabel, showLocationColumns, state.customers]
   );
 
   const sortRecords = useCallback(
@@ -77,6 +109,12 @@ export function TableBlockWaitlistTable(props: {
         }
         if (sortStatus.columnAccessor === "customerId") {
           return state.customers.find((item) => item.id === entry.customerId)?.fullName ?? "";
+        }
+        if (sortStatus.columnAccessor === "areaLabel") {
+          return resolveAreaLabel(entry);
+        }
+        if (sortStatus.columnAccessor === "tableLabel") {
+          return resolveTableLabel(entry);
         }
         if (sortStatus.columnAccessor === "partySize") {
           return entry.partySize;
@@ -96,8 +134,29 @@ export function TableBlockWaitlistTable(props: {
         return sortStatus.direction === "asc" ? compare : -compare;
       });
     },
-    [state.customers]
+    [resolveAreaLabel, resolveTableLabel, state.customers]
   );
+
+  const locationColumns = showLocationColumns
+    ? [
+        {
+          accessor: "areaLabel" as const,
+          title: "Khu vực",
+          sortable: true,
+          render: (entry: BookingWaitlistEntry) => (
+            <Text size="sm">{resolveAreaLabel(entry)}</Text>
+          ),
+        },
+        {
+          accessor: "tableLabel" as const,
+          title: "Bàn",
+          sortable: true,
+          render: (entry: BookingWaitlistEntry) => (
+            <Text size="sm">{resolveTableLabel(entry)}</Text>
+          ),
+        },
+      ]
+    : [];
 
   return (
     <PortalDataTable<BookingWaitlistEntry>
@@ -140,6 +199,11 @@ export function TableBlockWaitlistTable(props: {
                 {dayjs(entry.desiredStartTime).format("HH:mm")} –{" "}
                 {dayjs(entry.desiredEndTime).format("HH:mm")}
               </Text>
+              {showLocationColumns ? (
+                <Text size="xs" c="dimmed">
+                  {resolveAreaLabel(entry)} · {resolveTableLabel(entry)}
+                </Text>
+              ) : null}
               <Text size="xs" c="dimmed">
                 {entry.partySize} khách
               </Text>
@@ -176,8 +240,10 @@ export function TableBlockWaitlistTable(props: {
           sortable: true,
           render: (entry) => (
             <Text size="sm">
-              {dayjs(entry.desiredStartTime).format("HH:mm")} –{" "}
-              {dayjs(entry.desiredEndTime).format("HH:mm")}
+              {dayjs(entry.desiredStartTime).format(
+                showLocationColumns ? "HH:mm DD/MM/YYYY" : "HH:mm"
+              )}{" "}
+              – {dayjs(entry.desiredEndTime).format(showLocationColumns ? "HH:mm" : "HH:mm")}
             </Text>
           ),
         },
@@ -188,6 +254,7 @@ export function TableBlockWaitlistTable(props: {
           render: (entry) =>
             state.customers.find((item) => item.id === entry.customerId)?.fullName ?? "—",
         },
+        ...locationColumns,
         {
           accessor: "partySize",
           title: "Số khách",

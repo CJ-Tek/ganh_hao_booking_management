@@ -1175,6 +1175,27 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     }
 
     const mergeOutcome = outcome as BookingCreateOrQueueResult;
+    if (mergeOutcome.outcome === "waitlisted") {
+      const { error: waitlistNotifErr } = await client.from("internal_notifications").insert({
+        title: "Đã vào hàng chờ",
+        message: `Khung giờ ${dayjs(normalizedAt).format(
+          "HH:mm DD/MM/YYYY"
+        )} đã kín trên cụm ${groupCheck.mergedName}. Đã thêm ${input.customerName} vào hàng chờ.`,
+        created_at: dayjs().toISOString(),
+        is_read: false,
+        branch_id: input.branchId,
+      });
+      if (waitlistNotifErr) {
+        return { ok: false, message: waitlistNotifErr.message };
+      }
+      return {
+        ok: true,
+        message:
+          mergeOutcome.message ??
+          `Khung giờ đã kín. Khách đã được thêm vào hàng chờ cụm ${groupCheck.mergedName}.`,
+      };
+    }
+
     if (mergeOutcome.outcome === "confirmed") {
       try {
         await seatBookingForImmediateArrival(client, {
@@ -1199,19 +1220,21 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
           message: seatErr instanceof Error ? seatErr.message : "Không check-in được booking.",
         };
       }
+
+      await client.from("internal_notifications").insert({
+        title: "Đặt bàn mới",
+        message: `Đã xác nhận booking cho ${input.customerName} trên cụm ${groupCheck.mergedName} lúc ${dayjs(
+          normalizedAt
+        ).format("HH:mm DD/MM/YYYY")}.`,
+        created_at: dayjs().toISOString(),
+        is_read: false,
+        branch_id: input.branchId,
+      });
+
+      return { ok: true, message: `Đã tạo booking trên cụm ${groupCheck.mergedName}.` };
     }
 
-    await client.from("internal_notifications").insert({
-      title: "Đặt bàn mới",
-      message: `Đã xác nhận booking cho ${input.customerName} trên cụm ${groupCheck.mergedName} lúc ${dayjs(
-        normalizedAt
-      ).format("HH:mm DD/MM/YYYY")}.`,
-      created_at: dayjs().toISOString(),
-      is_read: false,
-      branch_id: input.branchId,
-    });
-
-    return { ok: true, message: `Đã tạo booking trên cụm ${groupCheck.mergedName}.` };
+    return { ok: false, message: "Không nhận được kết quả khi tạo booking cụm bàn gộp." };
   }
 
   if (hasAssignedTable) {
@@ -1416,29 +1439,36 @@ export async function assignBookingToTableInSupabase(input: {
     if (!outcome || typeof outcome !== "object") {
       return { ok: false, message: "Không nhận được phản hồi khi gán cụm bàn gộp." };
     }
-    if ((outcome as BookingCreateOrQueueResult).outcome !== "waitlisted") {
-      try {
-        await seatBookingForImmediateArrival(client, {
-          bookingId,
-          tableId: groupCheck.fallbackTableId,
-          bookingAtIso: normalizedStart,
-        });
-        if (!isImmediateBookingArrival(normalizedStart)) {
-          const { data: tableRow } = await client
-            .from("tables")
-            .select("status")
-            .eq("id", groupCheck.fallbackTableId)
-            .maybeSingle();
-          if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-            await refreshTableAvailabilityForBooking(client, groupCheck.fallbackTableId);
-          }
+    if ((outcome as BookingCreateOrQueueResult).outcome === "waitlisted") {
+      return {
+        ok: true,
+        message:
+          (outcome as BookingCreateOrQueueResult).message ??
+          `Khung giờ đã kín. Booking đã được đưa vào hàng chờ cụm ${groupCheck.mergedName}.`,
+      };
+    }
+
+    try {
+      await seatBookingForImmediateArrival(client, {
+        bookingId,
+        tableId: groupCheck.fallbackTableId,
+        bookingAtIso: normalizedStart,
+      });
+      if (!isImmediateBookingArrival(normalizedStart)) {
+        const { data: tableRow } = await client
+          .from("tables")
+          .select("status")
+          .eq("id", groupCheck.fallbackTableId)
+          .maybeSingle();
+        if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+          await refreshTableAvailabilityForBooking(client, groupCheck.fallbackTableId);
         }
-      } catch (seatErr) {
-        return {
-          ok: false,
-          message: seatErr instanceof Error ? seatErr.message : "Không check-in được booking.",
-        };
       }
+    } catch (seatErr) {
+      return {
+        ok: false,
+        message: seatErr instanceof Error ? seatErr.message : "Không check-in được booking.",
+      };
     }
 
     return { ok: true, message: `Đã gán booking vào cụm ${groupCheck.mergedName}.` };
@@ -2402,6 +2432,60 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
   }
 }
 
+function mapWaitlistRowFromRecord(item: Record<string, unknown>): BookingWaitlistEntry {
+  return {
+    id: item.id as string,
+    tableId: item.table_id as string,
+    branchId: item.branch_id as string,
+    areaId: (item.area_id as string | null) ?? null,
+    customerId: item.customer_id as string,
+    bookingId: (item.booking_id as string | null) ?? null,
+    desiredStartTime: item.desired_start_time as string,
+    desiredEndTime: item.desired_end_time as string,
+    partySize: item.party_size as number,
+    status: item.status as BookingWaitlistEntry["status"],
+    position: item.queue_position as number,
+    offeredAt: (item.offered_at as string | null) ?? null,
+    offerExpiresAt: (item.offer_expires_at as string | null) ?? null,
+    promotedBookingId: (item.promoted_booking_id as string | null) ?? null,
+    createdAt: item.created_at as string,
+    updatedAt: item.updated_at as string,
+  };
+}
+
+export async function listBranchWaitlistEntriesInSupabase(input: {
+  branchIds: string[];
+  /** Calendar day `YYYY-MM-DD`; omit to include all active queue rows for the branches. */
+  day?: string;
+}): Promise<BookingWaitlistEntry[]> {
+  const branchIds = [...new Set(input.branchIds.filter(Boolean))];
+  if (branchIds.length === 0) {
+    return [];
+  }
+
+  const client = ensureClient();
+  let query = (client as any)
+    .from("booking_waitlist_entries")
+    .select("*")
+    .in("branch_id", branchIds)
+    .in("status", ["waiting", "offered"])
+    .order("desired_start_time", { ascending: true })
+    .order("queue_position", { ascending: true });
+
+  if (input.day) {
+    const dayStart = dayjs(input.day).startOf("day").toISOString();
+    const dayEnd = dayjs(input.day).endOf("day").toISOString();
+    query = query.gte("desired_start_time", dayStart).lte("desired_start_time", dayEnd);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return ((data ?? []) as Record<string, unknown>[]).map(mapWaitlistRowFromRecord);
+}
+
 export async function getTableBlockStateInSupabase(input: {
   tableId?: string | null;
   mergeGroupId?: string | null;
@@ -2450,8 +2534,31 @@ export async function getTableBlockStateInSupabase(input: {
     status: item.status as BookingStatus,
   });
 
+  const waitlistScope = input.waitlistScope ?? "all";
+  const buildWaitlistQuery = (tableIds: string[]) => {
+    let query = (client as any)
+      .from("booking_waitlist_entries")
+      .select("*")
+      .in("table_id", tableIds)
+      .in("status", ["waiting", "offered"])
+      .order("queue_position", { ascending: true });
+    if (waitlistScope === "slot") {
+      query = query
+        .eq("desired_start_time", slotStartTime)
+        .eq("desired_end_time", slotEndTime);
+    } else if (waitlistScope === "day") {
+      const dayStart = dayjs(slotStartTime).startOf("day").toISOString();
+      const dayEnd = dayjs(slotStartTime).endOf("day").toISOString();
+      query = query
+        .gte("desired_start_time", dayStart)
+        .lte("desired_start_time", dayEnd);
+    }
+    return query;
+  };
+
   if (hasMergeGroup) {
-    let confirmedQuery = (client as any)
+    const memberTableIds = await listMergeGroupMemberTableIds(client, input.mergeGroupId!);
+    const confirmedQuery = (client as any)
       .from("bookings")
       .select("*")
       .eq("merge_group_id", input.mergeGroupId)
@@ -2459,9 +2566,20 @@ export async function getTableBlockStateInSupabase(input: {
       .in("status", ["confirmed", "seated", "checked_in"])
       .order("start_time", { ascending: true });
 
-    const confirmedResult = await confirmedQuery;
+    const waitlistPromise =
+      memberTableIds.length > 0
+        ? buildWaitlistQuery(memberTableIds)
+        : Promise.resolve({ data: [], error: null });
+
+    const [confirmedResult, waitlistResult] = await Promise.all([
+      confirmedQuery,
+      waitlistPromise,
+    ]);
     if (confirmedResult.error) {
       throw new Error(confirmedResult.error.message);
+    }
+    if (waitlistResult.error) {
+      throw new Error(waitlistResult.error.message);
     }
 
     return {
@@ -2473,27 +2591,11 @@ export async function getTableBlockStateInSupabase(input: {
         (confirmedResult.data as any[] | null | undefined)?.map((item) =>
           mapBookingRow(item as Record<string, unknown>)
         ) ?? [],
-      waitlistQueue: [],
+      waitlistQueue:
+        (waitlistResult.data as any[] | null | undefined)?.map((item) =>
+          mapWaitlistRowFromRecord(item as Record<string, unknown>)
+        ) ?? [],
     };
-  }
-
-  const waitlistScope = input.waitlistScope ?? "all";
-  let waitlistQuery = (client as any)
-    .from("booking_waitlist_entries")
-    .select("*")
-    .eq("table_id", input.tableId)
-    .in("status", ["waiting", "offered"])
-    .order("queue_position", { ascending: true });
-  if (waitlistScope === "slot") {
-    waitlistQuery = waitlistQuery
-      .eq("desired_start_time", slotStartTime)
-      .eq("desired_end_time", slotEndTime);
-  } else if (waitlistScope === "day") {
-    const dayStart = dayjs(slotStartTime).startOf("day").toISOString();
-    const dayEnd = dayjs(slotStartTime).endOf("day").toISOString();
-    waitlistQuery = waitlistQuery
-      .gte("desired_start_time", dayStart)
-      .lte("desired_start_time", dayEnd);
   }
 
   const [confirmedResult, waitlistResult] = await Promise.all([
@@ -2504,7 +2606,7 @@ export async function getTableBlockStateInSupabase(input: {
       .gte("start_time", scheduleFrom)
       .in("status", ["confirmed", "seated", "checked_in"])
       .order("start_time", { ascending: true }),
-    waitlistQuery,
+    buildWaitlistQuery([input.tableId!]),
   ]);
 
   if (confirmedResult.error) {
@@ -2524,25 +2626,8 @@ export async function getTableBlockStateInSupabase(input: {
         mapBookingRow(item as Record<string, unknown>)
       ) ?? [],
     waitlistQueue:
-      (waitlistResult.data as any[] | null | undefined)?.map(
-        (item): BookingWaitlistEntry => ({
-          id: item.id,
-          tableId: item.table_id,
-          branchId: item.branch_id,
-          areaId: item.area_id,
-          customerId: item.customer_id,
-          bookingId: item.booking_id,
-          desiredStartTime: item.desired_start_time,
-          desiredEndTime: item.desired_end_time,
-          partySize: item.party_size,
-          status: item.status as BookingWaitlistEntry["status"],
-          position: item.queue_position,
-          offeredAt: item.offered_at,
-          offerExpiresAt: item.offer_expires_at,
-          promotedBookingId: item.promoted_booking_id,
-          createdAt: item.created_at,
-          updatedAt: item.updated_at,
-        })
+      (waitlistResult.data as any[] | null | undefined)?.map((item) =>
+        mapWaitlistRowFromRecord(item as Record<string, unknown>)
       ) ?? [],
   };
 }

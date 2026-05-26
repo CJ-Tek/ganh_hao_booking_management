@@ -27,6 +27,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
+import { BranchWaitlistSection } from "@/components/booking-management/branch-waitlist-section";
 import { BookingCalendarPanel } from "@/components/booking-calendar-panel";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingOrderDetailModal } from "@/components/booking-management/booking-order-detail-modal";
@@ -118,6 +119,7 @@ function BookingsPageContent() {
   } = useAppContext();
 
   const isCompact = usePortalCompact();
+  const isEmployee = currentUser?.role === "employee";
   const {
     busyId: busyBookingId,
     isBusy: isBookingRowBusy,
@@ -1247,6 +1249,13 @@ function BookingsPageContent() {
   );
 
   const focusBookingIdFromUrl = searchParams.get("focusBooking");
+  const tabFromUrl = searchParams.get("tab");
+
+  useEffect(() => {
+    if (tabFromUrl === "waitlist") {
+      setActiveTab("waitlist");
+    }
+  }, [tabFromUrl]);
 
   useEffect(() => {
     if (!focusBookingIdFromUrl || consumedFocusFromUrlRef.current === focusBookingIdFromUrl) {
@@ -2472,6 +2481,7 @@ function BookingsPageContent() {
         <Tabs.List grow>
           <Tabs.Tab value="today">Booking hôm nay</Tabs.Tab>
           <Tabs.Tab value="list">Danh sách booking</Tabs.Tab>
+          <Tabs.Tab value="waitlist">Hàng chờ</Tabs.Tab>
           <Tabs.Tab value="completed">Hoàn thành</Tabs.Tab>
           <Tabs.Tab value="calendar">Lịch</Tabs.Tab>
         </Tabs.List>
@@ -2504,6 +2514,12 @@ function BookingsPageContent() {
           ) : (
             bookingsTable
           )}
+        </Tabs.Panel>
+        <Tabs.Panel value="waitlist" pt="md">
+          <BranchWaitlistSection
+            branchIds={filteredBranchIds}
+            isEmployee={isEmployee}
+          />
         </Tabs.Panel>
         <Tabs.Panel value="completed" pt="md">
           {completedBookingsPanel}

@@ -59,6 +59,7 @@ import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-t
 import { FloorLayoutTemplatesModal } from "@/components/floor-map/floor-layout-templates-modal";
 import { FloorTableBlockView } from "@/components/floor-map/floor-table-block-view";
 import { RegisterPendingAssignTable } from "@/components/floor-map/register-pending-assign-table";
+import { BranchWaitlistSection } from "@/components/booking-management/branch-waitlist-section";
 import { TableBlockDetailModal } from "@/components/floor-map/table-block-detail-modal";
 import {
   VoiceBookingAssistant,
@@ -593,6 +594,7 @@ export default function FloorMapPage() {
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [floorMapSelectedDate, setFloorMapSelectedDate] = useState(() => dayjs());
   const [createBookingModalOpened, setCreateBookingModalOpened] = useState(false);
+  const [waitlistModalOpened, setWaitlistModalOpened] = useState(false);
 
   const blockCanvasForOverlay =
     Boolean(registerTable || registerMergeGroup || detailTable || detailMergeGroup) ||
@@ -4460,6 +4462,14 @@ export default function FloorMapPage() {
                             </Button>
                             <Button
                               size={isCompact ? "sm" : "compact-sm"}
+                              variant="filled"
+                              className={classes.toolbarDayListBtn}
+                              onClick={() => setWaitlistModalOpened(true)}
+                            >
+                              Danh sách hàng chờ
+                            </Button>
+                            <Button
+                              size={isCompact ? "sm" : "compact-sm"}
                               variant="light"
                               className={classes.toolbarDayListBtn}
                               onClick={() => setMergeModalOpen(true)}
@@ -4834,6 +4844,23 @@ export default function FloorMapPage() {
             </Tabs>
           </Stack>
         ) : null}
+      </Modal>
+
+      <Modal
+        opened={waitlistModalOpened}
+        onClose={() => setWaitlistModalOpened(false)}
+        title={`Danh sách hàng chờ · ${floorMapSelectedDate.format("DD/MM/YYYY")}`}
+        size="xl"
+        centered
+      >
+        <BranchWaitlistSection
+          branchIds={filteredBranchIds}
+          fixedDay={floorMapSelectedDate.format("YYYY-MM-DD")}
+          isEmployee={isEmployee}
+          showHeader={false}
+          showDateFilter={false}
+          embedded
+        />
       </Modal>
 
       <TableBlockDetailModal

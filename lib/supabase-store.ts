@@ -146,6 +146,14 @@ export async function confirmWaitlistOfferInSupabase(waitlistEntryId: string): P
   return callStore("confirmWaitlistOffer", waitlistEntryId);
 }
 
+export async function listBranchWaitlistEntriesInSupabase(
+  input: Parameters<
+    typeof import("./supabase-store-server").listBranchWaitlistEntriesInSupabase
+  >[0]
+): Promise<import("./types").BookingWaitlistEntry[]> {
+  return callStore("listBranchWaitlistEntries", input);
+}
+
 export type CreateTableMergeGroupResult = Result & {
   groupId?: string;
   mergedName?: string;
