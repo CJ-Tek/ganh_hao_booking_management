@@ -29,6 +29,8 @@ export interface MergeGroupsPanelProps {
   filteredBranchIds: string[];
   busyGroupId: string | null;
   onRequestRelease: (groupId: string) => void;
+  /** Jump to this merge group (e.g. set floor-map date and focus group). */
+  onRowSelect?: (group: TableMergeGroup) => void;
   /** Pre-select area filter (e.g. current floor-map area). */
   initialAreaFilter?: string | null;
   /** Omit outer section card when embedded in a modal. */
@@ -44,6 +46,7 @@ export function MergeGroupsPanel({
   filteredBranchIds,
   busyGroupId,
   onRequestRelease,
+  onRowSelect,
   initialAreaFilter = null,
   embedded = false,
 }: MergeGroupsPanelProps) {
@@ -185,6 +188,21 @@ export function MergeGroupsPanel({
       records={searchedGroups}
       hideSearch
       withToolbar={false}
+      pinLastColumn
+      onRowClick={
+        onRowSelect
+          ? ({ record }) => {
+              onRowSelect(record);
+            }
+          : undefined
+      }
+      rowStyle={
+        onRowSelect
+          ? () => ({
+              cursor: "pointer",
+            })
+          : undefined
+      }
       sortRecords={sortGroups}
       sortStatus={sortStatus}
       onSortStatusChange={setSortStatus}
@@ -203,7 +221,11 @@ export function MergeGroupsPanel({
             radius="md"
             padding="md"
             className={cardBusy.className}
-            style={cardBusy.style}
+            style={{
+              ...cardBusy.style,
+              ...(onRowSelect ? { cursor: "pointer" } : undefined),
+            }}
+            onClick={onRowSelect ? () => onRowSelect(group) : undefined}
           >
             <Stack gap="sm">
               <Group justify="space-between" align="flex-start" wrap="nowrap">
@@ -237,7 +259,10 @@ export function MergeGroupsPanel({
                 variant="light"
                 size="compact-sm"
                 loading={busyGroupId === group.id}
-                onClick={() => onRequestRelease(group.id)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onRequestRelease(group.id);
+                }}
               >
                 Bỏ gộp
               </Button>
@@ -310,8 +335,11 @@ export function MergeGroupsPanel({
         {
           accessor: "status",
           title: "Trạng thái",
+          width: 112,
+          noWrap: true,
+          textAlign: "center",
           render: () => (
-            <Badge color="blue" variant="light">
+            <Badge color="blue" variant="light" style={{ whiteSpace: "nowrap" }}>
               Đang gộp
             </Badge>
           ),
@@ -319,13 +347,20 @@ export function MergeGroupsPanel({
         {
           accessor: "actions",
           title: "",
+          width: 100,
+          noWrap: true,
+          textAlign: "center",
           render: (group) => (
             <Button
               color="red"
               variant="light"
               size="compact-sm"
               loading={busyGroupId === group.id}
-              onClick={() => onRequestRelease(group.id)}
+              onClick={(event) => {
+                event.stopPropagation();
+                onRequestRelease(group.id);
+              }}
+              style={{ whiteSpace: "nowrap" }}
             >
               Bỏ gộp
             </Button>

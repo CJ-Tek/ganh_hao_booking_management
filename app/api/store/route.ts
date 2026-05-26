@@ -113,12 +113,57 @@ const handlers: Record<string, StoreHandler> = {
     const p = payload as {
       areaId: string;
       input: Parameters<typeof store.updateAreaFloorLayoutInSupabase>[1];
+      options?: Parameters<typeof store.updateAreaFloorLayoutInSupabase>[2];
     };
-    return store.updateAreaFloorLayoutInSupabase(p.areaId, p.input);
+    return store.updateAreaFloorLayoutInSupabase(p.areaId, p.input, p.options);
   },
   saveFloorLayout: (payload) => {
-    const p = payload as { areaId: string; input: Parameters<typeof store.saveFloorLayoutToSupabase>[1] };
-    return store.saveFloorLayoutToSupabase(p.areaId, p.input);
+    const p = payload as {
+      areaId: string;
+      input: Parameters<typeof store.saveFloorLayoutToSupabase>[1];
+      options?: Parameters<typeof store.saveFloorLayoutToSupabase>[2];
+    };
+    return store.saveFloorLayoutToSupabase(p.areaId, p.input, p.options);
+  },
+  fetchAreaFloorLayoutForDate: (payload) => {
+    const p = payload as { areaId: string; layoutDate: string };
+    return store.fetchAreaFloorLayoutForDateInSupabase(p.areaId, p.layoutDate);
+  },
+  deleteAreaFloorLayoutForDate: (payload) => {
+    const p = payload as { areaId: string; layoutDate: string };
+    return store.deleteAreaFloorLayoutForDateInSupabase(p.areaId, p.layoutDate);
+  },
+  listFloorLayoutTemplates: (payload) =>
+    store.listFloorLayoutTemplatesInSupabase(payload as string),
+  createFloorLayoutTemplate: (payload) => {
+    const p = payload as {
+      areaId: string;
+      name: string;
+      snapshot: Parameters<typeof store.createFloorLayoutTemplateInSupabase>[2];
+      createdByUserId: string;
+    };
+    return store.createFloorLayoutTemplateInSupabase(
+      p.areaId,
+      p.name,
+      p.snapshot,
+      p.createdByUserId
+    );
+  },
+  deleteFloorLayoutTemplate: (payload) =>
+    store.deleteFloorLayoutTemplateInSupabase(payload as string),
+  applyFloorLayoutTemplateToDate: (payload) => {
+    const p = payload as {
+      templateId: string;
+      areaId: string;
+      layoutDate: string;
+      updatedByUserId?: string | null;
+    };
+    return store.applyFloorLayoutTemplateToDateInSupabase(
+      p.templateId,
+      p.areaId,
+      p.layoutDate,
+      p.updatedByUserId
+    );
   },
   tryAcquireFloorLayoutLock: (payload) => {
     const p = payload as { areaId: string; userId: string };

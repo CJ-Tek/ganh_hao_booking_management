@@ -43,6 +43,77 @@ export type Database = {
         }
         Relationships: []
       }
+      area_floor_layout_by_date: {
+        Row: {
+          area_id: string
+          floor_grid_columns: number
+          floor_grid_rows: number
+          floor_node_spacing: number
+          id: string
+          layout_date: string
+          merge_group_id: string | null
+          source_template_id: string | null
+          table_positions: Json
+          updated_at: string
+          updated_by_user_id: string | null
+        }
+        Insert: {
+          area_id: string
+          floor_grid_columns?: number
+          floor_grid_rows?: number
+          floor_node_spacing?: number
+          id?: string
+          layout_date: string
+          merge_group_id?: string | null
+          source_template_id?: string | null
+          table_positions?: Json
+          updated_at?: string
+          updated_by_user_id?: string | null
+        }
+        Update: {
+          area_id?: string
+          floor_grid_columns?: number
+          floor_grid_rows?: number
+          floor_node_spacing?: number
+          id?: string
+          layout_date?: string
+          merge_group_id?: string | null
+          source_template_id?: string | null
+          table_positions?: Json
+          updated_at?: string
+          updated_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "area_floor_layout_by_date_area_id_fkey"
+            columns: ["area_id"]
+            isOneToOne: false
+            referencedRelation: "areas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "area_floor_layout_by_date_source_template_id_fkey"
+            columns: ["source_template_id"]
+            isOneToOne: false
+            referencedRelation: "floor_layout_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "area_floor_layout_by_date_merge_group_id_fkey"
+            columns: ["merge_group_id"]
+            isOneToOne: false
+            referencedRelation: "table_merge_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "area_floor_layout_by_date_updated_by_user_id_fkey"
+            columns: ["updated_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "app_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       areas: {
         Row: {
           branch_id: string

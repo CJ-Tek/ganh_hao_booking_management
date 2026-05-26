@@ -71,6 +71,27 @@ export function mapTableMergeGroupFromRow(
   };
 }
 
+/**
+ * Calendar day to open when jumping to a merge group: prefer `referenceDate` if in range,
+ * else today if in range, else the group's start date.
+ */
+export function resolveMergeGroupNavigationDate(
+  group: Pick<TableMergeGroup, "startDate" | "endDate">,
+  referenceDate: Dayjs = dayjs()
+): string {
+  const start = dayjs(group.startDate, "YYYY-MM-DD", true).startOf("day");
+  const end = dayjs(group.endDate, "YYYY-MM-DD", true).startOf("day");
+  const ref = referenceDate.startOf("day");
+  if (!ref.isBefore(start, "day") && !ref.isAfter(end, "day")) {
+    return formatMergeGroupDate(ref);
+  }
+  const today = dayjs().startOf("day");
+  if (!today.isBefore(start, "day") && !today.isAfter(end, "day")) {
+    return formatMergeGroupDate(today);
+  }
+  return group.startDate;
+}
+
 export function isMergeGroupEffectiveOnDate(
   group: Pick<TableMergeGroup, "status" | "startDate" | "endDate">,
   date: Dayjs
@@ -92,6 +113,30 @@ export function isMergeGroupExpired(
     return false;
   }
   return asOf.startOf("day").isAfter(group.endDate, "day");
+}
+
+/** Inclusive calendar dates from start through end (`YYYY-MM-DD`). */
+export function eachLayoutDateInRange(startDate: string, endDate: string): string[] {
+  const start = dayjs(startDate, "YYYY-MM-DD", true);
+  const end = dayjs(endDate, "YYYY-MM-DD", true);
+  if (!start.isValid() || !end.isValid() || end.isBefore(start, "day")) {
+    return [];
+  }
+  const dates: string[] = [];
+  let cursor = start.startOf("day");
+  const last = end.startOf("day");
+  while (!cursor.isAfter(last, "day")) {
+    dates.push(cursor.format("YYYY-MM-DD"));
+    cursor = cursor.add(1, "day");
+  }
+  return dates;
+}
+
+export function isLayoutDateWithinMergeRange(
+  layoutDate: string,
+  range: TableMergeGroupDateRange
+): boolean {
+  return layoutDate >= range.startDate && layoutDate <= range.endDate;
 }
 
 export function validateMergeGroupDateRange(input: {

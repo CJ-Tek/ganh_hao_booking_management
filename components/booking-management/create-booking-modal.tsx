@@ -325,7 +325,7 @@ export function CreateBookingModal({
       onClose={closeModal}
       closeOnClickOutside={!isCreating}
       closeOnEscape={!isCreating}
-      title="Tạo mới"
+      title="Tạo booking"
       size="lg"
       centered
     >
@@ -370,7 +370,15 @@ export function CreateBookingModal({
           {createFormMergeRecommendations.length > 0 && typeof guestCount === "number" ? (
             <MergeRecommendationCard
               recommendations={createFormMergeRecommendations}
-              tables={state.tables.filter((table) => table.branchId === createBranchId)}
+              areas={state.areas.filter((area) => area.branchId === createBranchId)}
+              tables={state.tables
+                .filter((table) => table.branchId === createBranchId)
+                .map((t) => ({
+                  id: t.id,
+                  name: t.name,
+                  seats: t.seats,
+                  areaId: t.areaId,
+                }))}
               targetSeats={guestCount}
               busyKey={recommendationBusyKey}
               maxItems={3}

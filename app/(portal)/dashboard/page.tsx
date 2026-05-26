@@ -24,7 +24,9 @@ import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
 import {
+  bookingAreaTableSortKey,
   displayCustomerPhone,
+  formatBookingAreaTable,
   isGuestCountSpecified,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
@@ -59,6 +61,14 @@ export default function DashboardPage() {
     () => state.tables.filter((item) => filteredBranchIds.includes(item.branchId)),
     [filteredBranchIds, state.tables]
   );
+  const bookingAreaTableLookup = useMemo(
+    () => ({
+      areas: state.areas,
+      tables: state.tables,
+      mergeGroups: state.mergeGroups,
+    }),
+    [state.areas, state.mergeGroups, state.tables]
+  );
   const checkedInCount = branchBookings.filter(
     (item) => item.status === "checked_in" || item.status === "seated"
   ).length;
@@ -78,14 +88,11 @@ export default function DashboardPage() {
     if (!q) return branchBookings;
     return branchBookings.filter((booking) => {
       const customer = state.customers.find((item) => item.id === booking.customerId);
-      const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
-      const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
       const creator = state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
       return [
         customer?.fullName ?? "",
         displayCustomerPhone(customer?.phone),
-        area,
-        table,
+        bookingAreaTableSortKey(booking, bookingAreaTableLookup),
         creator,
         bookingStatusLabel[booking.status],
         stripUnknownGuestTag(booking.note) ?? "",
@@ -94,7 +101,7 @@ export default function DashboardPage() {
         .toLowerCase()
         .includes(q);
     });
-  }, [branchBookings, mobileQuery, state.areas, state.customers, state.tables, state.users]);
+  }, [bookingAreaTableLookup, branchBookings, mobileQuery, state.customers, state.users]);
 
   const mobileSortedBookings = useMemo(
     () =>
@@ -127,12 +134,7 @@ export default function DashboardPage() {
           return booking.guestCount;
         }
         if (acc === "areaTable") {
-          if (!booking.areaId || !booking.tableId) {
-            return "Chờ xếp bàn";
-          }
-          const areaName = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
-          const tableName = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
-          return `${areaName} ${tableName}`;
+          return bookingAreaTableSortKey(booking, bookingAreaTableLookup);
         }
         if (acc === "note") {
           return stripUnknownGuestTag(booking.note) ?? "";
@@ -155,21 +157,18 @@ export default function DashboardPage() {
         return sortStatus.direction === "asc" ? compare : -compare;
       });
     },
-    [state.areas, state.customers, state.tables, state.users]
+    [bookingAreaTableLookup, state.customers, state.users]
   );
 
   const getHistorySearchValue = useCallback(
     (booking: Booking) => {
       const customer = state.customers.find((item) => item.id === booking.customerId);
-      const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
-      const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
       const creator =
         state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
       return [
         customer?.fullName,
         displayCustomerPhone(customer?.phone),
-        area,
-        table,
+        bookingAreaTableSortKey(booking, bookingAreaTableLookup),
         creator,
         bookingStatusLabel[booking.status],
         stripUnknownGuestTag(booking.note),
@@ -180,7 +179,7 @@ export default function DashboardPage() {
         .join(" ")
         .toLowerCase();
     },
-    [state.areas, state.customers, state.tables, state.users]
+    [bookingAreaTableLookup, state.customers, state.users]
   );
 
   const statGrid = (
@@ -289,10 +288,9 @@ export default function DashboardPage() {
                 displayCustomerPhone(
                   state.customers.find((item) => item.id === booking.customerId)?.phone
                 );
-              const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
-              const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
-              const locationLine =
-                booking.areaId && booking.tableId ? `${area} · Bàn ${table}` : "Chờ xếp bàn";
+              const locationLine = formatBookingAreaTable(booking, bookingAreaTableLookup, {
+                tableNamePrefix: true,
+              });
               const creator =
                 state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
                 "Không rõ";
@@ -392,14 +390,8 @@ export default function DashboardPage() {
               accessor: "areaTable",
               title: "Khu vực / Bàn",
               sortable: true,
-              render: (booking) => {
-                if (!booking.areaId || !booking.tableId) {
-                  return "Chờ xếp bàn";
-                }
-                const area = state.areas.find((item) => item.id === booking.areaId);
-                const table = state.tables.find((item) => item.id === booking.tableId);
-                return `${area?.name ?? "—"} · ${table?.name ?? "—"}`;
-              },
+              render: (booking) =>
+                formatBookingAreaTable(booking, bookingAreaTableLookup),
             },
             {
               accessor: "guestCount",

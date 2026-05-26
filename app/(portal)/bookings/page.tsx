@@ -28,11 +28,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { BookingCalendarPanel } from "@/components/booking-calendar-panel";
-import {
-  AssignGuestCountPromptBody,
-  AssignGuestSpecifiedOptionsBody,
-} from "@/components/booking-management/assign-guest-bodies";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
+import { BookingOrderDetailModal } from "@/components/booking-management/booking-order-detail-modal";
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import { MergeRecommendationCard } from "@/components/booking-management/merge-recommendation-card";
@@ -51,7 +48,10 @@ import {
   displayCustomerPhone,
   findAssignableSlotConflictsAtTable,
   formatTableSlotConflictMessage,
+  bookingAreaTableSortKey,
+  formatBookingAreaTable,
   formatTodayBookingAreaTable,
+  isBookingTableAssigned,
   getAssignableCandidateTables,
   getReceptionBookingStatus,
   inferGuestTypeLabel,
@@ -78,8 +78,6 @@ const LIST_BOOKING_PULSE_CYCLE_MS = 600;
 const LIST_BOOKING_PULSE_CYCLES = 2;
 const LIST_BOOKING_PULSE_TOTAL_MS = LIST_BOOKING_PULSE_CYCLE_MS * LIST_BOOKING_PULSE_CYCLES;
 
-const MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS = 220;
-
 /** Page `<Modal>` stacks above Mantine `modals`; portaled overlays need a higher z-index. */
 const MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX = 600;
 const MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX = 700;
@@ -97,18 +95,6 @@ function bookingLastEditorName(
     return "—";
   }
   return users.find((item) => item.id === booking.lastEditedByUserId)?.fullName ?? "Không rõ";
-}
-
-function BookingDetailField(props: { label: string; value: ReactNode }) {
-  const { label, value } = props;
-  return (
-    <Group justify="space-between" align="flex-start" wrap="nowrap" gap="md">
-      <Text size="sm" c="dimmed" style={{ flexShrink: 0 }}>
-        {label}
-      </Text>
-      <div style={{ minWidth: 0, flex: 1, textAlign: "right" }}>{value}</div>
-    </Group>
-  );
 }
 
 export default function BookingsPage() {
@@ -176,6 +162,7 @@ function BookingsPageContent() {
   const [assignManualGuestCount, setAssignManualGuestCount] = useState<number | undefined>(undefined);
   const [assignAreaId, setAssignAreaId] = useState<string | null>(null);
   const [assignTableId, setAssignTableId] = useState<string | null>(null);
+  const [assignMergeGroupId, setAssignMergeGroupId] = useState<string | null>(null);
   const [isAssignSaving, setIsAssignSaving] = useState(false);
   const [changeTableBooking, setChangeTableBooking] = useState<Booking | null>(null);
   const [isChangeTableSaving, setIsChangeTableSaving] = useState(false);
@@ -297,6 +284,15 @@ function BookingsPageContent() {
   const branchBookings = useMemo(
     () => state.bookings.filter((booking) => filteredBranchIds.includes(booking.branchId)),
     [filteredBranchIds, state.bookings]
+  );
+
+  const bookingAreaTableLookup = useMemo(
+    () => ({
+      areas: state.areas,
+      tables: state.tables,
+      mergeGroups: state.mergeGroups,
+    }),
+    [state.areas, state.mergeGroups, state.tables]
   );
 
   const editBookingSlotKey = useMemo(
@@ -459,7 +455,7 @@ function BookingsPageContent() {
       if (listStatusFilter && booking.status !== listStatusFilter) {
         return false;
       }
-      const hasTable = Boolean(booking.areaId && booking.tableId);
+      const hasTable = isBookingTableAssigned(booking);
       if (listTableAssignFilter === "assigned" && !hasTable) {
         return false;
       }
@@ -474,9 +470,12 @@ function BookingsPageContent() {
   const getCandidateTables = (booking: Booking, requiredSeats?: number) =>
     getAssignableCandidateTables(booking, state.tables, state.bookings, requiredSeats);
 
+  type AssignPersistMode = "default" | "keepModalSynced";
+
   const runAssign = async (
     booking: Booking,
-    target: { areaId: string; tableId: string; guestCount?: number }
+    target: { areaId: string; tableId: string; guestCount?: number },
+    persist?: AssignPersistMode
   ) => {
     setIsAssignSaving(true);
     try {
@@ -490,7 +489,26 @@ function BookingsPageContent() {
         color: result.ok ? "green" : "red",
         message: result.message,
       });
-      if (result.ok) {
+      if (result.ok && persist === "keepModalSynced") {
+        setAssignAreaId(target.areaId);
+        setAssignTableId(target.tableId);
+        setAssignMergeGroupId(null);
+        const guest =
+          typeof target.guestCount === "number" && Number.isFinite(target.guestCount)
+            ? Math.max(1, target.guestCount)
+            : booking.guestCount;
+        setAssignFormBooking((prev) =>
+          prev?.id === booking.id
+            ? {
+                ...prev,
+                areaId: target.areaId,
+                tableId: target.tableId,
+                mergeGroupId: null,
+                guestCount: guest,
+              }
+            : prev
+        );
+      } else if (result.ok && persist !== "keepModalSynced") {
         setAssignFormBooking(null);
       }
     } finally {
@@ -501,7 +519,8 @@ function BookingsPageContent() {
   /** Assign a booking to an existing merge group (Dùng cụm có sẵn). */
   const runAssignToMergeGroup = async (
     booking: Booking,
-    target: { areaId: string; groupId: string; guestCount?: number }
+    target: { areaId: string; groupId: string; guestCount?: number },
+    persist?: AssignPersistMode
   ) => {
     setIsAssignSaving(true);
     try {
@@ -516,7 +535,26 @@ function BookingsPageContent() {
         color: result.ok ? "green" : "red",
         message: result.message,
       });
-      if (result.ok) {
+      if (result.ok && persist === "keepModalSynced") {
+        setAssignAreaId(target.areaId);
+        setAssignTableId(null);
+        setAssignMergeGroupId(target.groupId);
+        const guest =
+          typeof target.guestCount === "number" && Number.isFinite(target.guestCount)
+            ? Math.max(1, target.guestCount)
+            : booking.guestCount;
+        setAssignFormBooking((prev) =>
+          prev?.id === booking.id
+            ? {
+                ...prev,
+                areaId: target.areaId,
+                tableId: null,
+                mergeGroupId: target.groupId,
+                guestCount: guest,
+              }
+            : prev
+        );
+      } else if (result.ok && persist !== "keepModalSynced") {
         setAssignFormBooking(null);
       }
     } finally {
@@ -527,7 +565,8 @@ function BookingsPageContent() {
   /** Create a new merge group from suggested tables, then assign the booking to it. */
   const runMergeAndAssign = async (
     booking: Booking,
-    target: { areaId: string; tableIds: string[]; guestCount?: number }
+    target: { areaId: string; tableIds: string[]; guestCount?: number },
+    persist?: AssignPersistMode
   ) => {
     setIsAssignSaving(true);
     try {
@@ -556,7 +595,26 @@ function BookingsPageContent() {
           ? `${createResult.message}. ${assignResult.message}`
           : assignResult.message,
       });
-      if (assignResult.ok) {
+      if (assignResult.ok && persist === "keepModalSynced") {
+        setAssignAreaId(target.areaId);
+        setAssignTableId(null);
+        setAssignMergeGroupId(createResult.groupId);
+        const guest =
+          typeof target.guestCount === "number" && Number.isFinite(target.guestCount)
+            ? Math.max(1, target.guestCount)
+            : booking.guestCount;
+        setAssignFormBooking((prev) =>
+          prev?.id === booking.id
+            ? {
+                ...prev,
+                areaId: target.areaId,
+                tableId: null,
+                mergeGroupId: createResult.groupId,
+                guestCount: guest,
+              }
+            : prev
+        );
+      } else if (assignResult.ok && persist !== "keepModalSynced") {
         setAssignFormBooking(null);
       }
     } finally {
@@ -583,10 +641,17 @@ function BookingsPageContent() {
         notifications.show({ color: "red", message: createResult.message });
         return;
       }
+      const guestApplied =
+        typeof target.guestCount === "number" && Number.isFinite(target.guestCount)
+          ? Math.max(1, target.guestCount)
+          : typeof editGuestCount === "number" && Number.isFinite(editGuestCount)
+            ? Math.max(1, editGuestCount)
+            : booking.guestCount;
+
       const result = await updateBookingOrder({
         bookingId: booking.id,
         bookingAt: dayjs(editBookingAt).toISOString(),
-        guestCount: target.guestCount,
+        guestCount: guestApplied,
         customerPhone: editCustomerPhone,
         areaId: target.areaId,
         tableId: null,
@@ -594,12 +659,33 @@ function BookingsPageContent() {
       });
       notifications.show({
         color: result.ok ? "green" : "red",
-        message: result.ok
-          ? `${createResult.message}. ${result.message}`
-          : result.message,
+        message:
+          result.ok
+            ? (() => {
+                const mergedLabel =
+                  createResult.mergedName ?? createResult.group?.mergedName ?? "Bàn gộp";
+                const areaLabel =
+                  state.areas.find((a) => a.id === target.areaId)?.name ?? "khu đã chọn";
+                return `${createResult.message}. ${result.message} · Đã chọn ${areaLabel} · ${mergedLabel}.`;
+              })()
+            : result.message,
       });
       if (result.ok) {
-        closeEditBookingModal();
+        setEditAreaId(target.areaId);
+        setEditMergeGroupId(createResult.groupId);
+        setEditTableId(null);
+        setEditGuestCount(guestApplied);
+        setEditBooking((prev) =>
+          prev?.id === booking.id
+            ? {
+                ...prev,
+                areaId: target.areaId,
+                tableId: null,
+                mergeGroupId: createResult.groupId,
+                guestCount: guestApplied,
+              }
+            : prev
+        );
       }
     } finally {
       setIsEditSaving(false);
@@ -617,6 +703,7 @@ function BookingsPageContent() {
     setAssignManualGuestCount(initialGuestCount);
     setAssignAreaId(null);
     setAssignTableId(null);
+    setAssignMergeGroupId(null);
   };
 
   const openEditBookingModal = (booking: Booking) => {
@@ -755,68 +842,7 @@ function BookingsPageContent() {
     }
   };
 
-  const openAssignOptions = (booking: Booking) => {
-    modals.closeAll();
-    const guestSpecified = isGuestCountSpecified(booking);
-    const modalId = modals.open({
-      title: "Gán khách vào bàn",
-      children: <></>,
-    });
-    modals.updateModal({
-      modalId,
-      children: (
-        <Stack gap="sm">
-          <Text size="sm">
-            Khách{" "}
-            <strong>
-              {state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—"}
-            </strong>{" "}
-            · {dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY")}
-          </Text>
-          {guestSpecified ? (
-            <AssignGuestSpecifiedOptionsBody
-              booking={booking}
-              modalId={modalId}
-              persistGuestCount={(id, n) => updateBookingGuestCount(id, n)}
-              onManual={(guestCount) => openManualAssignModal(booking, guestCount)}
-            />
-          ) : (
-            <>
-              <Text size="sm" c="dimmed">
-                Booking này chưa có số khách.
-              </Text>
-              <Button
-                variant="default"
-                onClick={() => {
-                  const nestedModalId = modals.open({
-                    title: "Nhập số khách rồi chọn bàn",
-                    children: <></>,
-                  });
-                  modals.updateModal({
-                    modalId: nestedModalId,
-                    children: (
-                      <AssignGuestCountPromptBody
-                        onBack={() => modals.close(nestedModalId)}
-                        onManual={(guest) => {
-                          modals.close(nestedModalId);
-                          modals.close(modalId);
-                          window.setTimeout(() => {
-                            openManualAssignModal(booking, guest);
-                          }, MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS);
-                        }}
-                      />
-                    ),
-                  });
-                }}
-              >
-                Nhập số khách để chọn bàn thủ công
-              </Button>
-            </>
-          )}
-        </Stack>
-      ),
-    });
-  };
+  const openAssignOptions = openManualAssignModal;
 
   const getListBookingRowStyle = useCallback(
     (booking: Booking) =>
@@ -867,8 +893,6 @@ function BookingsPageContent() {
   const getListBookingSearchValue = useCallback(
     (booking: Booking) => {
       const customer = state.customers.find((item) => item.id === booking.customerId);
-      const area = state.areas.find((item) => item.id === booking.areaId);
-      const table = state.tables.find((item) => item.id === booking.tableId);
       const noteText = stripUnknownGuestTag(booking.note) ?? "";
       return [
         customer?.fullName ?? "",
@@ -881,15 +905,14 @@ function BookingsPageContent() {
         "checkin",
         "giờ check-in",
         String(booking.guestCount),
-        area?.name ?? "",
-        table?.name ?? "",
+        bookingAreaTableSortKey(booking, bookingAreaTableLookup),
         bookingStatusLabel[booking.status],
         noteText,
       ]
         .join(" ")
         .toLowerCase();
     },
-    [state.areas, state.customers, state.tables]
+    [bookingAreaTableLookup, state.customers]
   );
 
   const sortListBookings = useCallback(
@@ -903,9 +926,7 @@ function BookingsPageContent() {
           return booking.guestCount;
         }
         if (acc === "areaTable") {
-          const areaName = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
-          const tableName = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
-          return `${areaName} ${tableName}`;
+          return bookingAreaTableSortKey(booking, bookingAreaTableLookup);
         }
         if (acc === "note") {
           return stripUnknownGuestTag(booking.note) ?? "";
@@ -937,7 +958,7 @@ function BookingsPageContent() {
         return sortStatus.direction === "asc" ? compare : -compare;
       });
     },
-    [state.areas, state.customers, state.tables, state.users]
+    [bookingAreaTableLookup, state.customers, state.users]
   );
 
   const sortedBookings = useMemo(
@@ -1017,7 +1038,7 @@ function BookingsPageContent() {
       if (todayStatusFilter && booking.status !== todayStatusFilter) {
         return false;
       }
-      const hasTable = Boolean(booking.areaId && booking.tableId);
+      const hasTable = isBookingTableAssigned(booking);
       if (todayTableAssignFilter === "assigned" && !hasTable) {
         return false;
       }
@@ -1055,8 +1076,6 @@ function BookingsPageContent() {
     }
     return todayPipelineFilteredBookings.filter((booking) => {
       const customer = state.customers.find((item) => item.id === booking.customerId);
-      const area = state.areas.find((item) => item.id === booking.areaId);
-      const table = state.tables.find((item) => item.id === booking.tableId);
       const noteText = stripUnknownGuestTag(booking.note) ?? "";
       const haystack = [
         customer?.fullName ?? "",
@@ -1064,9 +1083,7 @@ function BookingsPageContent() {
         dayjs(booking.bookingAt).format("HH:mm"),
         dayjs(booking.bookingAt).format("DD/MM/YYYY HH:mm"),
         String(booking.guestCount),
-        area?.name ?? "",
-        table?.name ?? "",
-        formatTodayBookingAreaTable(booking, area?.name, table?.name),
+        formatTodayBookingAreaTable(booking, bookingAreaTableLookup),
         getTodayGuestTypeLabel(booking),
         getTodayReceptionStatusLabel(booking),
         bookingStatusLabel[booking.status],
@@ -1078,11 +1095,10 @@ function BookingsPageContent() {
       return haystack.includes(q);
     });
   }, [
+    bookingAreaTableLookup,
     getTodayGuestTypeLabel,
     getTodayReceptionStatusLabel,
-    state.areas,
     state.customers,
-    state.tables,
     state.users,
     todayPipelineFilteredBookings,
     todaySearchQuery,
@@ -1091,8 +1107,6 @@ function BookingsPageContent() {
   const getTodayBookingSearchValue = useCallback(
     (booking: Booking) => {
       const customer = state.customers.find((item) => item.id === booking.customerId);
-      const area = state.areas.find((item) => item.id === booking.areaId);
-      const table = state.tables.find((item) => item.id === booking.tableId);
       const noteText = stripUnknownGuestTag(booking.note) ?? "";
       return [
         customer?.fullName ?? "",
@@ -1100,9 +1114,7 @@ function BookingsPageContent() {
         dayjs(booking.bookingAt).format("HH:mm"),
         dayjs(booking.bookingAt).format("DD/MM/YYYY HH:mm"),
         String(booking.guestCount),
-        area?.name ?? "",
-        table?.name ?? "",
-        formatTodayBookingAreaTable(booking, area?.name, table?.name),
+        formatTodayBookingAreaTable(booking, bookingAreaTableLookup),
         getTodayGuestTypeLabel(booking),
         getTodayReceptionStatusLabel(booking),
         bookingStatusLabel[booking.status],
@@ -1136,9 +1148,7 @@ function BookingsPageContent() {
           return getTodayGuestTypeLabel(booking);
         }
         if (acc === "areaTable") {
-          const areaName = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
-          const tableName = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
-          return formatTodayBookingAreaTable(booking, areaName, tableName);
+          return formatTodayBookingAreaTable(booking, bookingAreaTableLookup);
         }
         if (acc === "note") {
           return stripUnknownGuestTag(booking.note) ?? "";
@@ -1162,11 +1172,10 @@ function BookingsPageContent() {
       });
     },
     [
+      bookingAreaTableLookup,
       getTodayGuestTypeLabel,
       getTodayReceptionStatusLabel,
-      state.areas,
       state.customers,
-      state.tables,
       state.users,
     ]
   );
@@ -1413,6 +1422,7 @@ function BookingsPageContent() {
           </>
         }
         minHeight={260}
+        pinLastColumn
         onRowClick={({ record }) => {
           if (isBookingRowBusy(record.id)) {
             return;
@@ -1461,14 +1471,8 @@ function BookingsPageContent() {
             accessor: "areaTable",
             title: "Khu vực / Bàn",
             sortable: true,
-            render: (booking) => {
-              if (!booking.areaId || !booking.tableId) {
-                return "Chờ xếp bàn";
-              }
-              const area = state.areas.find((item) => item.id === booking.areaId);
-              const table = state.tables.find((item) => item.id === booking.tableId);
-              return `${area?.name ?? "—"} · ${table?.name ?? "—"}`;
-            },
+            render: (booking) =>
+              formatBookingAreaTable(booking, bookingAreaTableLookup),
           },
           {
             accessor: "guestCount",
@@ -1624,13 +1628,12 @@ function BookingsPageContent() {
           const cust = state.customers.find((item) => item.id === booking.customerId);
           const customer = cust?.fullName ?? "—";
           const phone = displayCustomerPhone(cust?.phone);
-          const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
-          const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
           const creator =
             state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
             "Không rõ";
-          const locationLine =
-            booking.areaId && booking.tableId ? `${area} · Bàn ${table}` : "Chờ xếp bàn";
+          const locationLine = formatBookingAreaTable(booking, bookingAreaTableLookup, {
+            tableNamePrefix: true,
+          });
           const cardBusy = bookingCardBusyProps(isBookingRowBusy(booking.id));
           return (
             <Card
@@ -1722,8 +1725,6 @@ function BookingsPageContent() {
             minHeight={220}
             mobileCardRender={(booking) => {
               const customer = state.customers.find((item) => item.id === booking.customerId);
-              const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
-              const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
               return (
                 <Card key={booking.id} withBorder radius="md" padding="md">
                   <Stack gap="xs">
@@ -1737,7 +1738,9 @@ function BookingsPageContent() {
                     </Group>
                     <Text size="sm">{dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY")}</Text>
                     <Text size="sm" c="dimmed">
-                      {booking.areaId && booking.tableId ? `${area} · Bàn ${table}` : "Chờ xếp bàn"}
+                      {formatBookingAreaTable(booking, bookingAreaTableLookup, {
+                        tableNamePrefix: true,
+                      })}
                     </Text>
                   </Stack>
                 </Card>
@@ -1758,14 +1761,8 @@ function BookingsPageContent() {
               {
                 accessor: "areaTable",
                 title: "Khu vực / Bàn",
-                render: (booking) => {
-                  if (!booking.areaId || !booking.tableId) {
-                    return "Chờ xếp bàn";
-                  }
-                  const area = state.areas.find((item) => item.id === booking.areaId);
-                  const table = state.tables.find((item) => item.id === booking.tableId);
-                  return `${area?.name ?? "—"} · ${table?.name ?? "—"}`;
-                },
+                render: (booking) =>
+                  formatBookingAreaTable(booking, bookingAreaTableLookup),
               },
               {
                 accessor: "status",
@@ -1819,9 +1816,7 @@ function BookingsPageContent() {
           const cust = state.customers.find((item) => item.id === booking.customerId);
           const customer = cust?.fullName ?? "—";
           const phone = displayCustomerPhone(cust?.phone);
-          const area = state.areas.find((item) => item.id === booking.areaId)?.name;
-          const table = state.tables.find((item) => item.id === booking.tableId)?.name;
-          const locationLine = formatTodayBookingAreaTable(booking, area, table);
+          const locationLine = formatTodayBookingAreaTable(booking, bookingAreaTableLookup);
           const receptionStatus = getReceptionBookingStatus(booking, receptionThresholds);
           const creator =
             state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
@@ -2102,11 +2097,8 @@ function BookingsPageContent() {
             accessor: "areaTable",
             title: "Khu/Bàn",
             sortable: true,
-            render: (booking) => {
-              const area = state.areas.find((item) => item.id === booking.areaId);
-              const table = state.tables.find((item) => item.id === booking.tableId);
-              return formatTodayBookingAreaTable(booking, area?.name, table?.name);
-            },
+            render: (booking) =>
+              formatTodayBookingAreaTable(booking, bookingAreaTableLookup),
           },
           {
             accessor: "status",
@@ -2263,6 +2255,48 @@ function BookingsPageContent() {
         label: area.name,
       }));
   }, [assignFormBooking, state.areas]);
+
+  const assignModalMergeGroupOptions = useMemo(() => {
+    if (!assignFormBooking || !assignAreaId) {
+      return [];
+    }
+    const requiredSeats =
+      typeof assignManualGuestCount === "number" && Number.isFinite(assignManualGuestCount)
+        ? assignManualGuestCount
+        : isGuestCountSpecified(assignFormBooking)
+          ? assignFormBooking.guestCount
+          : undefined;
+    const groups = getAssignableMergeGroups(
+      assignFormBooking,
+      state.mergeGroups.filter((group) => group.areaId === assignAreaId),
+      state.bookings,
+      requiredSeats
+    );
+    const options = groups.map((group) => ({
+      value: group.id,
+      label: `${group.mergedName} · ${group.totalCapacity} chỗ`,
+    }));
+    if (
+      assignMergeGroupId &&
+      !options.some((item) => item.value === assignMergeGroupId)
+    ) {
+      const current = state.mergeGroups.find((group) => group.id === assignMergeGroupId);
+      if (current) {
+        options.unshift({
+          value: current.id,
+          label: `${current.mergedName} · ${current.totalCapacity} chỗ`,
+        });
+      }
+    }
+    return options;
+  }, [
+    assignAreaId,
+    assignFormBooking,
+    assignManualGuestCount,
+    assignMergeGroupId,
+    state.bookings,
+    state.mergeGroups,
+  ]);
 
   const editModalAreaOptions = useMemo(() => {
     if (!editBooking) {
@@ -2433,158 +2467,6 @@ function BookingsPageContent() {
       : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất: ${maxGuestsInScope} khách).`;
   }, [editAreaId, editAssignCandidate, editGuestCount, state.bookings, state.tables]);
 
-  const bookingDetailTitle = mobileDetailBookingLive
-    ? (state.customers.find((item) => item.id === mobileDetailBookingLive.customerId)?.fullName ??
-      "Chi tiết booking")
-    : "Chi tiết booking";
-
-  const bookingDetailPanel = mobileDetailBookingLive ? (
-    (() => {
-      const booking = mobileDetailBookingLive;
-      const customer = state.customers.find((item) => item.id === booking.customerId);
-      const area = state.areas.find((item) => item.id === booking.areaId)?.name;
-      const table = state.tables.find((item) => item.id === booking.tableId)?.name;
-      const locationLine =
-        booking.areaId && booking.tableId
-          ? `${area ?? "—"} · Bàn ${table ?? "—"}`
-          : "Chờ xếp bàn";
-      const creator =
-        state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "Không rõ";
-      const note = stripUnknownGuestTag(booking.note);
-      const receptionStatus = getReceptionBookingStatus(booking, receptionThresholds);
-      const statusBadge =
-        mobileDetailSource === "today" ? (
-          <Badge color={receptionStatus.color} variant="light" size="lg">
-            {receptionStatus.label}
-          </Badge>
-        ) : (
-          <Badge color={bookingStatusColor[booking.status]} variant="light" size="lg">
-            {bookingStatusLabel[booking.status]}
-          </Badge>
-        );
-
-      return (
-        <Stack gap="md">
-          <Group justify="flex-end">{statusBadge}</Group>
-          <Stack gap="sm">
-            <BookingDetailField
-              label="Giờ đặt"
-              value={
-                <Text size="sm" fw={500}>
-                  {dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}
-                </Text>
-              }
-            />
-            {mobileDetailSource === "list" ? (
-              <BookingDetailField
-                label="Giờ check-in"
-                value={
-                  booking.checkedInAt ? (
-                    <Text size="sm">{dayjs(booking.checkedInAt).format("HH:mm · DD/MM/YYYY")}</Text>
-                  ) : (
-                    <Text size="sm" c="dimmed">
-                      —
-                    </Text>
-                  )
-                }
-              />
-            ) : null}
-            <BookingDetailField
-              label="Số điện thoại"
-              value={<Text size="sm">{displayCustomerPhone(customer?.phone)}</Text>}
-            />
-            <BookingDetailField
-              label="Khu vực / Bàn"
-              value={
-                <Text size="sm">
-                  {mobileDetailSource === "today"
-                    ? formatTodayBookingAreaTable(booking, area, table)
-                    : locationLine}
-                </Text>
-              }
-            />
-            <BookingDetailField
-              label="Số khách"
-              value={
-                <Text size="sm">
-                  {isGuestCountSpecified(booking) ? `${booking.guestCount} khách` : "Chưa rõ"}
-                </Text>
-              }
-            />
-            {mobileDetailSource === "today" ? (
-              <BookingDetailField
-                label="Loại khách"
-                value={<Text size="sm">{getTodayGuestTypeLabel(booking)}</Text>}
-              />
-            ) : null}
-            <BookingDetailField
-              label={mobileDetailSource === "today" ? "Người nhận" : "Người tạo"}
-              value={<Text size="sm">{creator}</Text>}
-            />
-            <BookingDetailField
-              label="Người sửa"
-              value={<Text size="sm">{bookingLastEditorName(booking, state.users)}</Text>}
-            />
-            <BookingDetailField
-              label="Lúc sửa"
-              value={
-                booking.lastEditedAt ? (
-                  <Text size="sm">{dayjs(booking.lastEditedAt).format("HH:mm · DD/MM/YYYY")}</Text>
-                ) : (
-                  <Text size="sm" c="dimmed">
-                    —
-                  </Text>
-                )
-              }
-            />
-            <BookingDetailField
-              label="Ghi chú"
-              value={
-                note ? (
-                  <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-                    {note}
-                  </Text>
-                ) : (
-                  <Text size="sm" c="dimmed">
-                    —
-                  </Text>
-                )
-              }
-            />
-          </Stack>
-          {booking.status === "cancelled" ||
-          booking.status === "completed" ||
-          booking.status === "no_show" ? null : (
-            <>
-              <Divider />
-              <BookingRowActions
-                booking={booking}
-                size="sm"
-                showEdit={mobileDetailSource === "list"}
-                busy={isBookingRowBusy(booking.id)}
-                onEdit={(b) => {
-                  closeMobileBookingDetail();
-                  openEditBookingModal(b);
-                }}
-                onChangeTable={(b) => {
-                  closeMobileBookingDetail();
-                  setChangeTableBooking(b);
-                }}
-                onAssign={(b) => {
-                  closeMobileBookingDetail();
-                  openAssignOptions(b);
-                }}
-                onCheckIn={(id) => void runCheckIn(id)}
-                onComplete={openCompleteBookingConfirm}
-                onCancel={openCancelBookingConfirm}
-              />
-            </>
-          )}
-        </Stack>
-      );
-    })()
-  ) : null;
-
   return (
     <Stack gap="md">
       <PortalPageTitle order={isCompact ? 3 : 2} mb={0}>
@@ -2640,32 +2522,30 @@ function BookingsPageContent() {
           />
         </Tabs.Panel>
       </Tabs>
-      {isCompact ? (
-        <Drawer
-          opened={mobileDetailBookingLive != null}
-          onClose={closeMobileBookingDetail}
-          title={bookingDetailTitle}
-          position="bottom"
-          size="92%"
-          transitionProps={{ transition: "slide-up" }}
-          styles={{
-            content: { height: "92dvh", maxHeight: "92dvh" },
-            body: { paddingTop: 4 },
-          }}
-        >
-          {bookingDetailPanel}
-        </Drawer>
-      ) : (
-        <Modal
-          opened={mobileDetailBookingLive != null}
-          onClose={closeMobileBookingDetail}
-          title={bookingDetailTitle}
-          size="lg"
-          centered
-        >
-          {bookingDetailPanel}
-        </Modal>
-      )}
+      <BookingOrderDetailModal
+        booking={mobileDetailBookingLive}
+        opened={mobileDetailBookingLive != null}
+        onClose={closeMobileBookingDetail}
+        source={mobileDetailSource}
+        receptionThresholds={receptionThresholds}
+        completedBookingsByCustomer={completedBookingsByCustomer}
+        isBookingRowBusy={isBookingRowBusy}
+        onEdit={(b) => {
+          closeMobileBookingDetail();
+          openEditBookingModal(b);
+        }}
+        onChangeTable={(b) => {
+          closeMobileBookingDetail();
+          setChangeTableBooking(b);
+        }}
+        onAssign={(b) => {
+          closeMobileBookingDetail();
+          openAssignOptions(b);
+        }}
+        onCheckIn={(id) => void runCheckIn(id)}
+        onComplete={openCompleteBookingConfirm}
+        onCancel={openCancelBookingConfirm}
+      />
       <Modal
         opened={editBooking != null}
         onClose={closeEditBookingModal}
@@ -2778,9 +2658,15 @@ function BookingsPageContent() {
             {editBooking && editModalMergeRecommendations.length > 0 ? (
               <MergeRecommendationCard
                 recommendations={editModalMergeRecommendations}
-                tables={state.tables.filter(
-                  (table) => table.branchId === editBooking.branchId
-                )}
+                areas={state.areas.filter((area) => area.branchId === editBooking.branchId)}
+                tables={state.tables
+                  .filter((table) => table.branchId === editBooking.branchId)
+                  .map((t) => ({
+                    id: t.id,
+                    name: t.name,
+                    seats: t.seats,
+                    areaId: t.areaId,
+                  }))}
                 targetSeats={
                   typeof editGuestCount === "number"
                     ? editGuestCount
@@ -2799,9 +2685,11 @@ function BookingsPageContent() {
                   setEditAreaId(rec.existingGroup.areaId);
                   setEditMergeGroupId(rec.existingGroup.id);
                   setEditTableId(null);
+                  const areaLabel =
+                    state.areas.find((a) => a.id === rec.existingGroup?.areaId)?.name ?? "";
                   notifications.show({
                     color: "blue",
-                    message: `Đã chọn ${rec.existingGroup.mergedName}. Bấm Lưu để áp dụng.`,
+                    message: `Đã chọn ${areaLabel ? `${areaLabel} · ` : ""}${rec.existingGroup.mergedName}. Bấm Lưu để áp dụng.`,
                   });
                 }}
                 onMergeAndApply={async (rec) => {
@@ -2875,7 +2763,10 @@ function BookingsPageContent() {
       {assignFormBooking ? (
         <Modal
           opened
-          onClose={() => setAssignFormBooking(null)}
+          onClose={() => {
+            setAssignFormBooking(null);
+            setAssignMergeGroupId(null);
+          }}
           title="Gán thủ công booking vào bàn"
           size="lg"
           centered
@@ -2883,20 +2774,6 @@ function BookingsPageContent() {
           overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
         >
           <Stack gap="sm">
-            <Button
-              variant="default"
-              size="compact-sm"
-              w="fit-content"
-              onClick={() => {
-                const b = assignFormBooking;
-                setAssignFormBooking(null);
-                if (b) {
-                  window.setTimeout(() => openAssignOptions(b), 0);
-                }
-              }}
-            >
-              ← Quay lại
-            </Button>
             <Text size="sm" c="dimmed">
               {state.customers.find((item) => item.id === assignFormBooking.customerId)?.fullName ?? "—"} ·{" "}
               {dayjs(assignFormBooking.bookingAt).format("HH:mm DD/MM/YYYY")}
@@ -2920,6 +2797,7 @@ function BookingsPageContent() {
                 onChange={(value) => {
                   setAssignAreaId(value);
                   setAssignTableId(null);
+                  setAssignMergeGroupId(null);
                 }}
                 searchable
                 clearable
@@ -2927,13 +2805,38 @@ function BookingsPageContent() {
               />
               <Select
                 label="Bàn"
+                placeholder={assignAreaId ? "Chọn bàn hoặc cụm gộp" : "Chọn khu vực trước"}
                 data={assignModalTableOptions}
                 value={assignTableId}
-                onChange={setAssignTableId}
+                onChange={(value) => {
+                  setAssignTableId(value);
+                  if (value) {
+                    setAssignMergeGroupId(null);
+                  }
+                }}
                 searchable
+                clearable
+                disabled={!assignAreaId || Boolean(assignMergeGroupId)}
                 comboboxProps={{ zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX }}
               />
             </Group>
+            {assignAreaId && (assignModalMergeGroupOptions.length > 0 || assignMergeGroupId) ? (
+              <Select
+                label="Cụm gộp (Bàn gộp)"
+                placeholder="Chọn cụm gộp thay cho bàn lẻ"
+                data={assignModalMergeGroupOptions}
+                value={assignMergeGroupId}
+                onChange={(value) => {
+                  setAssignMergeGroupId(value);
+                  if (value) {
+                    setAssignTableId(null);
+                  }
+                }}
+                searchable
+                clearable
+                comboboxProps={{ zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX }}
+              />
+            ) : null}
             {assignModalTableCapacityHint ? (
               <Text size="xs" c="dimmed">
                 {assignModalTableCapacityHint}
@@ -2942,9 +2845,15 @@ function BookingsPageContent() {
             {assignFormBooking && assignModalMergeRecommendations.length > 0 ? (
               <MergeRecommendationCard
                 recommendations={assignModalMergeRecommendations}
-                tables={state.tables.filter(
-                  (table) => table.branchId === assignFormBooking.branchId
-                )}
+                areas={state.areas.filter((area) => area.branchId === assignFormBooking.branchId)}
+                tables={state.tables
+                  .filter((table) => table.branchId === assignFormBooking.branchId)
+                  .map((t) => ({
+                    id: t.id,
+                    name: t.name,
+                    seats: t.seats,
+                    areaId: t.areaId,
+                  }))}
                 targetSeats={
                   typeof assignManualGuestCount === "number"
                     ? assignManualGuestCount
@@ -2960,16 +2869,23 @@ function BookingsPageContent() {
                   if (!rec.existingGroup) {
                     return;
                   }
+                  setAssignAreaId(rec.existingGroup.areaId);
+                  setAssignTableId(null);
+                  setAssignMergeGroupId(rec.existingGroup.id);
                   setRecommendationBusyKey(`existing:${rec.existingGroup.id}`);
                   try {
-                    await runAssignToMergeGroup(assignFormBooking, {
-                      areaId: rec.existingGroup.areaId,
-                      groupId: rec.existingGroup.id,
-                      guestCount:
-                        typeof assignManualGuestCount === "number"
-                          ? assignManualGuestCount
-                          : undefined,
-                    });
+                    await runAssignToMergeGroup(
+                      assignFormBooking,
+                      {
+                        areaId: rec.existingGroup.areaId,
+                        groupId: rec.existingGroup.id,
+                        guestCount:
+                          typeof assignManualGuestCount === "number"
+                            ? assignManualGuestCount
+                            : undefined,
+                      },
+                      "keepModalSynced"
+                    );
                   } finally {
                     setRecommendationBusyKey(null);
                   }
@@ -2985,16 +2901,23 @@ function BookingsPageContent() {
                     });
                     return;
                   }
+                  setAssignAreaId(firstTable.areaId);
+                  setAssignTableId(null);
+                  setAssignMergeGroupId(null);
                   setRecommendationBusyKey(`combo:${rec.tableIds.join(",")}`);
                   try {
-                    await runMergeAndAssign(assignFormBooking, {
-                      areaId: firstTable.areaId,
-                      tableIds: rec.tableIds,
-                      guestCount:
-                        typeof assignManualGuestCount === "number"
-                          ? assignManualGuestCount
-                          : undefined,
-                    });
+                    await runMergeAndAssign(
+                      assignFormBooking,
+                      {
+                        areaId: firstTable.areaId,
+                        tableIds: rec.tableIds,
+                        guestCount:
+                          typeof assignManualGuestCount === "number"
+                            ? assignManualGuestCount
+                            : undefined,
+                      },
+                      "keepModalSynced"
+                    );
                   } finally {
                     setRecommendationBusyKey(null);
                   }
@@ -3002,23 +2925,53 @@ function BookingsPageContent() {
               />
             ) : null}
             <Group justify="flex-end">
-              <Button variant="default" onClick={() => setAssignFormBooking(null)}>
+              <Button
+                variant="default"
+                onClick={() => {
+                  setAssignFormBooking(null);
+                  setAssignMergeGroupId(null);
+                }}
+              >
                 Đóng
               </Button>
               <Button
                 loading={isAssignSaving}
                 onClick={() => {
-                  if (!assignAreaId || !assignTableId) {
-                    notifications.show({ color: "red", message: "Vui lòng chọn khu vực và bàn." });
+                  if (!assignAreaId) {
+                    notifications.show({
+                      color: "red",
+                      message: "Vui lòng chọn khu vực.",
+                    });
                     return;
                   }
-                  if (typeof assignManualGuestCount !== "number" || assignManualGuestCount < 1) {
-                    notifications.show({ color: "red", message: "Vui lòng nhập số khách hợp lệ." });
+                  if (!assignTableId && !assignMergeGroupId) {
+                    notifications.show({
+                      color: "red",
+                      message: "Vui lòng chọn bàn hoặc cụm bàn gộp.",
+                    });
+                    return;
+                  }
+                  if (
+                    typeof assignManualGuestCount !== "number" ||
+                    assignManualGuestCount < 1
+                  ) {
+                    notifications.show({
+                      color: "red",
+                      message: "Vui lòng nhập số khách hợp lệ.",
+                    });
+                    return;
+                  }
+                  if (assignMergeGroupId) {
+                    void runAssignToMergeGroup(assignFormBooking, {
+                      areaId: assignAreaId,
+                      groupId: assignMergeGroupId,
+                      guestCount: assignManualGuestCount,
+                    });
                     return;
                   }
                   void runAssign(assignFormBooking, {
                     areaId: assignAreaId,
-                    tableId: assignTableId,
+                    tableId: assignTableId!,
                     guestCount: assignManualGuestCount,
                   });
                 }}

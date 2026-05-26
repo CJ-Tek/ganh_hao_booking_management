@@ -20,7 +20,10 @@ import {
   shouldPickBranchOnLogin,
 } from "@/lib/branch-pick";
 import { type BookingDuplicateInfo, DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
-import { isImmediateBookingArrival } from "@/lib/booking-meta";
+import {
+  tableStatusForCreateBooking,
+  type BookingArrivalIntent,
+} from "@/lib/booking-meta";
 import { initialState } from "@/lib/initial-state";
 import {
   assertEmployeeMaySetBookingStatus,
@@ -59,6 +62,15 @@ import {
   renewFloorLayoutLockInSupabase,
   releaseFloorLayoutLockInSupabase,
   type SaveFloorLayoutInput,
+  type AreaFloorLayoutByDate,
+  type FloorLayoutSnapshot,
+  type FloorLayoutTemplate,
+  applyFloorLayoutTemplateToDateInSupabase,
+  createFloorLayoutTemplateInSupabase,
+  deleteAreaFloorLayoutForDateInSupabase,
+  deleteFloorLayoutTemplateInSupabase,
+  fetchAreaFloorLayoutForDateInSupabase,
+  listFloorLayoutTemplatesInSupabase,
   saveFloorLayoutToSupabase,
   tryAcquireFloorLayoutLockInSupabase,
   updateAreaFloorLayoutInSupabase,
@@ -119,6 +131,7 @@ type CreateBookingInput = {
   note?: string;
   guestType?: string | null;
   allowDuplicate?: boolean;
+  arrivalIntent?: BookingArrivalIntent;
 };
 
 type ActionResult = {
@@ -178,16 +191,19 @@ interface AppContextValue {
     tableIds: string[];
     startDate: string;
     endDate: string;
+    layoutDate?: string;
   }) => Promise<CreateTableMergeGroupResult>;
   addTableToMergeGroup: (input: {
     groupId: string;
     tableId: string;
     repackFloor?: boolean;
+    layoutDate?: string;
   }) => Promise<ActionResult>;
   removeTableFromMergeGroup: (input: {
     groupId: string;
     tableId: string;
     repackFloor?: boolean;
+    layoutDate?: string;
   }) => Promise<ActionResult>;
   releaseTableMergeGroup: (input: { groupId: string }) => Promise<ActionResult>;
   updateTableMergeGroupDates: (input: {
@@ -234,9 +250,31 @@ interface AppContextValue {
     areaId: string,
     columns: number,
     rows: number,
-    nodeSpacing: number
+    nodeSpacing: number,
+    options?: { layoutDate?: string }
   ) => Promise<void>;
-  saveFloorLayout: (areaId: string, input: SaveFloorLayoutInput) => Promise<void>;
+  saveFloorLayout: (
+    areaId: string,
+    input: SaveFloorLayoutInput,
+    options?: { layoutDate?: string }
+  ) => Promise<AreaFloorLayoutByDate | void>;
+  fetchAreaFloorLayoutForDate: (
+    areaId: string,
+    layoutDate: string
+  ) => Promise<AreaFloorLayoutByDate | null>;
+  deleteAreaFloorLayoutForDate: (areaId: string, layoutDate: string) => Promise<void>;
+  listFloorLayoutTemplates: (areaId: string) => Promise<FloorLayoutTemplate[]>;
+  createFloorLayoutTemplate: (
+    areaId: string,
+    name: string,
+    snapshot: FloorLayoutSnapshot
+  ) => Promise<FloorLayoutTemplate>;
+  deleteFloorLayoutTemplate: (templateId: string) => Promise<void>;
+  applyFloorLayoutTemplateToDate: (
+    templateId: string,
+    areaId: string,
+    layoutDate: string
+  ) => Promise<AreaFloorLayoutByDate>;
   acquireFloorLayoutEditLock: (
     areaId: string
   ) => Promise<{ ok: true } | { ok: false; holderFullName: string }>;
@@ -1237,9 +1275,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       ? state.tables.find((t) => t.id === input.tableId)
       : undefined;
     if (tableBefore && tableBefore.status !== "locked") {
-      const nextStatus: TableStatus = isImmediateBookingArrival(input.bookingAt)
-        ? "occupied"
-        : "hold";
+      const nextStatus: TableStatus = tableStatusForCreateBooking(
+        input.bookingAt,
+        input.arrivalIntent
+      );
       setState((prev) => ({
         ...prev,
         tables: prev.tables.map((t) =>
@@ -1958,14 +1997,45 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   }, [currentUser, filteredBranchIds, hasSupabase, state.notifications]);
 
   const saveAreaFloorGrid = useCallback(
-    async (areaId: string, columns: number, rows: number, spacing: number) => {
+    async (
+      areaId: string,
+      columns: number,
+      rows: number,
+      spacing: number,
+      options?: { layoutDate?: string }
+    ) => {
       if (isEmployeeUser(currentUser)) {
         return;
       }
       const floorGridColumns = Math.min(24, Math.max(4, Math.round(columns)));
       const floorGridRows = Math.min(18, Math.max(4, Math.round(rows)));
       const floorNodeSpacing = clampFloorNodeSpacing(spacing);
+      const layoutDate = options?.layoutDate?.trim();
       if (!hasSupabase) {
+        if (!layoutDate) {
+          setState((prev) => ({
+            ...prev,
+            areas: prev.areas.map((a) =>
+              a.id === areaId
+                ? { ...a, floorGridColumns, floorGridRows, floorNodeSpacing }
+                : a
+            ),
+          }));
+        }
+        return;
+      }
+      await updateAreaFloorLayoutInSupabase(
+        areaId,
+        {
+          floorGridColumns,
+          floorGridRows,
+          floorNodeSpacing,
+        },
+        layoutDate
+          ? { layoutDate, updatedByUserId: currentUser?.id ?? null }
+          : undefined
+      );
+      if (!layoutDate) {
         setState((prev) => ({
           ...prev,
           areas: prev.areas.map((a) =>
@@ -1974,27 +2044,17 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
               : a
           ),
         }));
-        return;
       }
-      await updateAreaFloorLayoutInSupabase(areaId, {
-        floorGridColumns,
-        floorGridRows,
-        floorNodeSpacing,
-      });
-      setState((prev) => ({
-        ...prev,
-        areas: prev.areas.map((a) =>
-          a.id === areaId
-            ? { ...a, floorGridColumns, floorGridRows, floorNodeSpacing }
-            : a
-        ),
-      }));
     },
     [currentUser, hasSupabase]
   );
 
   const saveFloorLayout = useCallback(
-    async (areaId: string, input: SaveFloorLayoutInput) => {
+    async (
+      areaId: string,
+      input: SaveFloorLayoutInput,
+      options?: { layoutDate?: string }
+    ) => {
       if (isEmployeeUser(currentUser)) {
         throw new Error(EMPLOYEE_MUTATION_BLOCKED);
       }
@@ -2007,34 +2067,132 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         y: Math.round(p.y),
       }));
       const posById = new Map(tablePositions.map((p) => [p.tableId, p]));
+      const layoutDate = options?.layoutDate?.trim();
 
       if (!hasSupabase) {
-        setState((prev) => ({
-          ...prev,
-          areas: prev.areas.map((a) =>
-            a.id === areaId
-              ? { ...a, floorGridColumns, floorGridRows, floorNodeSpacing }
-              : a
-          ),
-          tables: prev.tables.map((t) => {
-            const pos = posById.get(t.id);
-            if (!pos || t.areaId !== areaId) {
-              return t;
-            }
-            return { ...t, positionX: pos.x, positionY: pos.y };
-          }),
-        }));
+        if (!layoutDate) {
+          setState((prev) => ({
+            ...prev,
+            areas: prev.areas.map((a) =>
+              a.id === areaId
+                ? { ...a, floorGridColumns, floorGridRows, floorNodeSpacing }
+                : a
+            ),
+            tables: prev.tables.map((t) => {
+              const pos = posById.get(t.id);
+              if (!pos || t.areaId !== areaId) {
+                return t;
+              }
+              return { ...t, positionX: pos.x, positionY: pos.y };
+            }),
+          }));
+        }
         return;
       }
-      await saveFloorLayoutToSupabase(areaId, {
-        floorGridColumns,
-        floorGridRows,
-        floorNodeSpacing,
-        tablePositions,
-      });
-      await reload({ scope: "floor" });
+      const result = await saveFloorLayoutToSupabase(
+        areaId,
+        {
+          floorGridColumns,
+          floorGridRows,
+          floorNodeSpacing,
+          tablePositions,
+        },
+        layoutDate
+          ? {
+              layoutDate,
+              updatedByUserId: currentUser?.id ?? null,
+              mergeGroupId: null,
+            }
+          : undefined
+      );
+      if (!layoutDate) {
+        await reload({ scope: "floor" });
+      }
+      return result;
     },
     [currentUser, hasSupabase, reload]
+  );
+
+  const fetchAreaFloorLayoutForDate = useCallback(
+    async (areaId: string, layoutDate: string) => {
+      if (!hasSupabase) {
+        return null;
+      }
+      return fetchAreaFloorLayoutForDateInSupabase(areaId, layoutDate);
+    },
+    [hasSupabase]
+  );
+
+  const deleteAreaFloorLayoutForDate = useCallback(
+    async (areaId: string, layoutDate: string) => {
+      if (isEmployeeUser(currentUser)) {
+        throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+      }
+      if (!hasSupabase) {
+        return;
+      }
+      await deleteAreaFloorLayoutForDateInSupabase(areaId, layoutDate);
+    },
+    [currentUser, hasSupabase]
+  );
+
+  const listFloorLayoutTemplates = useCallback(
+    async (areaId: string) => {
+      if (!hasSupabase) {
+        return [];
+      }
+      return listFloorLayoutTemplatesInSupabase(areaId);
+    },
+    [hasSupabase]
+  );
+
+  const createFloorLayoutTemplate = useCallback(
+    async (areaId: string, name: string, snapshot: FloorLayoutSnapshot) => {
+      if (isEmployeeUser(currentUser)) {
+        throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+      }
+      if (!hasSupabase || !currentUser) {
+        throw new Error("Chưa kết nối Supabase hoặc chưa đăng nhập.");
+      }
+      return createFloorLayoutTemplateInSupabase(
+        areaId,
+        name,
+        snapshot,
+        currentUser.id
+      );
+    },
+    [currentUser, hasSupabase]
+  );
+
+  const deleteFloorLayoutTemplate = useCallback(
+    async (templateId: string) => {
+      if (isEmployeeUser(currentUser)) {
+        throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+      }
+      if (!hasSupabase) {
+        return;
+      }
+      await deleteFloorLayoutTemplateInSupabase(templateId);
+    },
+    [currentUser, hasSupabase]
+  );
+
+  const applyFloorLayoutTemplateToDate = useCallback(
+    async (templateId: string, areaId: string, layoutDate: string) => {
+      if (isEmployeeUser(currentUser)) {
+        throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+      }
+      if (!hasSupabase) {
+        throw new Error("Chưa kết nối Supabase.");
+      }
+      return applyFloorLayoutTemplateToDateInSupabase(
+        templateId,
+        areaId,
+        layoutDate,
+        currentUser?.id ?? null
+      );
+    },
+    [currentUser, hasSupabase]
   );
 
   // Snapshot synchronization is driven by Supabase Realtime with fallback polling.
@@ -2092,6 +2250,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       tableIds: string[];
       startDate: string;
       endDate: string;
+      layoutDate?: string;
     }) => {
       if (isEmployeeUser(currentUser)) {
         return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
@@ -2106,7 +2265,15 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         ...input,
         createdByUserId: currentUser.id,
       });
-      if (result.ok) {
+      if (result.ok && result.group) {
+        setState((prev) => ({
+          ...prev,
+          mergeGroups: [
+            ...prev.mergeGroups.filter((group) => group.id !== result.group!.id),
+            result.group!,
+          ],
+        }));
+      } else if (result.ok) {
         await reload({ scope: "floor" });
       }
       return result;
@@ -2115,7 +2282,12 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   );
 
   const addTableToMergeGroup = useCallback(
-    async (input: { groupId: string; tableId: string; repackFloor?: boolean }) => {
+    async (input: {
+      groupId: string;
+      tableId: string;
+      repackFloor?: boolean;
+      layoutDate?: string;
+    }) => {
       if (isEmployeeUser(currentUser)) {
         return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
       }
@@ -2132,7 +2304,12 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   );
 
   const removeTableFromMergeGroup = useCallback(
-    async (input: { groupId: string; tableId: string; repackFloor?: boolean }) => {
+    async (input: {
+      groupId: string;
+      tableId: string;
+      repackFloor?: boolean;
+      layoutDate?: string;
+    }) => {
       if (isEmployeeUser(currentUser)) {
         return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
       }
@@ -2223,6 +2400,12 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     markAllScopedNotificationsRead,
     saveAreaFloorGrid,
     saveFloorLayout,
+    fetchAreaFloorLayoutForDate,
+    deleteAreaFloorLayoutForDate,
+    listFloorLayoutTemplates,
+    createFloorLayoutTemplate,
+    deleteFloorLayoutTemplate,
+    applyFloorLayoutTemplateToDate,
     acquireFloorLayoutEditLock,
     renewFloorLayoutEditLock,
     releaseFloorLayoutEditLock,

@@ -6,6 +6,7 @@ import {
   Button,
   Group,
   Modal,
+  Radio,
   Select,
   Stack,
   Text,
@@ -17,7 +18,7 @@ import { notifications } from "@mantine/notifications";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
-import { BOOKING_GUEST_TYPE_OPTIONS } from "@/lib/booking-meta";
+import { BOOKING_GUEST_TYPE_OPTIONS, type BookingArrivalIntent } from "@/lib/booking-meta";
 import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import { normalizeGuestTypeHint } from "@/lib/voice-booking/guest-type";
 import { matchAreaId, matchTableId, type AreaLite, type TableLite } from "@/lib/voice-booking/match";
@@ -122,6 +123,23 @@ export function VoiceBookingAssistant(props: {
   onFieldsChange?: (fields: VoiceBookingFormFields) => void;
   /** Disable inputs (e.g. while parent is creating booking). */
   disabled?: boolean;
+  /** Giữ chỗ vs Ngồi ngay (floor-map table registration). */
+  arrivalMode?: BookingArrivalIntent;
+  onArrivalModeChange?: (mode: BookingArrivalIntent) => void;
+  /** Render arrival mode radios inside the form. */
+  showArrivalModeRadios?: boolean;
+  /** Disable Ngồi ngay (e.g. table already occupied). */
+  immediateModeDisabled?: boolean;
+  /** Pre-select table/area and hide pickers (per-table floor map). */
+  lockTableId?: string | null;
+  lockAreaId?: string | null;
+  hideAreaTablePickers?: boolean;
+  /** Sync default arrival datetime when parent opens modal (YYYY-MM-DDTHH:mm). */
+  initialBookingAt?: string | null;
+  /** Cap guest count (per-table / merge-group registration on floor map). */
+  maxGuestCount?: number;
+  /** Override capacity hint under Số khách. */
+  guestCountDescription?: string;
   branch: { id: string; name: string } | null;
   areas: AreaLite[];
   tables: TableLite[];
@@ -147,6 +165,16 @@ export function VoiceBookingAssistant(props: {
     hideSubmitButton = false,
     onFieldsChange,
     disabled: disabledProp = false,
+    arrivalMode = "immediate",
+    onArrivalModeChange,
+    showArrivalModeRadios = false,
+    immediateModeDisabled = false,
+    lockTableId = null,
+    lockAreaId = null,
+    hideAreaTablePickers = false,
+    initialBookingAt,
+    maxGuestCount,
+    guestCountDescription,
   } = props;
 
   const [opened, setOpened] = useState(false);
@@ -174,6 +202,33 @@ export function VoiceBookingAssistant(props: {
   const [note, setNote] = useState("");
   const [guestType, setGuestType] = useState<string | null>("Khách thường");
   const [clarify, setClarify] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (lockAreaId) {
+      setAreaId(lockAreaId);
+    }
+    if (lockTableId) {
+      setTableId(lockTableId);
+    }
+  }, [lockAreaId, lockTableId]);
+
+  useEffect(() => {
+    if (initialBookingAt) {
+      setBookingAt(initialBookingAt);
+    }
+  }, [initialBookingAt]);
+
+  useEffect(() => {
+    if (typeof maxGuestCount !== "number" || maxGuestCount < 1) {
+      return;
+    }
+    setGuestCount((current) => {
+      if (current === null || current === undefined) {
+        return current;
+      }
+      return current > maxGuestCount ? maxGuestCount : current;
+    });
+  }, [maxGuestCount]);
 
   useEffect(() => {
     onFieldsChange?.({
@@ -427,7 +482,11 @@ export function VoiceBookingAssistant(props: {
 
   const submit = async () => {
     if (!branch) return;
-    if (!bookingAt) {
+    if (showArrivalModeRadios && arrivalMode === "hold" && !bookingAt) {
+      notifications.show({ color: "red", title: "Thiếu giờ", message: "Chọn ngày/giờ đến." });
+      return;
+    }
+    if (!showArrivalModeRadios && !bookingAt) {
       notifications.show({ color: "red", title: "Thiếu giờ", message: "Chọn ngày/giờ." });
       return;
     }
@@ -454,7 +513,10 @@ export function VoiceBookingAssistant(props: {
         areaId: areaId ?? undefined,
         tableId: tableId ?? undefined,
         guestCount: typeof guestCount === "number" && Number.isFinite(guestCount) ? guestCount : undefined,
-        bookingAt: dayjs(bookingAt).toISOString(),
+        bookingAt:
+          showArrivalModeRadios && arrivalMode === "immediate"
+            ? dayjs().toISOString()
+            : dayjs(bookingAt!).toISOString(),
         note: note.trim() ? note.trim() : undefined,
         guestType,
         allowDuplicate,
@@ -553,6 +615,25 @@ export function VoiceBookingAssistant(props: {
             </Text>
           ) : null}
 
+          {showArrivalModeRadios ? (
+            <Radio.Group
+              label="Đặt bàn"
+              value={arrivalMode}
+              onChange={(value) =>
+                onArrivalModeChange?.(value === "hold" ? "hold" : "immediate")
+              }
+            >
+              <Stack gap={6} mt={4}>
+                <Radio value="hold" label="Giữ chỗ" disabled={formDisabled} />
+                <Radio
+                  value="immediate"
+                  label="Ngồi ngay"
+                  disabled={formDisabled || immediateModeDisabled}
+                />
+              </Stack>
+            </Radio.Group>
+          ) : null}
+
           <Group grow align="flex-start">
             <TextInput
               label="Tên khách"
@@ -588,48 +669,64 @@ export function VoiceBookingAssistant(props: {
               onChange={(value) => setGuestCount(value ?? null)}
               placeholder="Tùy chọn"
               disabled={formDisabled}
+              min={1}
+              max={
+                typeof maxGuestCount === "number" && maxGuestCount > 0
+                  ? maxGuestCount
+                  : undefined
+              }
+              description={
+                guestCountDescription ??
+                (typeof maxGuestCount === "number" && maxGuestCount > 0
+                  ? `Tối đa ${maxGuestCount} khách`
+                  : undefined)
+              }
             />
-            <DateTimePicker
-              label="Thời gian đến"
-              value={bookingAt ? dayjs(bookingAt).toDate() : null}
-              onChange={(d) => setBookingAt(d ? dayjs(d).format("YYYY-MM-DDTHH:mm") : null)}
-              valueFormat="DD/MM/YYYY HH:mm"
-              clearable={false}
-              disabled={formDisabled}
-            />
+            {showArrivalModeRadios && arrivalMode === "immediate" ? null : (
+              <DateTimePicker
+                label="Thời gian đến"
+                value={bookingAt ? dayjs(bookingAt).toDate() : null}
+                onChange={(d) => setBookingAt(d ? dayjs(d).format("YYYY-MM-DDTHH:mm") : null)}
+                valueFormat="DD/MM/YYYY HH:mm"
+                clearable={false}
+                disabled={formDisabled}
+              />
+            )}
           </Group>
 
-          <Group grow align="flex-start">
-            <Select
-              label="Khu vực"
-              data={areaOptions}
-              value={areaId}
-              onChange={(v) => {
-                setAreaId(v);
-                setTableId(null);
-              }}
-              searchable
-              clearable
-              disabled={formDisabled}
-            />
-            <Select
-              label="Bàn"
-              data={tableOptions}
-              value={tableId}
-              onChange={setTableId}
-              searchable
-              clearable
-              disabled={formDisabled}
-            />
-          </Group>
+          {hideAreaTablePickers ? null : (
+            <Group grow align="flex-start">
+              <Select
+                label="Khu vực"
+                data={areaOptions}
+                value={areaId}
+                onChange={(v) => {
+                  setAreaId(v);
+                  setTableId(null);
+                }}
+                searchable
+                clearable
+                disabled={formDisabled || Boolean(lockAreaId)}
+              />
+              <Select
+                label="Bàn"
+                data={tableOptions}
+                value={tableId}
+                onChange={setTableId}
+                searchable
+                clearable
+                disabled={formDisabled || Boolean(lockTableId)}
+              />
+            </Group>
+          )}
 
-          {areaAvailability ? (
+          {hideAreaTablePickers || !areaAvailability ? null : (
             <Text size="sm" c="dimmed">
               Tình trạng khu: {areaAvailability.total} bàn · Trống {areaAvailability.byStatus.available ?? 0} · Giữ chỗ{" "}
               {areaAvailability.byStatus.hold ?? 0} · Đang ngồi {areaAvailability.byStatus.occupied ?? 0} · Khóa{" "}
               {areaAvailability.byStatus.locked ?? 0}
             </Text>
-          ) : null}
+          )}
 
           <Textarea
             label="Ghi chú"

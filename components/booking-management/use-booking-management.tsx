@@ -15,16 +15,11 @@ import { DateTimePicker } from "@mantine/dates";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { useCallback, useMemo, useState } from "react";
-import {
-  AssignGuestCountPromptBody,
-  AssignGuestSpecifiedOptionsBody,
-} from "@/components/booking-management/assign-guest-bodies";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import {
   canEditBookingOrder,
-  MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS,
   MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX,
   MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX,
   portalModalOverlayPopoverProps,
@@ -231,6 +226,9 @@ export function useBookingManagement() {
     setAssignAreaId(null);
     setAssignTableId(null);
   }, []);
+
+  // Back-compat name: previously opened intermediate options modal.
+  const openAssignOptions = openManualAssignModal;
 
   const openEditBookingModal = useCallback(
     (booking: Booking) => {
@@ -445,72 +443,6 @@ export function useBookingManagement() {
     ]
   );
 
-  const openAssignOptions = useCallback(
-    (booking: Booking) => {
-      modals.closeAll();
-      const guestSpecified = isGuestCountSpecified(booking);
-      const modalId = modals.open({
-        title: "Gán khách vào bàn",
-        children: <></>,
-      });
-      modals.updateModal({
-        modalId,
-        children: (
-          <Stack gap="sm">
-            <Text size="sm">
-              Khách{" "}
-              <strong>
-                {state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—"}
-              </strong>{" "}
-              · {dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY")}
-            </Text>
-            {guestSpecified ? (
-              <AssignGuestSpecifiedOptionsBody
-                booking={booking}
-                modalId={modalId}
-                persistGuestCount={(id, n) => updateBookingGuestCount(id, n)}
-                onManual={(guestCount) => openManualAssignModal(booking, guestCount)}
-              />
-            ) : (
-              <>
-                <Text size="sm" c="dimmed">
-                  Booking này chưa có số khách.
-                </Text>
-                <Button
-                  variant="default"
-                  onClick={() => {
-                    const nestedModalId = modals.open({
-                      title: "Nhập số khách rồi chọn bàn",
-                      children: <></>,
-                    });
-                    modals.updateModal({
-                      modalId: nestedModalId,
-                      children: (
-                        <AssignGuestCountPromptBody
-                          onBack={() => modals.close(nestedModalId)}
-                          onManual={(guest) => {
-                            modals.close(nestedModalId);
-                            modals.close(modalId);
-                            window.setTimeout(() => {
-                              openManualAssignModal(booking, guest);
-                            }, MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS);
-                          }}
-                        />
-                      ),
-                    });
-                  }}
-                >
-                  Nhập số khách
-                </Button>
-              </>
-            )}
-          </Stack>
-        ),
-      });
-    },
-    [openManualAssignModal, state.customers, updateBookingGuestCount]
-  );
-
   const handleSubmitChangeTable = useCallback(
     async (target: {
       areaId: string;
@@ -549,7 +481,7 @@ export function useBookingManagement() {
         busy={isBookingRowBusy(booking.id)}
         onEdit={openEditBookingModal}
         onChangeTable={setChangeTableBooking}
-        onAssign={openAssignOptions}
+        onAssign={openManualAssignModal}
         onCheckIn={(bookingId) => void runCheckIn(bookingId)}
         onComplete={openCompleteBookingConfirm}
         onCancel={openCancelBookingConfirm}
@@ -557,7 +489,7 @@ export function useBookingManagement() {
     ),
     [
       isBookingRowBusy,
-      openAssignOptions,
+      openManualAssignModal,
       openCancelBookingConfirm,
       openCompleteBookingConfirm,
       openEditBookingModal,
@@ -859,20 +791,6 @@ export function useBookingManagement() {
           overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
         >
           <Stack gap="sm">
-            <Button
-              variant="default"
-              size="compact-sm"
-              w="fit-content"
-              onClick={() => {
-                const b = assignFormBooking;
-                setAssignFormBooking(null);
-                if (b) {
-                  window.setTimeout(() => openAssignOptions(b), 0);
-                }
-              }}
-            >
-              ← Quay lại
-            </Button>
             <Text size="sm" c="dimmed">
               {state.customers.find((item) => item.id === assignFormBooking.customerId)?.fullName ??
                 "—"}{" "}
@@ -953,5 +871,11 @@ export function useBookingManagement() {
     busyBookingId,
     isBookingRowBusy,
     getBookingRowStyle,
+    openEditBookingModal,
+    openAssignOptions,
+    setChangeTableBooking,
+    runCheckIn,
+    openCompleteBookingConfirm,
+    openCancelBookingConfirm,
   };
 }

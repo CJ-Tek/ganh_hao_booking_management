@@ -21,7 +21,7 @@ import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import { usePortalCompact } from "@/lib/use-portal-compact";
-import { displayCustomerPhone } from "@/lib/booking-meta";
+import { displayCustomerPhone, formatBookingAreaTable } from "@/lib/booking-meta";
 import { Customer } from "@/lib/types";
 
 const DRAWER_BOOKING_PAGE_SIZE = 8;
@@ -396,10 +396,14 @@ export default function CustomersPage() {
             ) : (
               <>
                 {pagedDrawerBookings.map((booking) => {
-                  const area = state.areas.find((a) => a.id === booking.areaId)?.name ?? "—";
-                  const table = state.tables.find((t) => t.id === booking.tableId)?.name ?? "—";
-                  const locationLine =
-                    booking.areaId && booking.tableId ? `${area} · ${table}` : "Chờ xếp bàn";
+                  const locationLine = formatBookingAreaTable(
+                    booking,
+                    {
+                      areas: state.areas,
+                      tables: state.tables,
+                      mergeGroups: state.mergeGroups,
+                    }
+                  );
                   return (
                     <Card key={booking.id} withBorder radius="md" padding="sm">
                       <Group justify="space-between" align="flex-start" wrap="nowrap">

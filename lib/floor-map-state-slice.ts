@@ -62,6 +62,7 @@ export const FLOOR_SYNC_REALTIME_TABLES = new Set([
   "areas",
   "table_merge_groups",
   "table_merge_members",
+  "area_floor_layout_by_date",
 ]);
 
 export function reloadScopeForRealtimeTable(table: string | undefined): "floor" | "full" {

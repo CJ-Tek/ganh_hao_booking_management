@@ -223,6 +223,18 @@
   flex: 1;
 }
 
+.toolbarSaveRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.toolbarSaveBtn {
+  flex-shrink: 0;
+}
+
 .toolbarAreaSelectRow {
   display: flex;
   align-items: center;
@@ -306,6 +318,9 @@
   top: calc(100% + 8px);
   left: 0;
   z-index: 20;
+  /* Sized vs viewport/canvas — anchor is icon-only (~42px); % width would collapse panel. */
+  width: min(320px, calc(100vw - 40px));
+  box-sizing: border-box;
 }
 
 .canvasZoomDock {
@@ -393,7 +408,18 @@
     flex: 1 1 100%;
     width: 100%;
     align-items: center;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
+  }
+
+  .toolbarSaveRow {
+    flex: 1 1 100%;
+    width: 100%;
+    order: 1;
+  }
+
+  .toolbarSaveBtn {
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .toolbarModeControl {
@@ -401,6 +427,7 @@
     min-width: 0;
     max-width: none;
     width: auto;
+    order: 0;
   }
 
   .toolbarAreaRow {
@@ -506,7 +533,19 @@
 
   .toolbarModeRow {
     width: 100%;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
+  }
+
+  .toolbarSaveRow {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .toolbarSaveBtn {
+    flex: none;
+    width: 100%;
+    min-height: 44px;
   }
 
   .toolbarModeControl {
@@ -550,13 +589,10 @@
     min-height: 44px;
   }
 
-  .canvasPopoverPanel {
-    width: min(260px, calc(100% - 26px));
-  }
-
   .toolbarPopoverLeft {
     left: 0;
     right: auto;
+    width: min(280px, calc(100cqw - 24px));
   }
 
   .canvasPopoverPanelOpen {
@@ -582,7 +618,16 @@
     width: 100%;
     min-width: 0;
     align-self: center;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
+  }
+
+  .toolbarSaveRow {
+    flex: 1 1 auto;
+    order: 0;
+  }
+
+  .toolbarSaveBtn {
+    flex: 0 1 auto;
   }
 
   .toolbarModeControl {
@@ -1107,6 +1152,7 @@ button.mergeGroupContainerHeaderClickable:hover .mergeGroupContainerTitle {
   bottom: 20px;
   transform: translateX(-50%);
   z-index: 12;
+  pointer-events: auto;
   display: flex;
   align-items: center;
   gap: 12px;

@@ -149,6 +149,8 @@ export async function confirmWaitlistOfferInSupabase(waitlistEntryId: string): P
 export type CreateTableMergeGroupResult = Result & {
   groupId?: string;
   mergedName?: string;
+  group?: import("@/lib/types").TableMergeGroup;
+  dayLayout?: import("@/lib/floor-layout-snapshot").AreaFloorLayoutByDate | null;
 };
 
 export async function createTableMergeGroupInSupabase(
@@ -253,16 +255,89 @@ export async function deleteAreaInSupabase(areaId: string): Promise<Result> {
 
 export async function updateAreaFloorLayoutInSupabase(
   areaId: string,
-  input: Parameters<typeof import("./supabase-store-server").updateAreaFloorLayoutInSupabase>[1]
+  input: Parameters<typeof import("./supabase-store-server").updateAreaFloorLayoutInSupabase>[1],
+  options?: Parameters<typeof import("./supabase-store-server").updateAreaFloorLayoutInSupabase>[2]
 ): Promise<void> {
-  await callStore("updateAreaFloorLayout", { areaId, input });
+  await callStore("updateAreaFloorLayout", { areaId, input, options });
 }
 
 export async function saveFloorLayoutToSupabase(
   areaId: string,
-  input: Parameters<typeof import("./supabase-store-server").saveFloorLayoutToSupabase>[1]
+  input: Parameters<typeof import("./supabase-store-server").saveFloorLayoutToSupabase>[1],
+  options?: Parameters<typeof import("./supabase-store-server").saveFloorLayoutToSupabase>[2]
+): Promise<
+  Awaited<ReturnType<typeof import("./supabase-store-server").saveFloorLayoutToSupabase>>
+> {
+  return callStore("saveFloorLayout", { areaId, input, options });
+}
+
+export type { AreaFloorLayoutByDate, FloorLayoutSnapshot } from "./floor-layout-snapshot";
+export type { FloorLayoutTemplate } from "./supabase-store-server";
+
+export async function fetchAreaFloorLayoutForDateInSupabase(
+  areaId: string,
+  layoutDate: string
+): Promise<import("./floor-layout-snapshot").AreaFloorLayoutByDate | null> {
+  return callStore<import("./floor-layout-snapshot").AreaFloorLayoutByDate | null>(
+    "fetchAreaFloorLayoutForDate",
+    { areaId, layoutDate }
+  );
+}
+
+export async function deleteAreaFloorLayoutForDateInSupabase(
+  areaId: string,
+  layoutDate: string
 ): Promise<void> {
-  await callStore("saveFloorLayout", { areaId, input });
+  await callStore("deleteAreaFloorLayoutForDate", { areaId, layoutDate });
+}
+
+export async function listFloorLayoutTemplatesInSupabase(
+  areaId: string
+): Promise<import("./supabase-store-server").FloorLayoutTemplate[]> {
+  return callStore<import("./supabase-store-server").FloorLayoutTemplate[]>(
+    "listFloorLayoutTemplates",
+    areaId
+  );
+}
+
+export async function createFloorLayoutTemplateInSupabase(
+  areaId: string,
+  name: string,
+  snapshot: Parameters<
+    typeof import("./supabase-store-server").createFloorLayoutTemplateInSupabase
+  >[2],
+  createdByUserId: string
+): Promise<import("./supabase-store-server").FloorLayoutTemplate> {
+  return callStore<import("./supabase-store-server").FloorLayoutTemplate>(
+    "createFloorLayoutTemplate",
+    {
+      areaId,
+      name,
+      snapshot,
+      createdByUserId,
+    }
+  );
+}
+
+export async function deleteFloorLayoutTemplateInSupabase(templateId: string): Promise<void> {
+  await callStore("deleteFloorLayoutTemplate", templateId);
+}
+
+export async function applyFloorLayoutTemplateToDateInSupabase(
+  templateId: string,
+  areaId: string,
+  layoutDate: string,
+  updatedByUserId?: string | null
+): Promise<import("./floor-layout-snapshot").AreaFloorLayoutByDate> {
+  return callStore<import("./floor-layout-snapshot").AreaFloorLayoutByDate>(
+    "applyFloorLayoutTemplateToDate",
+    {
+      templateId,
+      areaId,
+      layoutDate,
+      updatedByUserId,
+    }
+  );
 }
 
 export async function tryAcquireFloorLayoutLockInSupabase(

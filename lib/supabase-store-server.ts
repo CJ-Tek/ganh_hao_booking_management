@@ -27,16 +27,33 @@ import {
   buildBookingNoteForStorage,
   formatTableSlotConflictMessage,
   isImmediateBookingArrival,
+  shouldAutoSeatOnCreate,
+  shouldRefreshTableHoldAfterCreate,
   isSyntheticPhoneValue,
   pickPrimaryBookingOnTable,
   stripUnknownGuestTag,
 } from "./booking-meta";
 import {
   FLOOR_DEFAULT_NODE_SPACING_PX,
+  clampFloorNodeSpacing,
 } from "./floor-map-layout";
+import {
+  type AreaFloorLayoutByDate,
+  floorLayoutSnapshotToJson,
+  normalizeFloorLayoutSnapshot,
+  parseFloorLayoutSnapshotJson,
+  parseTablePositionsJson,
+  positionsRecordFromSnapshot,
+  snapshotFromGlobalArea,
+  snapshotFromPositionsRecord,
+  tablePositionsToJson,
+  type FloorLayoutSnapshot,
+} from "./floor-layout-snapshot";
 import { packMergeGroupTablePositions } from "./floor-map-merge-layout";
 import {
+  eachLayoutDateInRange,
   formatMergeGroupDate,
+  isLayoutDateWithinMergeRange,
   mapTableMergeGroupFromRow,
   mergeDateRangesOverlap,
   resolveMergeGroupDateRange,
@@ -87,6 +104,8 @@ type CreateBookingInput = {
   createdByUserId: string;
   /** Skip phone+slot duplicate guard (e.g. khách đặt bàn thứ 2). */
   allowDuplicate?: boolean;
+  /** Giữ chỗ vs Ngồi ngay — overrides timestamp-only seating when set. */
+  arrivalIntent?: import("@/lib/booking-meta").BookingArrivalIntent;
 };
 
 type BookingCreateOrQueueResult =
@@ -545,9 +564,14 @@ async function refreshTableAvailabilityForBooking(
 /** Vào bàn ngay / arrival due: mark booking seated so refresh sets table to occupied. */
 async function seatBookingForImmediateArrival(
   client: ReturnType<typeof ensureClient>,
-  input: { bookingId: string; tableId: string; bookingAtIso: string }
+  input: {
+    bookingId: string;
+    tableId: string;
+    bookingAtIso: string;
+    arrivalIntent?: import("@/lib/booking-meta").BookingArrivalIntent;
+  }
 ): Promise<void> {
-  if (!isImmediateBookingArrival(input.bookingAtIso)) {
+  if (!shouldAutoSeatOnCreate(input.bookingAtIso, input.arrivalIntent)) {
     return;
   }
   const { error: bookingErr } = await (client as any)
@@ -793,7 +817,10 @@ export async function fetchSnapshot(options?: {
     .map((item) => item.id);
 
   if (orphanTableIds.length > 0) {
-    await Promise.all(orphanTableIds.map((id) => refreshTableAvailabilityForBooking(client, id)));
+    const orphanBatch = orphanTableIds.slice(0, 32);
+    await Promise.all(
+      orphanBatch.map((id) => refreshTableAvailabilityForBooking(client, id))
+    );
     const tablesRefetch = await client.from("tables").select("*");
     if (!tablesRefetch.error && tablesRefetch.data) {
       tablesRowList = tablesRefetch.data;
@@ -875,7 +902,6 @@ export async function fetchFloorMapSliceInSupabase(
   }
 
   const client = ensureClient();
-  await releaseExpiredTableMergeGroupsInSupabase();
   const scopedBranches = branchIds.filter((id) => id.length > 0);
 
   let bookingsQuery = client.from("bookings").select("*");
@@ -1004,7 +1030,10 @@ export async function fetchFloorMapSliceInSupabase(
     .map((item) => item.id);
 
   if (orphanTableIds.length > 0) {
-    await Promise.all(orphanTableIds.map((id) => refreshTableAvailabilityForBooking(client, id)));
+    const orphanBatch = orphanTableIds.slice(0, 32);
+    await Promise.all(
+      orphanBatch.map((id) => refreshTableAvailabilityForBooking(client, id))
+    );
     let tablesRefetch = client.from("tables").select("*");
     if (scopedBranches.length > 0) {
       tablesRefetch = tablesRefetch.in("branch_id", scopedBranches);
@@ -1132,8 +1161,9 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
           bookingId: mergeOutcome.booking_id,
           tableId: groupCheck.fallbackTableId,
           bookingAtIso: normalizedAt,
+          arrivalIntent: input.arrivalIntent,
         });
-        if (!isImmediateBookingArrival(normalizedAt)) {
+        if (shouldRefreshTableHoldAfterCreate(normalizedAt, input.arrivalIntent)) {
           const { data: tableRow } = await client
             .from("tables")
             .select("status")
@@ -1237,8 +1267,9 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
           bookingId: normalizedOutcome.booking_id,
           tableId: input.tableId!,
           bookingAtIso: normalizedAt,
+          arrivalIntent: input.arrivalIntent,
         });
-        if (!isImmediateBookingArrival(normalizedAt)) {
+        if (shouldRefreshTableHoldAfterCreate(normalizedAt, input.arrivalIntent)) {
           const { data: tableRow } = await client
             .from("tables")
             .select("status")
@@ -2490,9 +2521,16 @@ type MergeGroupCreateInput = {
   startDate: string;
   endDate: string;
   createdByUserId?: string;
+  /** Calendar day whose floor layout receives merge repack (defaults to startDate). */
+  layoutDate?: string;
 };
 
-type MergeGroupCreateResult = Result & { groupId?: string; mergedName?: string };
+type MergeGroupCreateResult = Result & {
+  groupId?: string;
+  mergedName?: string;
+  group?: TableMergeGroup;
+  dayLayout?: AreaFloorLayoutByDate | null;
+};
 
 /**
  * Pick the lowest unused positive integer among active merge groups of an area
@@ -2581,57 +2619,525 @@ async function ensureTablesAreFreeToMerge(
   };
 }
 
-/** Snap active merge members into one adjacent row on the area floor grid (+ one empty plug cell). */
-async function packMergeGroupTablesOnFloor(
+function mapAreaFloorLayoutByDateFromRow(row: {
+  id: string;
+  area_id: string;
+  layout_date: string;
+  floor_grid_columns: number;
+  floor_grid_rows: number;
+  floor_node_spacing: number;
+  table_positions: unknown;
+  source_template_id: string | null;
+  merge_group_id?: string | null;
+  updated_at: string;
+  updated_by_user_id: string | null;
+}): AreaFloorLayoutByDate {
+  return {
+    id: row.id,
+    areaId: row.area_id,
+    layoutDate: row.layout_date,
+    floorGridColumns: row.floor_grid_columns,
+    floorGridRows: row.floor_grid_rows,
+    floorNodeSpacing: row.floor_node_spacing,
+    tablePositions: parseTablePositionsJson(row.table_positions as Parameters<typeof parseTablePositionsJson>[0]),
+    sourceTemplateId: row.source_template_id,
+    mergeGroupId: row.merge_group_id ?? null,
+    updatedAt: row.updated_at,
+    updatedByUserId: row.updated_by_user_id,
+  };
+}
+
+async function isMergeManagedDayLayoutStillValid(
+  client: ReturnType<typeof ensureClient>,
+  layoutDate: string,
+  mergeGroupId: string
+): Promise<boolean> {
+  const { data: group, error } = await (client as any)
+    .from("table_merge_groups")
+    .select("status, start_date, end_date, created_at")
+    .eq("id", mergeGroupId)
+    .maybeSingle();
+  if (error || !group) {
+    return false;
+  }
+  if (group.status !== "active") {
+    return false;
+  }
+  const range = resolveMergeGroupDateRange({
+    created_at: group.created_at,
+    start_date: group.start_date,
+    end_date: group.end_date,
+  });
+  return isLayoutDateWithinMergeRange(layoutDate, range);
+}
+
+export async function deleteMergeManagedFloorLayoutsForGroupInSupabase(
+  mergeGroupId: string
+): Promise<void> {
+  const client = ensureClient();
+  const { error } = await client
+    .from("area_floor_layout_by_date")
+    .delete()
+    .eq("merge_group_id", mergeGroupId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+async function loadAreaFloorLayoutRowForDate(
   client: ReturnType<typeof ensureClient>,
   areaId: string,
-  memberTableIds: string[],
-  preferredAnchor?: { row: number; col: number }
-): Promise<{ packed: boolean }> {
-  if (memberTableIds.length === 0) {
-    return { packed: false };
+  layoutDate: string
+) {
+  const { data, error } = await client
+    .from("area_floor_layout_by_date")
+    .select(
+      "id, area_id, layout_date, floor_grid_columns, floor_grid_rows, floor_node_spacing, table_positions, source_template_id, merge_group_id, updated_at, updated_by_user_id"
+    )
+    .eq("area_id", areaId)
+    .eq("layout_date", layoutDate)
+    .maybeSingle();
+  if (error) {
+    throw new Error(error.message);
   }
+  if (!data) {
+    return null;
+  }
+  if (data.merge_group_id) {
+    const stillValid = await isMergeManagedDayLayoutStillValid(
+      client,
+      layoutDate,
+      data.merge_group_id
+    );
+    if (!stillValid) {
+      await client.from("area_floor_layout_by_date").delete().eq("id", data.id);
+      return null;
+    }
+  }
+  return mapAreaFloorLayoutByDateFromRow(data);
+}
+
+/** When merges are active on `layoutDate`, build a merge-managed day layout if missing. */
+async function ensureMergeDayLayoutForAreaDateIfNeeded(
+  client: ReturnType<typeof ensureClient>,
+  areaId: string,
+  layoutDate: string
+): Promise<boolean> {
+  const { data: groups, error } = await (client as any)
+    .from("table_merge_groups")
+    .select("id, status, start_date, end_date, created_at")
+    .eq("area_id", areaId)
+    .eq("status", "active");
+  if (error) {
+    return false;
+  }
+  const effective = ((groups ?? []) as TableMergeGroupRowLike[]).filter((group) => {
+    const range = resolveMergeGroupDateRange(group);
+    return isLayoutDateWithinMergeRange(layoutDate, range);
+  });
+  if (effective.length === 0) {
+    return false;
+  }
+  const targetGroup = effective[0]!;
+  const { data: members, error: membersErr } = await (client as any)
+    .from("table_merge_members")
+    .select("table_id")
+    .eq("group_id", targetGroup.id);
+  if (membersErr) {
+    return false;
+  }
+  const memberIds = ((members ?? []) as Array<{ table_id: string }>).map((row) => row.table_id);
+  if (memberIds.length < 2) {
+    return false;
+  }
+  const packResult = await packMergeGroupTablesOnFloor(client, areaId, memberIds, {
+    layoutDate,
+    mergeGroupId: targetGroup.id,
+  });
+  return packResult.packed;
+}
+
+export async function fetchAreaFloorLayoutForDateInSupabase(
+  areaId: string,
+  layoutDate: string
+): Promise<AreaFloorLayoutByDate | null> {
+  const client = ensureClient();
+  let row = await loadAreaFloorLayoutRowForDate(client, areaId, layoutDate);
+  if (row) {
+    return row;
+  }
+  const ensured = await ensureMergeDayLayoutForAreaDateIfNeeded(client, areaId, layoutDate);
+  if (!ensured) {
+    return null;
+  }
+  row = await loadAreaFloorLayoutRowForDate(client, areaId, layoutDate);
+  return row;
+}
+
+export async function upsertAreaFloorLayoutForDateInSupabase(
+  areaId: string,
+  layoutDate: string,
+  snapshot: FloorLayoutSnapshot,
+  options?: {
+    sourceTemplateId?: string | null;
+    updatedByUserId?: string | null;
+    mergeGroupId?: string | null;
+  }
+): Promise<AreaFloorLayoutByDate> {
+  const client = ensureClient();
+  const normalized = normalizeFloorLayoutSnapshot(snapshot);
+  const positionsJson = tablePositionsToJson(positionsRecordFromSnapshot(normalized));
+  const mergeGroupId =
+    options?.mergeGroupId !== undefined ? options.mergeGroupId : undefined;
+  const { data, error } = await client
+    .from("area_floor_layout_by_date")
+    .upsert(
+      {
+        area_id: areaId,
+        layout_date: layoutDate,
+        floor_grid_columns: normalized.floorGridColumns,
+        floor_grid_rows: normalized.floorGridRows,
+        floor_node_spacing: normalized.floorNodeSpacing,
+        table_positions: positionsJson,
+        source_template_id: options?.sourceTemplateId ?? null,
+        ...(mergeGroupId !== undefined ? { merge_group_id: mergeGroupId } : {}),
+        updated_at: new Date().toISOString(),
+        updated_by_user_id: options?.updatedByUserId ?? null,
+      },
+      { onConflict: "area_id,layout_date" }
+    )
+    .select(
+      "id, area_id, layout_date, floor_grid_columns, floor_grid_rows, floor_node_spacing, table_positions, source_template_id, merge_group_id, updated_at, updated_by_user_id"
+    )
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message ?? "Không lưu được sơ đồ theo ngày.");
+  }
+  return mapAreaFloorLayoutByDateFromRow(data);
+}
+
+export async function deleteAreaFloorLayoutForDateInSupabase(
+  areaId: string,
+  layoutDate: string
+): Promise<void> {
+  const client = ensureClient();
+  const { error } = await client
+    .from("area_floor_layout_by_date")
+    .delete()
+    .eq("area_id", areaId)
+    .eq("layout_date", layoutDate);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export type FloorLayoutTemplate = {
+  id: string;
+  areaId: string;
+  name: string;
+  snapshot: FloorLayoutSnapshot;
+  backgroundImageDataUrl: string | null;
+  backgroundScale: number;
+  createdByUserId: string;
+  updatedAt: string;
+};
+
+export async function listFloorLayoutTemplatesInSupabase(
+  areaId: string
+): Promise<FloorLayoutTemplate[]> {
+  const client = ensureClient();
+  const { data, error } = await client
+    .from("floor_layout_templates")
+    .select(
+      "id, area_id, name, table_layout_json, background_image_data_url, background_scale, created_by_user_id, updated_at"
+    )
+    .eq("area_id", areaId)
+    .order("updated_at", { ascending: false });
+  if (error) {
+    throw new Error(error.message);
+  }
+  return (data ?? []).flatMap((row) => {
+    const snapshot = parseFloorLayoutSnapshotJson(row.table_layout_json);
+    if (!snapshot) {
+      return [];
+    }
+    return [
+      {
+        id: row.id,
+        areaId: row.area_id,
+        name: row.name,
+        snapshot,
+        backgroundImageDataUrl: row.background_image_data_url,
+        backgroundScale: row.background_scale,
+        createdByUserId: row.created_by_user_id,
+        updatedAt: row.updated_at,
+      },
+    ];
+  });
+}
+
+export async function createFloorLayoutTemplateInSupabase(
+  areaId: string,
+  name: string,
+  snapshot: FloorLayoutSnapshot,
+  createdByUserId: string
+): Promise<FloorLayoutTemplate> {
+  const client = ensureClient();
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error("Vui lòng nhập tên mẫu sơ đồ.");
+  }
+  const normalized = normalizeFloorLayoutSnapshot(snapshot);
+  const { data, error } = await client
+    .from("floor_layout_templates")
+    .insert({
+      area_id: areaId,
+      name: trimmed,
+      table_layout_json: floorLayoutSnapshotToJson(normalized),
+      created_by_user_id: createdByUserId,
+      updated_at: new Date().toISOString(),
+    })
+    .select(
+      "id, area_id, name, table_layout_json, background_image_data_url, background_scale, created_by_user_id, updated_at"
+    )
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message ?? "Không tạo được mẫu sơ đồ.");
+  }
+  const parsed = parseFloorLayoutSnapshotJson(data.table_layout_json);
+  if (!parsed) {
+    throw new Error("Mẫu sơ đồ không hợp lệ sau khi lưu.");
+  }
+  return {
+    id: data.id,
+    areaId: data.area_id,
+    name: data.name,
+    snapshot: parsed,
+    backgroundImageDataUrl: data.background_image_data_url,
+    backgroundScale: data.background_scale,
+    createdByUserId: data.created_by_user_id,
+    updatedAt: data.updated_at,
+  };
+}
+
+export async function deleteFloorLayoutTemplateInSupabase(templateId: string): Promise<void> {
+  const client = ensureClient();
+  const { error } = await client.from("floor_layout_templates").delete().eq("id", templateId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function applyFloorLayoutTemplateToDateInSupabase(
+  templateId: string,
+  areaId: string,
+  layoutDate: string,
+  updatedByUserId?: string | null
+): Promise<AreaFloorLayoutByDate> {
+  const client = ensureClient();
+  const { data: template, error } = await client
+    .from("floor_layout_templates")
+    .select("id, area_id, table_layout_json")
+    .eq("id", templateId)
+    .maybeSingle();
+  if (error || !template) {
+    throw new Error(error?.message ?? "Không tìm thấy mẫu sơ đồ.");
+  }
+  if (template.area_id !== areaId) {
+    throw new Error("Mẫu sơ đồ không thuộc khu vực này.");
+  }
+  const snapshot = parseFloorLayoutSnapshotJson(template.table_layout_json);
+  if (!snapshot) {
+    throw new Error("Dữ liệu mẫu sơ đồ không hợp lệ.");
+  }
+  return upsertAreaFloorLayoutForDateInSupabase(areaId, layoutDate, snapshot, {
+    sourceTemplateId: templateId,
+    updatedByUserId: updatedByUserId ?? null,
+    mergeGroupId: null,
+  });
+}
+
+async function loadResolvedLayoutForPack(
+  client: ReturnType<typeof ensureClient>,
+  areaId: string,
+  layoutDate: string
+): Promise<{
+  gridColumns: number;
+  gridRows: number;
+  nodeSpacing: number;
+  areaTables: Array<{ id: string; positionX: number; positionY: number }>;
+}> {
   const { data: area, error: areaErr } = await client
     .from("areas")
-    .select("floor_grid_columns, floor_grid_rows, floor_node_spacing")
+    .select("id, floor_grid_columns, floor_grid_rows, floor_node_spacing")
     .eq("id", areaId)
     .maybeSingle();
   if (areaErr || !area) {
-    return { packed: false };
+    throw new Error(areaErr?.message ?? "Không tìm thấy khu vực.");
   }
-  const gridColumns =
-    typeof area.floor_grid_columns === "number" ? area.floor_grid_columns : 12;
-  const gridRows = typeof area.floor_grid_rows === "number" ? area.floor_grid_rows : 8;
-  const nodeSpacing =
-    typeof area.floor_node_spacing === "number" ? area.floor_node_spacing : 168;
 
   const { data: areaTables, error: tablesErr } = await client
     .from("tables")
     .select("id, position_x, position_y")
     .eq("area_id", areaId);
   if (tablesErr) {
+    throw new Error(tablesErr.message);
+  }
+
+  const tablesMapped = (areaTables ?? []).map((row) => ({
+    id: row.id,
+    positionX: row.position_x,
+    positionY: row.position_y,
+  }));
+
+  const dayRow = await loadAreaFloorLayoutRowForDate(client, areaId, layoutDate);
+  if (!dayRow) {
+    const globalSnapshot = snapshotFromGlobalArea(
+      {
+        floorGridColumns:
+          typeof area.floor_grid_columns === "number" ? area.floor_grid_columns : 12,
+        floorGridRows: typeof area.floor_grid_rows === "number" ? area.floor_grid_rows : 8,
+        floorNodeSpacing:
+          typeof area.floor_node_spacing === "number"
+            ? area.floor_node_spacing
+            : FLOOR_DEFAULT_NODE_SPACING_PX,
+      },
+      tablesMapped.map((t) => ({
+        id: t.id,
+        positionX: t.positionX,
+        positionY: t.positionY,
+      })) as Parameters<typeof snapshotFromGlobalArea>[1]
+    );
+    return {
+      gridColumns: globalSnapshot.floorGridColumns,
+      gridRows: globalSnapshot.floorGridRows,
+      nodeSpacing: globalSnapshot.floorNodeSpacing,
+      areaTables: tablesMapped.map((t) => {
+        const pos = positionsRecordFromSnapshot(globalSnapshot)[t.id];
+        return {
+          id: t.id,
+          positionX: pos?.x ?? t.positionX,
+          positionY: pos?.y ?? t.positionY,
+        };
+      }),
+    };
+  }
+
+  const positions = { ...dayRow.tablePositions };
+  for (const table of tablesMapped) {
+    if (!(table.id in positions)) {
+      positions[table.id] = { x: table.positionX, y: table.positionY };
+    }
+  }
+
+  return {
+    gridColumns: dayRow.floorGridColumns,
+    gridRows: dayRow.floorGridRows,
+    nodeSpacing: dayRow.floorNodeSpacing,
+    areaTables: tablesMapped.map((t) => ({
+      id: t.id,
+      positionX: positions[t.id]?.x ?? t.positionX,
+      positionY: positions[t.id]?.y ?? t.positionY,
+    })),
+  };
+}
+
+/** Snap active merge members into one adjacent row on the area floor grid (+ one empty plug cell). */
+async function packMergeGroupTablesOnFloor(
+  client: ReturnType<typeof ensureClient>,
+  areaId: string,
+  memberTableIds: string[],
+  options?: {
+    preferredAnchor?: { row: number; col: number };
+    /** When set, repack writes to per-day layout instead of global table positions. */
+    layoutDate?: string;
+    mergeGroupId?: string;
+  }
+): Promise<{ packed: boolean; dayLayout?: AreaFloorLayoutByDate }> {
+  if (memberTableIds.length === 0) {
     return { packed: false };
+  }
+
+  const layoutDate = options?.layoutDate?.trim() || null;
+  let gridColumns: number;
+  let gridRows: number;
+  let nodeSpacing: number;
+  let areaTables: Array<{ id: string; positionX: number; positionY: number }>;
+
+  if (layoutDate) {
+    const resolved = await loadResolvedLayoutForPack(client, areaId, layoutDate);
+    gridColumns = resolved.gridColumns;
+    gridRows = resolved.gridRows;
+    nodeSpacing = resolved.nodeSpacing;
+    areaTables = resolved.areaTables;
+  } else {
+    const { data: area, error: areaErr } = await client
+      .from("areas")
+      .select("floor_grid_columns, floor_grid_rows, floor_node_spacing")
+      .eq("id", areaId)
+      .maybeSingle();
+    if (areaErr || !area) {
+      return { packed: false };
+    }
+    gridColumns =
+      typeof area.floor_grid_columns === "number" ? area.floor_grid_columns : 12;
+    gridRows = typeof area.floor_grid_rows === "number" ? area.floor_grid_rows : 8;
+    nodeSpacing =
+      typeof area.floor_node_spacing === "number" ? area.floor_node_spacing : 168;
+
+    const { data: rawTables, error: tablesErr } = await client
+      .from("tables")
+      .select("id, position_x, position_y")
+      .eq("area_id", areaId);
+    if (tablesErr) {
+      return { packed: false };
+    }
+    areaTables = (rawTables ?? []).map((row) => ({
+      id: row.id,
+      positionX: row.position_x,
+      positionY: row.position_y,
+    }));
   }
 
   const packResult = packMergeGroupTablePositions({
     memberTableIds,
-    areaTables: (areaTables ?? []).map((row) => ({
-      id: row.id,
-      positionX: row.position_x,
-      positionY: row.position_y,
-    })),
+    areaTables,
     gridColumns,
     gridRows,
-    preferredAnchor,
+    preferredAnchor: options?.preferredAnchor,
   });
   if (!packResult) {
     return { packed: false };
   }
 
-  if (packResult.gridRows > gridRows) {
+  const nextGridRows = Math.max(gridRows, packResult.gridRows);
+  const positionsRecord: Record<string, { x: number; y: number }> = {};
+  for (const table of areaTables) {
+    positionsRecord[table.id] = { x: table.positionX, y: table.positionY };
+  }
+  for (const [tableId, pos] of packResult.positionUpdates.entries()) {
+    positionsRecord[tableId] = { x: pos.col, y: pos.row };
+  }
+
+  if (layoutDate) {
+    const snapshot = snapshotFromPositionsRecord(
+      {
+        floorGridColumns: gridColumns,
+        floorGridRows: nextGridRows,
+        floorNodeSpacing: clampFloorNodeSpacing(nodeSpacing),
+      },
+      positionsRecord
+    );
+    const dayLayout = await upsertAreaFloorLayoutForDateInSupabase(areaId, layoutDate, snapshot, {
+      mergeGroupId: options?.mergeGroupId ?? null,
+    });
+    return { packed: true, dayLayout };
+  }
+
+  if (nextGridRows > gridRows) {
     await updateAreaFloorLayoutInSupabase(areaId, {
       floorGridColumns: gridColumns,
-      floorGridRows: packResult.gridRows,
+      floorGridRows: nextGridRows,
       floorNodeSpacing: nodeSpacing,
     });
   }
@@ -2721,17 +3227,49 @@ export async function createTableMergeGroupInSupabase(
     return { ok: false, message: membersErr.message };
   }
 
-  const packResult = await packMergeGroupTablesOnFloor(client, input.areaId, tableIds);
+  const mergeRange = { startDate: input.startDate, endDate: input.endDate };
+  const layoutDateCandidate = input.layoutDate?.trim() || input.startDate;
+  const primaryLayoutDate = isLayoutDateWithinMergeRange(layoutDateCandidate, mergeRange)
+    ? layoutDateCandidate
+    : input.startDate;
+  const packResult = await packMergeGroupTablesOnFloor(client, input.areaId, tableIds, {
+    layoutDate: primaryLayoutDate,
+    mergeGroupId: groupRow.id,
+  });
+  const packedAny = packResult.packed;
+  const spanDays = eachLayoutDateInRange(input.startDate, input.endDate).length;
   let message = `Đã gộp ${tableIds.length} bàn thành "${groupName}" (${input.startDate} → ${input.endDate}).`;
-  if (!packResult.packed) {
+  if (!packedAny) {
     message +=
       " Chưa xếp được cụm trên sơ đồ tự động — vào Sơ đồ (chỉnh sửa) để kéo các bàn sát nhau.";
+  } else if (spanDays > 1) {
+    message +=
+      " Sơ đồ đã xếp cho ngày đang xem; các ngày khác trong khoảng sẽ tự xếp khi mở sơ đồ.";
   }
+
+  const group = mapTableMergeGroupFromRow(
+    {
+      id: groupRow.id,
+      branch_id: input.branchId,
+      area_id: input.areaId,
+      auto_number: nextNumber,
+      merged_name: groupName,
+      total_capacity: totalCapacity,
+      status: "active",
+      created_at: new Date().toISOString(),
+      released_at: null,
+      start_date: input.startDate,
+      end_date: input.endDate,
+    },
+    tableIds
+  );
 
   return {
     ok: true,
     groupId: groupRow.id,
     mergedName: groupName,
+    group,
+    dayLayout: packResult.dayLayout ?? null,
     message,
   };
 }
@@ -2741,6 +3279,8 @@ export async function addTableToMergeGroupInSupabase(input: {
   tableId: string;
   /** When false, membership is updated but floor positions are left unchanged (caller saved layout). */
   repackFloor?: boolean;
+  /** Calendar day whose layout receives repack (defaults to group startDate). */
+  layoutDate?: string;
 }): Promise<Result> {
   const client = ensureClient();
   const { data: group, error: groupErr } = await (client as any)
@@ -2820,7 +3360,12 @@ export async function addTableToMergeGroupInSupabase(input: {
       ...((existingMembers ?? []) as Array<{ table_id: string }>).map((row) => row.table_id),
       input.tableId,
     ];
-    const packResult = await packMergeGroupTablesOnFloor(client, group.area_id, allMemberIds);
+    const groupDates = resolveMergeGroupDateRange(group);
+    const packLayoutDate = input.layoutDate ?? groupDates.startDate;
+    const packResult = await packMergeGroupTablesOnFloor(client, group.area_id, allMemberIds, {
+      layoutDate: packLayoutDate,
+      mergeGroupId: group.id,
+    });
     let message = `Đã thêm bàn ${table.name} vào ${group.merged_name}.`;
     if (!packResult.packed) {
       message +=
@@ -2836,11 +3381,14 @@ export async function removeTableFromMergeGroupInSupabase(input: {
   groupId: string;
   tableId: string;
   repackFloor?: boolean;
+  layoutDate?: string;
 }): Promise<Result> {
   const client = ensureClient();
   const { data: group, error: groupErr } = await (client as any)
     .from("table_merge_groups")
-    .select("id, status, merged_name, total_capacity, area_id")
+    .select(
+      "id, status, merged_name, total_capacity, area_id, start_date, end_date, created_at"
+    )
     .eq("id", input.groupId)
     .maybeSingle();
   if (groupErr || !group) {
@@ -2899,7 +3447,11 @@ export async function removeTableFromMergeGroupInSupabase(input: {
   const repackFloor = input.repackFloor !== false;
   let message = `Đã tách bàn khỏi ${group.merged_name}.`;
   if (repackFloor && remainingIds.length >= 2) {
-    const packResult = await packMergeGroupTablesOnFloor(client, group.area_id, remainingIds);
+    const groupDates = resolveMergeGroupDateRange(group);
+    const packResult = await packMergeGroupTablesOnFloor(client, group.area_id, remainingIds, {
+      layoutDate: input.layoutDate ?? groupDates.startDate,
+      mergeGroupId: group.id,
+    });
     if (!packResult.packed) {
       message += " Cụm còn lại chưa được xếp lại trên sơ đồ tự động.";
     }
@@ -3164,6 +3716,8 @@ export async function releaseTableMergeGroupInSupabase(input: {
     return { ok: false, message: releaseErr.message };
   }
 
+  await deleteMergeManagedFloorLayoutsForGroupInSupabase(group.id);
+
   return { ok: true, message: `Đã giải tán ${group.merged_name}.` };
 }
 
@@ -3425,6 +3979,7 @@ export async function deleteAreaInSupabase(areaId: string): Promise<Result> {
 
   await client.from("floor_layout_edit_locks").delete().eq("area_id", areaId);
   await client.from("floor_backgrounds").delete().eq("area_id", areaId);
+  await client.from("area_floor_layout_by_date").delete().eq("area_id", areaId);
   await client.from("floor_layout_template_selections").delete().eq("area_id", areaId);
   await client.from("floor_layout_templates").delete().eq("area_id", areaId);
 
@@ -3435,14 +3990,86 @@ export async function deleteAreaInSupabase(areaId: string): Promise<Result> {
   return { ok: true, message: "Đã xóa khu vực." };
 }
 
+export type FloorLayoutSaveOptions = {
+  /** When set, persists to per-day override only (does not mutate global areas/tables). */
+  layoutDate?: string;
+  updatedByUserId?: string | null;
+  sourceTemplateId?: string | null;
+  /** null clears merge auto-management when saving a manual layout. */
+  mergeGroupId?: string | null;
+};
+
 export async function updateAreaFloorLayoutInSupabase(
   areaId: string,
   input: {
     floorGridColumns: number;
     floorGridRows: number;
     floorNodeSpacing: number;
-  }
+  },
+  options?: FloorLayoutSaveOptions
 ): Promise<void> {
+  const layoutDate = options?.layoutDate?.trim();
+  if (layoutDate) {
+    const existing = await fetchAreaFloorLayoutForDateInSupabase(areaId, layoutDate);
+    const { data: area } = await ensureClient()
+      .from("areas")
+      .select("floor_grid_columns, floor_grid_rows, floor_node_spacing")
+      .eq("id", areaId)
+      .maybeSingle();
+    const { data: tables } = await ensureClient()
+      .from("tables")
+      .select("id, position_x, position_y")
+      .eq("area_id", areaId);
+    const baseSnapshot = existing
+      ? {
+          floorGridColumns: existing.floorGridColumns,
+          floorGridRows: existing.floorGridRows,
+          floorNodeSpacing: existing.floorNodeSpacing,
+          tablePositions: Object.entries(existing.tablePositions).map(([tableId, pos]) => ({
+            tableId,
+            x: pos.x,
+            y: pos.y,
+          })),
+        }
+      : snapshotFromGlobalArea(
+          {
+            floorGridColumns:
+              typeof area?.floor_grid_columns === "number" ? area.floor_grid_columns : 12,
+            floorGridRows: typeof area?.floor_grid_rows === "number" ? area.floor_grid_rows : 8,
+            floorNodeSpacing:
+              typeof area?.floor_node_spacing === "number"
+                ? area.floor_node_spacing
+                : FLOOR_DEFAULT_NODE_SPACING_PX,
+          },
+          (tables ?? []).map((row) => ({
+            id: row.id,
+            branchId: "",
+            areaId,
+            name: "",
+            seats: 1,
+            status: "available" as const,
+            positionX: row.position_x,
+            positionY: row.position_y,
+          }))
+        );
+    await upsertAreaFloorLayoutForDateInSupabase(
+      areaId,
+      layoutDate,
+      normalizeFloorLayoutSnapshot({
+        ...baseSnapshot,
+        floorGridColumns: input.floorGridColumns,
+        floorGridRows: input.floorGridRows,
+        floorNodeSpacing: input.floorNodeSpacing,
+      }),
+      {
+        sourceTemplateId: options?.sourceTemplateId ?? existing?.sourceTemplateId ?? null,
+        updatedByUserId: options?.updatedByUserId ?? null,
+        mergeGroupId: options?.mergeGroupId ?? existing?.mergeGroupId ?? null,
+      }
+    );
+    return;
+  }
+
   const client = ensureClient();
   const { error } = await client
     .from("areas")
@@ -3468,8 +4095,28 @@ export type SaveFloorLayoutInput = {
 /** Persists grid metadata and all table positions for a floor in one logical save. */
 export async function saveFloorLayoutToSupabase(
   areaId: string,
-  input: SaveFloorLayoutInput
-): Promise<void> {
+  input: SaveFloorLayoutInput,
+  options?: FloorLayoutSaveOptions
+): Promise<AreaFloorLayoutByDate | void> {
+  const layoutDate = options?.layoutDate?.trim();
+  if (layoutDate) {
+    return upsertAreaFloorLayoutForDateInSupabase(
+      areaId,
+      layoutDate,
+      normalizeFloorLayoutSnapshot({
+        floorGridColumns: input.floorGridColumns,
+        floorGridRows: input.floorGridRows,
+        floorNodeSpacing: input.floorNodeSpacing,
+        tablePositions: input.tablePositions,
+      }),
+      {
+        sourceTemplateId: options?.sourceTemplateId ?? null,
+        updatedByUserId: options?.updatedByUserId ?? null,
+        mergeGroupId: options?.mergeGroupId ?? null,
+      }
+    );
+  }
+
   await updateAreaFloorLayoutInSupabase(areaId, {
     floorGridColumns: input.floorGridColumns,
     floorGridRows: input.floorGridRows,

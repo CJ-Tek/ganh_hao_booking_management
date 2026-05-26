@@ -51,19 +51,36 @@ import {
   BookingCalendarPanel,
   type BookingCalendarPanelHandle,
 } from "@/components/booking-calendar-panel";
+import { BookingOrderDetailModal } from "@/components/booking-management/booking-order-detail-modal";
 import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
+import { useBookingManagement } from "@/components/booking-management/use-booking-management";
 import { MergeGroupsPanel } from "@/components/merge-groups/merge-groups-panel";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
+import { FloorLayoutTemplatesModal } from "@/components/floor-map/floor-layout-templates-modal";
 import { FloorTableBlockView } from "@/components/floor-map/floor-table-block-view";
 import { RegisterPendingAssignTable } from "@/components/floor-map/register-pending-assign-table";
 import { TableBlockDetailModal } from "@/components/floor-map/table-block-detail-modal";
-import { VoiceBookingAssistant } from "@/components/voice-booking/VoiceBookingAssistant";
+import {
+  VoiceBookingAssistant,
+  type VoiceBookingFormFields,
+} from "@/components/voice-booking/VoiceBookingAssistant";
 import {
   DUPLICATE_BOOKING_CODE,
   isPlausibleVietnamPhone,
   normalizeVietnamPhone,
 } from "@/lib/booking-duplicate";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
+
+const emptyRegisterVoiceFields = (): VoiceBookingFormFields => ({
+  customerName: "",
+  customerPhone: "",
+  guestCount: null,
+  bookingAt: dayjs().add(1, "hour").format("YYYY-MM-DDTHH:mm"),
+  areaId: null,
+  tableId: null,
+  note: "",
+  guestType: "Khách thường",
+});
 import {
   useCallback,
   useEffect,
@@ -97,6 +114,15 @@ import {
   packMergeGroupTablePositions,
 } from "@/lib/floor-map-merge-layout";
 import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
+import {
+  applySnapshotToTablesInArea,
+  floorLayoutDayKey,
+  type AreaFloorLayoutByDate,
+} from "@/lib/floor-layout-snapshot";
+import {
+  resolveFloorLayoutForDate,
+  resolvedLayoutToSnapshot,
+} from "@/lib/floor-layout-resolve";
 import { getSupabaseBrowserClient } from "@/lib/supabase";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import {
@@ -126,6 +152,7 @@ import {
   formatMergeGroupDateRange,
   isMergeGroupEffectiveOnDate,
   isMergeGroupExpired,
+  resolveMergeGroupNavigationDate,
   validateMergeGroupDateRange,
 } from "@/lib/merge-group-utils";
 import {
@@ -436,6 +463,12 @@ export default function FloorMapPage() {
     hasSupabase,
     saveAreaFloorGrid,
     saveFloorLayout,
+    fetchAreaFloorLayoutForDate,
+    deleteAreaFloorLayoutForDate,
+    listFloorLayoutTemplates,
+    createFloorLayoutTemplate,
+    deleteFloorLayoutTemplate,
+    applyFloorLayoutTemplateToDate,
     acquireFloorLayoutEditLock,
     renewFloorLayoutEditLock,
     releaseFloorLayoutEditLock,
@@ -484,6 +517,11 @@ export default function FloorMapPage() {
   const [areaDeleteLoading, setAreaDeleteLoading] = useState(false);
   const [editLayout, setEditLayout] = useState<FloorEditLayout | null>(null);
   const [isSavingLayout, setIsSavingLayout] = useState(false);
+  const [dayLayoutByKey, setDayLayoutByKey] = useState<
+    Record<string, AreaFloorLayoutByDate | null | undefined>
+  >({});
+  const [layoutTemplatesOpen, setLayoutTemplatesOpen] = useState(false);
+  const [clearingDayLayout, setClearingDayLayout] = useState(false);
   const [registerTable, setRegisterTable] = useState<DiningTable | null>(null);
   /** Giữ chỗ = future slot (show datetime); Vào bàn ngay = now (hide datetime) */
   const [registerArrivalMode, setRegisterArrivalMode] = useState<"hold" | "immediate">(
@@ -503,6 +541,20 @@ export default function FloorMapPage() {
   const [registerPendingSelected, setRegisterPendingSelected] = useState<Booking[]>([]);
   const [registerModalTab, setRegisterModalTab] = useState<"book" | "assign">("book");
   const [registerSaving, setRegisterSaving] = useState(false);
+  const [registerVoiceFields, setRegisterVoiceFields] = useState<VoiceBookingFormFields>(
+    emptyRegisterVoiceFields
+  );
+  const [dayListDetailBooking, setDayListDetailBooking] = useState<Booking | null>(null);
+  const {
+    bookingManagementModals,
+    isBookingRowBusy,
+    openEditBookingModal,
+    openAssignOptions,
+    setChangeTableBooking: setMgmtChangeTableBooking,
+    runCheckIn,
+    openCompleteBookingConfirm,
+    openCancelBookingConfirm,
+  } = useBookingManagement();
   const { isBusy: isTableStatusBusy, run: runTableStatusAction } = useBusyId();
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
   const [mergeGroupsListModalOpen, setMergeGroupsListModalOpen] = useState(false);
@@ -542,14 +594,6 @@ export default function FloorMapPage() {
   const isEditMode = mode === "edit";
   const editBlockedByOther = Boolean(layoutLockHolderName);
 
-  // #region agent log
-  const inRenderPhaseRef = useRef(false);
-  inRenderPhaseRef.current = true;
-  useLayoutEffect(() => {
-    inRenderPhaseRef.current = false;
-  });
-  // #endregion
-
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const calendarPanelRef = useRef<BookingCalendarPanelHandle | null>(null);
   const panStateRef = useRef<PanState | null>(null);
@@ -561,6 +605,12 @@ export default function FloorMapPage() {
     originY: number;
   } | null>(null);
   const paletteGestureRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    tableId: string;
+  } | null>(null);
+  const tablePickGestureRef = useRef<{
     pointerId: number;
     startX: number;
     startY: number;
@@ -605,6 +655,86 @@ export default function FloorMapPage() {
     [areaId, state.areas]
   );
   const activeAreaBranchId = activeArea?.branchId ?? null;
+  const selectedLayoutDate = formatMergeGroupDate(floorMapSelectedDate);
+  const dayLayoutCacheKey = areaId ? floorLayoutDayKey(areaId, selectedLayoutDate) : null;
+  const cachedDayLayout =
+    dayLayoutCacheKey !== null ? dayLayoutByKey[dayLayoutCacheKey] : undefined;
+
+  const setCurrentDayLayoutCache = useCallback(
+    (row: AreaFloorLayoutByDate | null | undefined) => {
+      if (!dayLayoutCacheKey) {
+        return;
+      }
+      setDayLayoutByKey({ [dayLayoutCacheKey]: row });
+    },
+    [dayLayoutCacheKey]
+  );
+
+  const refreshDayLayout = useCallback(async () => {
+    if (!areaId || !hasSupabase || !dayLayoutCacheKey) {
+      return null;
+    }
+    setCurrentDayLayoutCache(undefined);
+    const row = await fetchAreaFloorLayoutForDate(areaId, selectedLayoutDate);
+    setCurrentDayLayoutCache(row);
+    return row;
+  }, [
+    areaId,
+    dayLayoutCacheKey,
+    fetchAreaFloorLayoutForDate,
+    hasSupabase,
+    selectedLayoutDate,
+    setCurrentDayLayoutCache,
+  ]);
+
+  const syncEditLayoutFromDayOverride = useCallback(
+    (dayOverride: AreaFloorLayoutByDate | null) => {
+      if (!areaId) {
+        return;
+      }
+      const area = state.areas.find((a) => a.id === areaId);
+      const tablesInAreaDraft = state.tables.filter((x) => x.areaId === areaId);
+      const resolved = resolveFloorLayoutForDate({
+        area: area ?? {
+          id: areaId,
+          branchId: "",
+          name: "",
+          capacity: 0,
+          floorGridColumns: DEFAULT_GRID_COLUMNS,
+          floorGridRows: DEFAULT_GRID_ROWS,
+          floorNodeSpacing: FLOOR_DEFAULT_NODE_SPACING_PX,
+        },
+        tablesInArea: tablesInAreaDraft,
+        dayOverride,
+      });
+      setEditLayout({
+        gridColumns: resolved.floorGridColumns,
+        gridRows: resolved.floorGridRows,
+        nodeSpacing: resolved.floorNodeSpacing,
+        positions: { ...resolved.positions },
+        pendingMergeAdds: [],
+        pendingMergeRemoves: [],
+      });
+    },
+    [areaId, state.areas, state.tables]
+  );
+
+  useEffect(() => {
+    if (!areaId || !hasSupabase || !dayLayoutCacheKey) {
+      setDayLayoutByKey({});
+      return;
+    }
+    let cancelled = false;
+    setDayLayoutByKey({ [dayLayoutCacheKey]: undefined });
+    void fetchAreaFloorLayoutForDate(areaId, selectedLayoutDate).then((row) => {
+      if (!cancelled) {
+        setDayLayoutByKey({ [dayLayoutCacheKey]: row });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [areaId, dayLayoutCacheKey, fetchAreaFloorLayoutForDate, hasSupabase, selectedLayoutDate]);
 
   const selectedAreaTableCount = useMemo(() => {
     if (!areaId) {
@@ -663,34 +793,37 @@ export default function FloorMapPage() {
     );
   }, [detailMergeGroup, floorMapDayBookings]);
 
-  const registerTableBranch = useMemo(() => {
-    if (!registerTable) {
+  const registerFormBranchId =
+    registerTable?.branchId ?? registerMergeGroup?.branchId ?? null;
+
+  const registerFormBranch = useMemo(() => {
+    if (!registerFormBranchId) {
       return null;
     }
-    const branch = state.branches.find((item) => item.id === registerTable.branchId);
+    const branch = state.branches.find((item) => item.id === registerFormBranchId);
     return branch ? { id: branch.id, name: branch.name } : null;
-  }, [registerTable, state.branches]);
+  }, [registerFormBranchId, state.branches]);
 
   const registerVoiceAreas = useMemo(() => {
-    if (!registerTable) {
+    if (!registerFormBranchId) {
       return [];
     }
     return state.areas
       .filter(
         (area) =>
-          area.branchId === registerTable.branchId && filteredBranchIds.includes(area.branchId)
+          area.branchId === registerFormBranchId && filteredBranchIds.includes(area.branchId)
       )
       .map((area) => ({ id: area.id, name: area.name }));
-  }, [filteredBranchIds, registerTable, state.areas]);
+  }, [filteredBranchIds, registerFormBranchId, state.areas]);
 
   const registerVoiceTables = useMemo(() => {
-    if (!registerTable) {
+    if (!registerFormBranchId) {
       return [];
     }
     return state.tables
       .filter(
         (table) =>
-          table.branchId === registerTable.branchId && filteredBranchIds.includes(table.branchId)
+          table.branchId === registerFormBranchId && filteredBranchIds.includes(table.branchId)
       )
       .map((table) => ({
         id: table.id,
@@ -699,7 +832,46 @@ export default function FloorMapPage() {
         areaId: table.areaId,
         status: table.status,
       }));
-  }, [filteredBranchIds, registerTable, state.tables]);
+  }, [filteredBranchIds, registerFormBranchId, state.tables]);
+
+  const registerDefaultBookingAt = useMemo(() => {
+    if (registerArrivalMode !== "hold" || !registerBookingDate || !registerBookingTime) {
+      return null;
+    }
+    const [hour, minute] = registerBookingTime.split(":").map((value) => Number(value) || 0);
+    return dayjs(registerBookingDate, "YYYY-MM-DD")
+      .hour(hour)
+      .minute(minute)
+      .second(0)
+      .millisecond(0)
+      .format("YYYY-MM-DDTHH:mm");
+  }, [registerArrivalMode, registerBookingDate, registerBookingTime]);
+
+  const registerMaxGuestCount = useMemo(() => {
+    if (registerMergeGroup) {
+      const max = getMergeGroupEffectiveGuestCapacity(registerMergeGroup.totalCapacity);
+      return max > 0 ? max : undefined;
+    }
+    if (registerTable && registerTable.seats > 0) {
+      const max = getTableEffectiveGuestCapacity(registerTable.seats);
+      return max > 0 ? max : undefined;
+    }
+    return undefined;
+  }, [registerMergeGroup, registerTable]);
+
+  const registerGuestCountDescription = useMemo(() => {
+    if (registerMergeGroup) {
+      const max = getMergeGroupEffectiveGuestCapacity(registerMergeGroup.totalCapacity);
+      if (max <= 0) {
+        return undefined;
+      }
+      return `Tối đa ${max} khách (cụm ${registerMergeGroup.totalCapacity} ghế)`;
+    }
+    if (registerTable) {
+      return `Tối đa ${formatTableGuestCapacityHint(registerTable.seats)}`;
+    }
+    return undefined;
+  }, [registerMergeGroup, registerTable]);
 
   const registerBookingCandidate = useMemo((): Booking | null => {
     if (!registerTable) {
@@ -708,6 +880,8 @@ export default function FloorMapPage() {
     let startIso: string | null = null;
     if (registerArrivalMode === "immediate") {
       startIso = dayjs().toISOString();
+    } else if (registerVoiceFields.bookingAt) {
+      startIso = dayjs(registerVoiceFields.bookingAt).toISOString();
     } else if (registerBookingDate && registerBookingTime) {
       const [hour, minute] = registerBookingTime.split(":").map((value) => Number(value) || 0);
       startIso = dayjs(registerBookingDate, "YYYY-MM-DD")
@@ -729,7 +903,14 @@ export default function FloorMapPage() {
       branchId: registerTable.branchId,
       areaId: registerTable.areaId,
       tableId: registerTable.id,
-      guestCount: Math.max(1, Number(registerGuestCount || 1)),
+      guestCount: Math.max(
+        1,
+        Number(
+          registerVoiceFields.guestCount ??
+            registerGuestCount ??
+            1
+        )
+      ),
       bookingAt: startIso,
       startTime: startIso,
       endTime: endIso,
@@ -742,6 +923,8 @@ export default function FloorMapPage() {
     registerBookingTime,
     registerGuestCount,
     registerTable,
+    registerVoiceFields.bookingAt,
+    registerVoiceFields.guestCount,
     state.bookingRuntimeSettings.standardTurnaroundMinutes,
   ]);
 
@@ -769,16 +952,12 @@ export default function FloorMapPage() {
     });
   }, [registerTable, registerTableSlotConflicts, state.customers]);
 
-  const registerImmediateBlocked =
-    registerTable?.status === "occupied" && registerArrivalMode === "immediate";
-
   const pendingBookings = useMemo(
     () =>
-      state.bookings
-        .filter((b) => filteredBranchIds.includes(b.branchId))
+      floorMapDayBookings
         .filter((b) => b.status === "pending")
         .sort((a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf()),
-    [filteredBranchIds, state.bookings]
+    [floorMapDayBookings]
   );
   /** Active groups across all areas — used to exclude already-merged tables from new-merge candidates. */
   const allActiveMergedTableIds = useMemo(() => {
@@ -1160,18 +1339,23 @@ export default function FloorMapPage() {
   modeRef.current = mode;
 
   useEffect(() => {
-    if (!areaId || isLoading || mode !== "view") {
+    if (!areaId || isLoading || mode !== "view" || !activeArea) {
       return;
     }
-    const area = state.areas.find((a) => a.id === areaId);
-    if (!area) {
+    if (cachedDayLayout === undefined) {
       return;
     }
-    setGridColumns(area.floorGridColumns ?? DEFAULT_GRID_COLUMNS);
-    setGridRows(area.floorGridRows ?? DEFAULT_GRID_ROWS);
-    setNodeSpacing(clampFloorNodeSpacing(area.floorNodeSpacing ?? FLOOR_DEFAULT_NODE_SPACING_PX));
-    // Resync view grid when area/mode/loading changes; avoid re-drafting on every snapshot.
-  }, [areaId, isLoading, mode, state.areas]);
+    const dayOverride =
+      cachedDayLayout === null || cachedDayLayout === undefined ? null : cachedDayLayout;
+    const resolved = resolveFloorLayoutForDate({
+      area: activeArea,
+      tablesInArea: state.tables.filter((t) => t.areaId === areaId),
+      dayOverride: dayOverride ?? null,
+    });
+    setGridColumns(resolved.floorGridColumns);
+    setGridRows(resolved.floorGridRows);
+    setNodeSpacing(clampFloorNodeSpacing(resolved.floorNodeSpacing));
+  }, [activeArea, areaId, cachedDayLayout, isLoading, mode, state.tables]);
 
   useEffect(() => {
     setFloorLayoutRealtimeReloadBlocked(mode === "edit");
@@ -1215,40 +1399,81 @@ export default function FloorMapPage() {
     }
 
     const area = state.areas.find((a) => a.id === areaId);
-    const positions: Record<string, { x: number; y: number }> = {};
-    for (const t of state.tables.filter((x) => x.areaId === areaId)) {
-      positions[t.id] = { x: t.positionX, y: t.positionY };
-    }
+    const tablesInAreaDraft = state.tables.filter((x) => x.areaId === areaId);
+    const dayOverride =
+      cachedDayLayout && cachedDayLayout !== undefined ? cachedDayLayout : null;
+    const resolved = resolveFloorLayoutForDate({
+      area: area ?? {
+        id: areaId,
+        branchId: "",
+        name: "",
+        capacity: 0,
+        floorGridColumns: DEFAULT_GRID_COLUMNS,
+        floorGridRows: DEFAULT_GRID_ROWS,
+        floorNodeSpacing: FLOOR_DEFAULT_NODE_SPACING_PX,
+      },
+      tablesInArea: tablesInAreaDraft,
+      dayOverride,
+    });
     setEditLayout({
-      gridColumns: area?.floorGridColumns ?? DEFAULT_GRID_COLUMNS,
-      gridRows: area?.floorGridRows ?? DEFAULT_GRID_ROWS,
-      nodeSpacing: clampFloorNodeSpacing(area?.floorNodeSpacing ?? FLOOR_DEFAULT_NODE_SPACING_PX),
-      positions,
+      gridColumns: resolved.floorGridColumns,
+      gridRows: resolved.floorGridRows,
+      nodeSpacing: resolved.floorNodeSpacing,
+      positions: { ...resolved.positions },
       pendingMergeAdds: [],
       pendingMergeRemoves: [],
     });
     // Draft snapshot only when entering edit; remote updates handled after save.
-  }, [mode, areaId, state.areas, state.tables, releaseFloorLayoutEditLock]);
+  }, [
+    cachedDayLayout,
+    mode,
+    areaId,
+    state.areas,
+    state.tables,
+    releaseFloorLayoutEditLock,
+  ]);
 
   useEffect(() => {
     if (!resyncEditLayoutAfterSaveRef.current || mode !== "edit" || !areaId) {
       return;
     }
     resyncEditLayoutAfterSaveRef.current = false;
-    const area = state.areas.find((a) => a.id === areaId);
-    const positions: Record<string, { x: number; y: number }> = {};
-    for (const t of state.tables.filter((x) => x.areaId === areaId)) {
-      positions[t.id] = { x: t.positionX, y: t.positionY };
-    }
-    setEditLayout({
-      gridColumns: area?.floorGridColumns ?? DEFAULT_GRID_COLUMNS,
-      gridRows: area?.floorGridRows ?? DEFAULT_GRID_ROWS,
-      nodeSpacing: clampFloorNodeSpacing(area?.floorNodeSpacing ?? FLOOR_DEFAULT_NODE_SPACING_PX),
-      positions,
-      pendingMergeAdds: [],
-      pendingMergeRemoves: [],
+    void refreshDayLayout().then(() => {
+      const area = state.areas.find((a) => a.id === areaId);
+      const tablesInAreaDraft = state.tables.filter((x) => x.areaId === areaId);
+      const key = floorLayoutDayKey(areaId, selectedLayoutDate);
+      const dayOverride = dayLayoutByKey[key] ?? null;
+      const resolved = resolveFloorLayoutForDate({
+        area: area ?? {
+          id: areaId,
+          branchId: "",
+          name: "",
+          capacity: 0,
+          floorGridColumns: DEFAULT_GRID_COLUMNS,
+          floorGridRows: DEFAULT_GRID_ROWS,
+          floorNodeSpacing: FLOOR_DEFAULT_NODE_SPACING_PX,
+        },
+        tablesInArea: tablesInAreaDraft,
+        dayOverride,
+      });
+      setEditLayout({
+        gridColumns: resolved.floorGridColumns,
+        gridRows: resolved.floorGridRows,
+        nodeSpacing: resolved.floorNodeSpacing,
+        positions: { ...resolved.positions },
+        pendingMergeAdds: [],
+        pendingMergeRemoves: [],
+      });
     });
-  }, [state.tables, state.areas, mode, areaId]);
+  }, [
+    areaId,
+    dayLayoutByKey,
+    mode,
+    refreshDayLayout,
+    selectedLayoutDate,
+    state.areas,
+    state.tables,
+  ]);
 
   useEffect(() => {
     if (!areaId || isLoading || isEditMode) {
@@ -1290,44 +1515,8 @@ export default function FloorMapPage() {
       }
       if (info.userId !== currentUser.id) {
         setLayoutLockHolderName(info.fullName);
-        // #region agent log
-        fetch("http://127.0.0.1:7775/ingest/6dbf37ec-2333-468e-bf97-62fad053dd9f", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "7f6736",
-          },
-          body: JSON.stringify({
-            sessionId: "7f6736",
-            runId: "pre-fix",
-            hypothesisId: "A",
-            location: "floor-map/page.tsx:syncLockInfo",
-            message: "syncLockInfo foreign lock before setMode",
-            data: { modeRef: modeRef.current, inRender: inRenderPhaseRef.current },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         setMode((m) => {
           if (m === "edit") {
-            // #region agent log
-            fetch("http://127.0.0.1:7775/ingest/6dbf37ec-2333-468e-bf97-62fad053dd9f", {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Debug-Session-Id": "7f6736",
-              },
-              body: JSON.stringify({
-                sessionId: "7f6736",
-                runId: "pre-fix",
-                hypothesisId: "A",
-                location: "floor-map/page.tsx:setMode-updater",
-                message: "setMode updater calling notifications.show",
-                data: { prevMode: m, inRender: inRenderPhaseRef.current },
-                timestamp: Date.now(),
-              }),
-            }).catch(() => {});
-            // #endregion
             notifications.show({
               color: "orange",
               message: `${info.fullName} đang chỉnh sửa sơ đồ. Chế độ của bạn chuyển sang xem.`,
@@ -1396,18 +1585,56 @@ export default function FloorMapPage() {
     [areaId, state.tables]
   );
 
-  const layoutTablesInArea = useMemo(() => {
-    if (!isEditMode || !editLayout) {
-      return tablesInArea;
+  const resolvedLayout = useMemo(() => {
+    if (!activeArea) {
+      return {
+        floorGridColumns: DEFAULT_GRID_COLUMNS,
+        floorGridRows: DEFAULT_GRID_ROWS,
+        floorNodeSpacing: FLOOR_DEFAULT_NODE_SPACING_PX,
+        positions: {} as Record<string, { x: number; y: number }>,
+        hasDayOverride: false,
+        sourceTemplateId: null,
+      };
     }
-    return tablesInArea.map((t) => {
-      const p = editLayout.positions[t.id];
-      if (!p) {
-        return t;
-      }
-      return { ...t, positionX: p.x, positionY: p.y };
+    const dayOverride =
+      cachedDayLayout && cachedDayLayout !== undefined ? cachedDayLayout : null;
+    return resolveFloorLayoutForDate({
+      area: activeArea,
+      tablesInArea,
+      dayOverride,
     });
-  }, [isEditMode, editLayout, tablesInArea]);
+  }, [activeArea, cachedDayLayout, tablesInArea]);
+
+  const currentLayoutSnapshot = useMemo(
+    () =>
+      resolvedLayoutToSnapshot(
+        isEditMode && editLayout
+          ? {
+              floorGridColumns: editLayout.gridColumns,
+              floorGridRows: editLayout.gridRows,
+              floorNodeSpacing: editLayout.nodeSpacing,
+              positions: editLayout.positions,
+              hasDayOverride: resolvedLayout.hasDayOverride,
+              sourceTemplateId: resolvedLayout.sourceTemplateId,
+            }
+          : resolvedLayout,
+        tablesInArea
+      ),
+    [editLayout, isEditMode, resolvedLayout, tablesInArea]
+  );
+
+  const layoutTablesInArea = useMemo(() => {
+    if (isEditMode && editLayout) {
+      return tablesInArea.map((t) => {
+        const p = editLayout.positions[t.id];
+        if (!p) {
+          return t;
+        }
+        return { ...t, positionX: p.x, positionY: p.y };
+      });
+    }
+    return applySnapshotToTablesInArea(tablesInArea, resolvedLayout.positions);
+  }, [isEditMode, editLayout, resolvedLayout.positions, tablesInArea]);
 
   const floorMapDisplayTables = useMemo(() => {
     const tableToMergeGroup = new Map<string, string>();
@@ -1475,6 +1702,11 @@ export default function FloorMapPage() {
     return map;
   }, [floorMapDayBookings, effectiveMergeGroups]);
 
+  const registerImmediateBlocked =
+    (registerMergeGroup
+      ? (mergeGroupStatusById.get(registerMergeGroup.id) ?? "available") === "occupied"
+      : registerTable?.status === "occupied") && registerArrivalMode === "immediate";
+
   const effectiveGridColumns =
     isEditMode && editLayout ? editLayout.gridColumns : gridColumns;
   const effectiveGridRows = isEditMode && editLayout ? editLayout.gridRows : gridRows;
@@ -1484,21 +1716,17 @@ export default function FloorMapPage() {
     if (!isEditMode || !editLayout || !areaId) {
       return false;
     }
-    const area = state.areas.find((a) => a.id === areaId);
-    if (!area) {
-      return false;
-    }
     if (
-      editLayout.gridColumns !== (area.floorGridColumns ?? DEFAULT_GRID_COLUMNS) ||
-      editLayout.gridRows !== (area.floorGridRows ?? DEFAULT_GRID_ROWS) ||
-      editLayout.nodeSpacing !==
-      clampFloorNodeSpacing(area.floorNodeSpacing ?? FLOOR_DEFAULT_NODE_SPACING_PX)
+      editLayout.gridColumns !== resolvedLayout.floorGridColumns ||
+      editLayout.gridRows !== resolvedLayout.floorGridRows ||
+      editLayout.nodeSpacing !== resolvedLayout.floorNodeSpacing
     ) {
       return true;
     }
     for (const t of tablesInArea) {
+      const baseline = resolvedLayout.positions[t.id];
       const p = editLayout.positions[t.id];
-      if (!p || p.x !== t.positionX || p.y !== t.positionY) {
+      if (!p || !baseline || p.x !== baseline.x || p.y !== baseline.y) {
         return true;
       }
     }
@@ -1506,7 +1734,7 @@ export default function FloorMapPage() {
       return true;
     }
     return false;
-  }, [isEditMode, editLayout, areaId, state.areas, tablesInArea]);
+  }, [isEditMode, editLayout, areaId, resolvedLayout, tablesInArea]);
 
   const visibleTables = useMemo(() => {
     if (isEditMode) {
@@ -1979,6 +2207,101 @@ export default function FloorMapPage() {
     });
   };
 
+  const handleSaveFloorLayoutAsGlobal = async () => {
+    if (!areaId || !editLayout || !isLayoutDirty) {
+      return;
+    }
+    setIsSavingLayout(true);
+    try {
+      const layoutInput = (() => {
+        const tablePositions = tablesInArea.map((t) => {
+          const p = editLayout.positions[t.id];
+          return {
+            tableId: t.id,
+            x: p?.x ?? t.positionX,
+            y: p?.y ?? t.positionY,
+          };
+        });
+        return {
+          floorGridColumns: editLayout.gridColumns,
+          floorGridRows: editLayout.gridRows,
+          floorNodeSpacing: editLayout.nodeSpacing,
+          tablePositions,
+        };
+      })();
+
+      // 1) Save global (default) layout: updates areas grid + tables positions.
+      await saveFloorLayout(areaId, layoutInput);
+
+      // 2) Keep current date consistent for the user.
+      // - If the existing per-day override was merge-managed, converting it via day-save keeps edits visible.
+      // - If it was a manual override, delete it so this date uses the newly saved global layout.
+      if (resolvedLayout.hasDayOverride) {
+        const mergeGroupId = cachedDayLayout?.mergeGroupId ?? null;
+        if (mergeGroupId) {
+          await saveFloorLayout(areaId, layoutInput, { layoutDate: selectedLayoutDate });
+        } else {
+          if (
+            typeof window !== "undefined" &&
+            !window.confirm(
+              `Lưu sơ đồ mặc định và xóa sơ đồ riêng cho ngày ${floorMapSelectedDate.format(
+                "DD/MM/YYYY"
+              )}?`
+            )
+          ) {
+            return;
+          }
+          await deleteAreaFloorLayoutForDate(areaId, selectedLayoutDate);
+          if (dayLayoutCacheKey) {
+            setCurrentDayLayoutCache(null);
+          }
+        }
+      }
+
+      // 3) Apply any pending merge membership changes (positions repack is disabled).
+      for (const remove of editLayout.pendingMergeRemoves) {
+        const result = await removeTableFromMergeGroup({
+          groupId: remove.groupId,
+          tableId: remove.tableId,
+          repackFloor: false,
+          layoutDate: selectedLayoutDate,
+        });
+        if (!result.ok) {
+          throw new Error(result.message);
+        }
+      }
+      for (const add of editLayout.pendingMergeAdds) {
+        const result = await addTableToMergeGroup({
+          groupId: add.groupId,
+          tableId: add.tableId,
+          repackFloor: false,
+          layoutDate: selectedLayoutDate,
+        });
+        if (!result.ok) {
+          throw new Error(result.message);
+        }
+      }
+
+      resyncEditLayoutAfterSaveRef.current = true;
+      const mergeChangeCount =
+        editLayout.pendingMergeAdds.length + editLayout.pendingMergeRemoves.length;
+      notifications.show({
+        color: "green",
+        message:
+          mergeChangeCount > 0
+            ? "Đã lưu sơ đồ mặc định và thay đổi bàn gộp."
+            : "Đã lưu sơ đồ mặc định.",
+      });
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Không thể lưu sơ đồ.",
+      });
+    } finally {
+      setIsSavingLayout(false);
+    }
+  };
+
   const handleSaveFloorLayout = async () => {
     if (!areaId || !editLayout || !isLayoutDirty) {
       return;
@@ -1993,18 +2316,28 @@ export default function FloorMapPage() {
           y: p?.y ?? t.positionY,
         };
       });
-      await saveFloorLayout(areaId, {
-        floorGridColumns: editLayout.gridColumns,
-        floorGridRows: editLayout.gridRows,
-        floorNodeSpacing: editLayout.nodeSpacing,
-        tablePositions,
-      });
+      const savedDay = await saveFloorLayout(
+        areaId,
+        {
+          floorGridColumns: editLayout.gridColumns,
+          floorGridRows: editLayout.gridRows,
+          floorNodeSpacing: editLayout.nodeSpacing,
+          tablePositions,
+        },
+        { layoutDate: selectedLayoutDate }
+      );
+      if (savedDay && dayLayoutCacheKey) {
+        setCurrentDayLayoutCache(savedDay);
+      } else {
+        await refreshDayLayout();
+      }
 
       for (const remove of editLayout.pendingMergeRemoves) {
         const result = await removeTableFromMergeGroup({
           groupId: remove.groupId,
           tableId: remove.tableId,
           repackFloor: false,
+          layoutDate: selectedLayoutDate,
         });
         if (!result.ok) {
           throw new Error(result.message);
@@ -2015,6 +2348,7 @@ export default function FloorMapPage() {
           groupId: add.groupId,
           tableId: add.tableId,
           repackFloor: false,
+          layoutDate: selectedLayoutDate,
         });
         if (!result.ok) {
           throw new Error(result.message);
@@ -2028,8 +2362,8 @@ export default function FloorMapPage() {
         color: "green",
         message:
           mergeChangeCount > 0
-            ? "Đã lưu sơ đồ và thay đổi bàn gộp xuống máy chủ."
-            : "Đã lưu sơ đồ xuống máy chủ.",
+            ? `Đã lưu sơ đồ cho ngày ${floorMapSelectedDate.format("DD/MM/YYYY")} và thay đổi bàn gộp.`
+            : `Đã lưu sơ đồ cho ngày ${floorMapSelectedDate.format("DD/MM/YYYY")}.`,
       });
     } catch (error) {
       notifications.show({
@@ -2074,6 +2408,7 @@ export default function FloorMapPage() {
     setRegisterPendingSelected([]);
     setRegisterArrivalMode("immediate");
     setRegisterModalTab("book");
+    setRegisterVoiceFields(emptyRegisterVoiceFields());
   }, []);
 
   const openAssignPendingForTable = (table: DiningTable) => {
@@ -2150,6 +2485,10 @@ export default function FloorMapPage() {
     setRegisterCustomerPhone("");
     setRegisterPendingSelected([]);
     setRegisterModalTab("book");
+    setRegisterVoiceFields({
+      ...emptyRegisterVoiceFields(),
+      guestCount: Math.max(1, getMergeGroupEffectiveGuestCapacity(group.totalCapacity)),
+    });
 
     const status = mergeGroupStatusById.get(group.id) ?? "available";
     const preferHold =
@@ -2176,13 +2515,24 @@ export default function FloorMapPage() {
     setDetailMergeGroup(null);
     setRegisterMergeGroup(null);
     setRegisterTable(table);
-    setRegisterGuestCount(Math.max(1, table.seats || 1));
+    const tableMaxGuests = getTableEffectiveGuestCapacity(table.seats);
+    const defaultGuestCount =
+      tableMaxGuests > 0
+        ? Math.min(Math.max(1, table.seats || 1), tableMaxGuests)
+        : Math.max(1, table.seats || 1);
+    setRegisterGuestCount(defaultGuestCount);
     setRegisterNote("");
     setRegisterGuestType("Khách thường");
     setRegisterCustomerName("");
     setRegisterCustomerPhone("");
     setRegisterPendingSelected([]);
     setRegisterModalTab("book");
+    setRegisterVoiceFields({
+      ...emptyRegisterVoiceFields(),
+      guestCount: defaultGuestCount,
+      areaId: table.areaId,
+      tableId: table.id,
+    });
 
     const preferHold =
       options?.preferHoldAfterOccupied && (table.status === "occupied" || table.status === "hold");
@@ -2314,14 +2664,16 @@ export default function FloorMapPage() {
 
   const handleRegisterCustomer = async () => {
     const registerTarget = registerMergeGroup ?? registerTable;
-    if (!registerTarget || !registerCustomerName.trim()) {
+    const { customerName, customerPhone, guestCount, bookingAt, note, guestType } =
+      registerVoiceFields;
+    if (!registerTarget || !customerName.trim()) {
       notifications.show({
         color: "red",
         message: "Vui lòng nhập tên khách.",
       });
       return;
     }
-    const normalizedRegisterPhone = normalizeVietnamPhone(registerCustomerPhone.trim());
+    const normalizedRegisterPhone = normalizeVietnamPhone(customerPhone.trim());
     if (normalizedRegisterPhone && !isPlausibleVietnamPhone(normalizedRegisterPhone)) {
       notifications.show({
         color: "red",
@@ -2330,7 +2682,7 @@ export default function FloorMapPage() {
       });
       return;
     }
-    const nextGuestCount = Math.max(1, Number(registerGuestCount || 1));
+    const nextGuestCount = Math.max(1, Number(guestCount ?? registerGuestCount ?? 1));
     if (registerMergeGroup) {
       const maxGuests = getMergeGroupEffectiveGuestCapacity(registerMergeGroup.totalCapacity);
       if (nextGuestCount > maxGuests) {
@@ -2350,7 +2702,7 @@ export default function FloorMapPage() {
       });
       return;
     }
-    if (registerArrivalMode === "hold" && (!registerBookingDate || !registerBookingTime)) {
+    if (registerArrivalMode === "hold" && !bookingAt) {
       notifications.show({
         color: "red",
         message: "Vui lòng chọn ngày và giờ đến khi chọn Giữ chỗ.",
@@ -2408,20 +2760,13 @@ export default function FloorMapPage() {
     if (registerArrivalMode === "immediate") {
       bookingAtIso = dayjs().toISOString();
     } else {
-      const [hour, minute] = registerBookingTime.split(":").map((value) => Number(value) || 0);
       const now = dayjs();
-      let bookingAt = dayjs(registerBookingDate!, "YYYY-MM-DD")
-        .hour(hour)
-        .minute(minute)
-        .second(0)
-        .millisecond(0);
+      let holdAt = dayjs(bookingAt!);
 
-      // If the user picked "Giữ chỗ" within the current minute, the seconds=0
-      // timestamp may fall slightly in the past (and would be marked as "Đã ngồi").
-      // So: if it is the same minute, bump by 1 second; otherwise require a future time.
-      if (!bookingAt.isAfter(now)) {
-        if (bookingAt.isSame(now, "minute")) {
-          bookingAt = now.add(1, "second");
+      // Giữ chỗ must be strictly in the future so it is not auto-seated as Ngồi ngay.
+      if (!holdAt.isAfter(now)) {
+        if (holdAt.isSame(now, "minute")) {
+          holdAt = now.add(1, "minute");
         } else {
           notifications.show({
             color: "red",
@@ -2431,11 +2776,12 @@ export default function FloorMapPage() {
         }
       }
 
-      bookingAtIso = bookingAt.toISOString();
+      bookingAtIso = holdAt.toISOString();
     }
+    const arrivalIntent = registerArrivalMode === "immediate" ? "immediate" : "hold";
     const runCreate = async (allowDuplicate?: boolean) => {
       const result = await createBooking({
-        customerName: formatVietnamesePersonName(registerCustomerName.trim()),
+        customerName: formatVietnamesePersonName(customerName.trim()),
         customerPhone: normalizedRegisterPhone || undefined,
         branchId: registerTarget.branchId,
         areaId: registerTarget.areaId,
@@ -2443,8 +2789,9 @@ export default function FloorMapPage() {
         mergeGroupId: registerMergeGroup?.id ?? null,
         guestCount: nextGuestCount,
         bookingAt: bookingAtIso,
-        note: registerNote.trim() || undefined,
-        guestType: registerGuestType,
+        note: note.trim() || undefined,
+        guestType,
+        arrivalIntent,
         allowDuplicate,
       });
       if (!result.ok && result.code === DUPLICATE_BOOKING_CODE && result.duplicates?.length) {
@@ -2605,9 +2952,11 @@ export default function FloorMapPage() {
       notifications.show({ color: "red", message: "Vui lòng chọn ngày bắt đầu và ngày kết thúc." });
       return;
     }
+    const startDate = formatMergeGroupDate(mergeStartDate);
+    const endDate = formatMergeGroupDate(mergeEndDate);
     const dateCheck = validateMergeGroupDateRange({
-      startDate: mergeStartDate,
-      endDate: mergeEndDate,
+      startDate,
+      endDate,
     });
     if (!dateCheck.ok) {
       notifications.show({ color: "red", message: dateCheck.message });
@@ -2619,8 +2968,9 @@ export default function FloorMapPage() {
         branchId: activeAreaBranchId,
         areaId,
         tableIds: uniqueIds,
-        startDate: mergeStartDate,
-        endDate: mergeEndDate,
+        startDate,
+        endDate,
+        layoutDate: selectedLayoutDate,
       });
       notifications.show({
         color: result.ok ? "green" : "red",
@@ -2630,9 +2980,54 @@ export default function FloorMapPage() {
         setMergeModalOpen(false);
         setMergeSelectedTableIds([]);
         setEditSelectedTableIds([]);
+        const dayRow =
+          result.dayLayout !== undefined
+            ? result.dayLayout
+            : await refreshDayLayout();
+        if (result.dayLayout !== undefined) {
+          setCurrentDayLayoutCache(result.dayLayout);
+        }
+        if (result.groupId) {
+          setOpenedMergeGroupId(result.groupId);
+        }
+        if (isEditMode) {
+          syncEditLayoutFromDayOverride(dayRow);
+        }
       }
     } finally {
       setMergeSaving(false);
+    }
+  };
+
+  const handleClearDayLayout = async () => {
+    if (!areaId || !hasSupabase) {
+      return;
+    }
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Xóa sơ đồ riêng cho ngày ${floorMapSelectedDate.format("DD/MM/YYYY")} và dùng lại sơ đồ mặc định chung?`
+      )
+    ) {
+      return;
+    }
+    setClearingDayLayout(true);
+    try {
+      await deleteAreaFloorLayoutForDate(areaId, selectedLayoutDate);
+      if (dayLayoutCacheKey) {
+        setCurrentDayLayoutCache(null);
+      }
+      notifications.show({
+        color: "green",
+        message: "Đã xóa sơ đồ riêng — đang dùng sơ đồ mặc định chung.",
+      });
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Không xóa được sơ đồ riêng.",
+      });
+    } finally {
+      setClearingDayLayout(false);
     }
   };
 
@@ -2657,6 +3052,7 @@ export default function FloorMapPage() {
         if (detailMergeGroup?.id === groupId) {
           closeDetailModal();
         }
+        await refreshDayLayout();
       }
     } finally {
       setMergeSaving(false);
@@ -2954,8 +3350,80 @@ export default function FloorMapPage() {
     });
   };
 
+  const canvasInputBlockRef = useRef(false);
+  canvasInputBlockRef.current = !isEditMode && blockCanvasForOverlay;
+  const scaleLatestRef = useRef(scale);
+  scaleLatestRef.current = scale;
+  const zoomAtRef = useRef(zoomAt);
+  zoomAtRef.current = zoomAt;
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      if (canvasInputBlockRef.current) {
+        return;
+      }
+      event.preventDefault();
+      const delta = event.deltaY > 0 ? -SCALE_STEP : SCALE_STEP;
+      zoomAtRef.current(scaleLatestRef.current + delta, event.clientX, event.clientY);
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      if (canvasInputBlockRef.current) {
+        return;
+      }
+      if (event.touches.length !== 2) {
+        pinchRef.current = null;
+        return;
+      }
+      event.preventDefault();
+      const [first, second] = Array.from(event.touches);
+      const dx = second.clientX - first.clientX;
+      const dy = second.clientY - first.clientY;
+      const distance = Math.hypot(dx, dy);
+      const centerX = (first.clientX + second.clientX) / 2;
+      const centerY = (first.clientY + second.clientY) / 2;
+      if (!pinchRef.current) {
+        pinchRef.current = { distance, centerX, centerY, scale: scaleLatestRef.current };
+        return;
+      }
+      const factor = distance - pinchRef.current.distance;
+      zoomAtRef.current(
+        pinchRef.current.scale + factor * TOUCH_PINCH_FACTOR,
+        centerX,
+        centerY
+      );
+    };
+
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    viewport.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => {
+      viewport.removeEventListener("wheel", onWheel);
+      viewport.removeEventListener("touchmove", onTouchMove);
+    };
+  }, [areaId, mode]);
+
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!isEditMode && blockCanvasForOverlay) {
+      return;
+    }
+    const tablePick = tablePickGestureRef.current;
+    if (tablePick && event.pointerId === tablePick.pointerId) {
+      const dist = Math.hypot(
+        event.clientX - tablePick.startX,
+        event.clientY - tablePick.startY
+      );
+      if (dist > PALETTE_DRAG_THRESHOLD_PX) {
+        const pickedTable = layoutTablesInArea.find((t) => t.id === tablePick.tableId);
+        tablePickGestureRef.current = null;
+        if (pickedTable) {
+          startTableDrag(event, pickedTable);
+        }
+      }
       return;
     }
     const placementTap = placementTapRef.current;
@@ -3060,6 +3528,21 @@ export default function FloorMapPage() {
       void commitDrop(dragState.tableId, dragState.row, dragState.col);
       return;
     }
+    const tablePick = tablePickGestureRef.current;
+    if (tablePick && event.pointerId === tablePick.pointerId) {
+      tablePickGestureRef.current = null;
+      const dist = Math.hypot(
+        event.clientX - tablePick.startX,
+        event.clientY - tablePick.startY
+      );
+      if (dist <= PALETTE_DRAG_THRESHOLD_PX) {
+        const pickedTable = layoutTablesInArea.find((t) => t.id === tablePick.tableId);
+        if (pickedTable) {
+          toggleEditMergeTableSelection(pickedTable.id, pickedTable.name);
+        }
+      }
+      return;
+    }
     if (panStateRef.current && event.pointerId === panStateRef.current.pointerId) {
       panStateRef.current = null;
     }
@@ -3106,6 +3589,7 @@ export default function FloorMapPage() {
     panStateRef.current = null;
     placementTapRef.current = null;
     paletteGestureRef.current = null;
+    tablePickGestureRef.current = null;
     setDragState(null);
     setMergeGroupDragState(null);
   };
@@ -3132,7 +3616,9 @@ export default function FloorMapPage() {
     if (memberIds.length === 0) {
       return;
     }
-    event.preventDefault();
+    if (event.pointerType !== "touch") {
+      event.preventDefault();
+    }
     event.stopPropagation();
     const viewport = viewportRef.current;
     if (!viewport) {
@@ -3162,7 +3648,7 @@ export default function FloorMapPage() {
     setDragState(null);
   };
 
-  const handleTablePointerDown = (
+  const startTableDrag = (
     event: React.PointerEvent<HTMLDivElement>,
     table: DiningTable
   ) => {
@@ -3178,7 +3664,10 @@ export default function FloorMapPage() {
     if (event.button !== 0) {
       return;
     }
-    event.preventDefault();
+    tablePickGestureRef.current = null;
+    if (event.pointerType !== "touch") {
+      event.preventDefault();
+    }
     event.stopPropagation();
     const viewport = viewportRef.current;
     if (!viewport) {
@@ -3192,6 +3681,19 @@ export default function FloorMapPage() {
       row: clamp(base.row, 0, effectiveGridRows - 1),
       col: clamp(base.col, 0, effectiveGridColumns - 1),
     });
+  };
+
+  const toggleEditMergeTableSelection = (tableId: string, tableName: string) => {
+    if (allActiveMergedTableIds.has(tableId)) {
+      notifications.show({
+        color: "yellow",
+        message: `${tableName} đã thuộc một cụm gộp khác.`,
+      });
+      return;
+    }
+    setEditSelectedTableIds((prev) =>
+      prev.includes(tableId) ? prev.filter((id) => id !== tableId) : [...prev, tableId]
+    );
   };
 
   const handlePalettePointerDown = (
@@ -3259,65 +3761,11 @@ export default function FloorMapPage() {
     paletteGestureRef.current = null;
     const dist = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
     if (dist <= PALETTE_DRAG_THRESHOLD_PX) {
-      // #region agent log
-      fetch("http://127.0.0.1:7775/ingest/6dbf37ec-2333-468e-bf97-62fad053dd9f", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "7f6736",
-        },
-        body: JSON.stringify({
-          sessionId: "7f6736",
-          runId: "pre-fix",
-          hypothesisId: "B",
-          location: "floor-map/page.tsx:handlePalettePointerUp",
-          message: "palette tap before setPendingPlacementTableId",
-          data: { tableId: table.id, inRender: inRenderPhaseRef.current },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setPendingPlacementTableId((current) => {
         if (current === table.id) {
-          // #region agent log
-          fetch("http://127.0.0.1:7775/ingest/6dbf37ec-2333-468e-bf97-62fad053dd9f", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Debug-Session-Id": "7f6736",
-            },
-            body: JSON.stringify({
-              sessionId: "7f6736",
-              runId: "pre-fix",
-              hypothesisId: "B",
-              location: "floor-map/page.tsx:setPendingPlacement-updater",
-              message: "setPendingPlacement updater calling notifications.show (deselect)",
-              data: { current, inRender: inRenderPhaseRef.current },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
           notifications.show({ color: "blue", message: "Đã bỏ chọn đặt bàn." });
           return null;
         }
-        // #region agent log
-        fetch("http://127.0.0.1:7775/ingest/6dbf37ec-2333-468e-bf97-62fad053dd9f", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Debug-Session-Id": "7f6736",
-          },
-          body: JSON.stringify({
-            sessionId: "7f6736",
-            runId: "pre-fix",
-            hypothesisId: "B",
-            location: "floor-map/page.tsx:setPendingPlacement-updater",
-            message: "setPendingPlacement updater calling notifications.show (select)",
-            data: { current, nextId: table.id, inRender: inRenderPhaseRef.current },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
-        // #endregion
         notifications.show({
           color: "blue",
           message: "Chạm vào ô trên sơ đồ để đặt bàn (hoặc kéo từ kho như trước).",
@@ -3341,38 +3789,6 @@ export default function FloorMapPage() {
     }
   };
 
-  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    if (!isEditMode && blockCanvasForOverlay) {
-      return;
-    }
-    event.preventDefault();
-    const delta = event.deltaY > 0 ? -SCALE_STEP : SCALE_STEP;
-    zoomAt(scale + delta, event.clientX, event.clientY);
-  };
-
-  const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
-    if (!isEditMode && blockCanvasForOverlay) {
-      return;
-    }
-    if (event.touches.length !== 2) {
-      pinchRef.current = null;
-      return;
-    }
-    event.preventDefault();
-    const [first, second] = Array.from(event.touches);
-    const dx = second.clientX - first.clientX;
-    const dy = second.clientY - first.clientY;
-    const distance = Math.hypot(dx, dy);
-    const centerX = (first.clientX + second.clientX) / 2;
-    const centerY = (first.clientY + second.clientY) / 2;
-    if (!pinchRef.current) {
-      pinchRef.current = { distance, centerX, centerY, scale };
-      return;
-    }
-    const factor = distance - pinchRef.current.distance;
-    zoomAt(pinchRef.current.scale + factor * TOUCH_PINCH_FACTOR, centerX, centerY);
-  };
-
   return (
     <Stack
       className={classes.pageRoot}
@@ -3389,7 +3805,7 @@ export default function FloorMapPage() {
             {isEmployee
               ? "Chạm bàn Đã ngồi để mở chi tiết, rồi bấm Hoàn thành khi khách ra về. Kéo nền để xem sơ đồ, cuộn/chụm để zoom."
               : isEditMode
-                ? "Chỉnh sơ đồ trên lưới, rồi bấm Lưu sơ đồ để ghi xuống máy chủ — người khác sẽ thấy ngay sau khi lưu. Cuộn/chụm để zoom."
+                ? `Chỉnh sơ đồ cho ngày ${floorMapSelectedDate.format("DD/MM/YYYY")}, rồi bấm Lưu sơ đồ — chỉ áp dụng cho ngày này. Cuộn/chụm để zoom.`
                 : "Chạm bàn để đổi trạng thái. Kéo nền để xem sơ đồ, cuộn/chụm để zoom."}
           </Text>
         </div>
@@ -3442,6 +3858,7 @@ export default function FloorMapPage() {
                 showDayListButton={false}
                 selectedDate={floorMapSelectedDate}
                 onSelectedDateChange={setFloorMapSelectedDate}
+                onDayBookingRowClick={(booking) => setDayListDetailBooking(booking)}
               />
             </Accordion.Panel>
           </Accordion.Item>
@@ -3461,8 +3878,6 @@ export default function FloorMapPage() {
             onPointerUp={handleViewportPointerUp}
             onPointerCancel={handleViewportPointerUp}
             onLostPointerCapture={handleViewportLostPointerCapture}
-            onWheel={handleWheel}
-            onTouchMove={handleTouchMove}
           >
             <div
               className={classes.canvasContent}
@@ -3747,22 +4162,22 @@ export default function FloorMapPage() {
                         // Shift-click toggles a merge-pick selection without starting a drag.
                         if (event.shiftKey) {
                           event.stopPropagation();
-                          event.preventDefault();
-                          if (allActiveMergedTableIds.has(table.id)) {
-                            notifications.show({
-                              color: "yellow",
-                              message: `${table.name} đã thuộc một cụm gộp khác.`,
-                            });
-                            return;
+                          if (event.pointerType !== "touch") {
+                            event.preventDefault();
                           }
-                          setEditSelectedTableIds((prev) =>
-                            prev.includes(table.id)
-                              ? prev.filter((id) => id !== table.id)
-                              : [...prev, table.id]
-                          );
+                          toggleEditMergeTableSelection(table.id, table.name);
                           return;
                         }
-                        handleTablePointerDown(event, table);
+                        event.stopPropagation();
+                        tablePickGestureRef.current = {
+                          pointerId: event.pointerId,
+                          startX: event.clientX,
+                          startY: event.clientY,
+                          tableId: table.id,
+                        };
+                        if (event.pointerType === "mouse") {
+                          startTableDrag(event, table);
+                        }
                       }}
                     >
                       {!isMergeMember ? (
@@ -3976,15 +4391,29 @@ export default function FloorMapPage() {
                 ) : null}
 
                 {isEditMode ? (
-                  <Button
-                    size="sm"
-                    leftSection={<Save size={16} />}
-                    loading={isSavingLayout}
-                    disabled={!editLayout || !isLayoutDirty}
-                    onClick={() => void handleSaveFloorLayout()}
-                  >
-                    Lưu sơ đồ
-                  </Button>
+                  <div className={classes.toolbarSaveRow}>
+                    <Button
+                      size="sm"
+                      leftSection={<Save size={16} />}
+                      loading={isSavingLayout}
+                      disabled={!editLayout || !isLayoutDirty}
+                      onClick={() => void handleSaveFloorLayout()}
+                      className={classes.toolbarSaveBtn}
+                    >
+                      Lưu sơ đồ ({floorMapSelectedDate.format("DD/MM")})
+                    </Button>
+                    <Button
+                      size="sm"
+                      leftSection={<Save size={16} />}
+                      variant="light"
+                      loading={isSavingLayout}
+                      disabled={!editLayout || !isLayoutDirty}
+                      onClick={() => void handleSaveFloorLayoutAsGlobal()}
+                      className={classes.toolbarSaveBtn}
+                    >
+                      Lưu sơ đồ mặc định
+                    </Button>
+                  </div>
                 ) : null}
 
                 {!isEmployee ? (
@@ -4103,7 +4532,7 @@ export default function FloorMapPage() {
                           className={classes.toolbarDayListBtn}
                           onClick={() => setCreateBookingModalOpened(true)}
                         >
-                          Tạo mới
+                          Tạo booking
                         </Button>
                         <Button
                           size={isCompact ? "sm" : "compact-sm"}
@@ -4146,6 +4575,32 @@ export default function FloorMapPage() {
                         >
                           Danh sách bàn gộp
                         </Button>
+                        {isEditMode ? (
+                          <>
+                            <Button
+                              size={isCompact ? "sm" : "compact-sm"}
+                              variant="default"
+                              className={classes.toolbarDayListBtn}
+                              onClick={() => setLayoutTemplatesOpen(true)}
+                              disabled={!areaId || !hasSupabase}
+                            >
+                              Mẫu sơ đồ…
+                            </Button>
+                            {resolvedLayout.hasDayOverride ? (
+                              <Button
+                                size={isCompact ? "sm" : "compact-sm"}
+                                variant="subtle"
+                                color="gray"
+                                className={classes.toolbarDayListBtn}
+                                loading={clearingDayLayout}
+                                onClick={() => void handleClearDayLayout()}
+                                disabled={!areaId || !hasSupabase}
+                              >
+                                Xóa sơ đồ riêng
+                              </Button>
+                            ) : null}
+                          </>
+                        ) : null}
                       </Group>
                     </div>
                   ) : null}
@@ -4349,102 +4804,29 @@ export default function FloorMapPage() {
 
               <Tabs.Panel value="book" pt="sm">
                 <Stack gap="sm">
-                  {registerMergeGroup ? null : registerTableBranch ? (
-                    <Group justify="flex-start">
-                      <VoiceBookingAssistant
-                        branch={registerTableBranch}
-                        areas={registerVoiceAreas}
-                        tables={registerVoiceTables}
-                        onCreateBooking={async (input) => {
-                          if (!registerTable) {
-                            return { ok: false, message: "Không có bàn được chọn." };
-                          }
-                          const bookingAtIso = dayjs(input.bookingAt).toISOString();
-                          const candidate: Booking = {
-                            id: "__floor_voice__",
-                            customerId: "",
-                            branchId: registerTable.branchId,
-                            areaId: registerTable.areaId,
-                            tableId: registerTable.id,
-                            guestCount:
-                              typeof input.guestCount === "number" && Number.isFinite(input.guestCount)
-                                ? Math.max(1, Math.round(input.guestCount))
-                                : 1,
-                            bookingAt: bookingAtIso,
-                            startTime: bookingAtIso,
-                            endTime: dayjs(bookingAtIso)
-                              .add(
-                                state.bookingRuntimeSettings.standardTurnaroundMinutes,
-                                "minute"
-                              )
-                              .toISOString(),
-                            status: "confirmed",
-                            createdByUserId: "",
-                          };
-                          const conflicts = findAssignableSlotConflictsAtTable(
-                            candidate,
-                            registerTable.id,
-                            state.bookings
-                          );
-                          if (conflicts.length > 0) {
-                            const conflictCustomer = state.customers.find(
-                              (item) => item.id === conflicts[0]?.customerId
-                            )?.fullName;
-                            return {
-                              ok: false,
-                              message:
-                                formatTableSlotConflictMessage(conflicts, {
-                                  tableName: registerTable.name,
-                                  customerName: conflictCustomer,
-                                }) ?? "Khung giờ trùng với booking khác trên bàn này.",
-                            };
-                          }
-                          if (
-                            registerTable.status === "occupied" &&
-                            dayjs(bookingAtIso).isBefore(dayjs().add(1, "minute"))
-                          ) {
-                            return {
-                              ok: false,
-                              message:
-                                "Bàn đang có khách — chọn khung giờ sau khi bàn trống.",
-                            };
-                          }
-                          const result = await createBooking({
-                            ...input,
-                            branchId: registerTable.branchId,
-                            areaId: registerTable.areaId,
-                            tableId: registerTable.id,
-                          });
-                          if (result.ok) {
-                            closeRegistrationPanel();
-                          }
-                          return result;
-                        }}
-                      />
-                    </Group>
+                  {registerFormBranch ? (
+                    <VoiceBookingAssistant
+                      key={`${registerTable?.id ?? registerMergeGroup?.id ?? "reg"}-${registerModalTab}`}
+                      embedded
+                      hideSubmitButton
+                      disabled={registerSaving}
+                      branch={registerFormBranch}
+                      areas={registerVoiceAreas}
+                      tables={registerVoiceTables}
+                      arrivalMode={registerArrivalMode}
+                      onArrivalModeChange={setRegisterArrivalMode}
+                      showArrivalModeRadios
+                      immediateModeDisabled={registerImmediateBlocked}
+                      lockTableId={registerMergeGroup ? null : registerTable?.id ?? null}
+                      lockAreaId={registerMergeGroup ? null : registerTable?.areaId ?? null}
+                      hideAreaTablePickers={Boolean(registerTable || registerMergeGroup)}
+                      initialBookingAt={registerDefaultBookingAt}
+                      maxGuestCount={registerMaxGuestCount}
+                      guestCountDescription={registerGuestCountDescription}
+                      onFieldsChange={setRegisterVoiceFields}
+                      onCreateBooking={async () => ({ ok: false, message: "Dùng nút Tạo booking." })}
+                    />
                   ) : null}
-                  <Radio.Group
-                    label="Đặt bàn"
-                    value={registerArrivalMode}
-                    disabled={registerSaving}
-                    onChange={(value) =>
-                      setRegisterArrivalMode(value === "hold" ? "hold" : "immediate")
-                    }
-                  >
-                    <Stack gap={6} mt={4}>
-                      <Radio value="hold" label="Giữ chỗ" />
-                      <Radio
-                        value="immediate"
-                        label="Vào bàn ngay"
-                        disabled={
-                          registerMergeGroup
-                            ? (mergeGroupStatusById.get(registerMergeGroup.id) ?? "available") ===
-                              "occupied"
-                            : registerTable!.status === "occupied"
-                        }
-                      />
-                    </Stack>
-                  </Radio.Group>
                   {registerMergeGroup ? (
                     (mergeGroupStatusById.get(registerMergeGroup.id) ?? "available") ===
                     "occupied" ? (
@@ -4453,7 +4835,7 @@ export default function FloorMapPage() {
                         tại.
                       </Text>
                     ) : null
-                  ) : registerTable!.status === "occupied" ? (
+                  ) : registerTable?.status === "occupied" ? (
                     <Text size="xs" c="dimmed">
                       Bàn đang có khách — chỉ đặt thêm booking ở khung giờ không trùng lịch hiện tại.
                     </Text>
@@ -4463,80 +4845,6 @@ export default function FloorMapPage() {
                       {registerTableConflictMessage}
                     </Alert>
                   ) : null}
-                  {registerArrivalMode === "hold" ? (
-                    <Flex
-                      direction={{ base: "column", sm: "row" }}
-                      gap="sm"
-                      align={{ base: "stretch", sm: "flex-end" }}
-                    >
-                      <DatePickerInput
-                        style={{ flex: "1 1 0", minWidth: 0 }}
-                        label="Ngày đến"
-                        value={registerBookingDate}
-                        onChange={setRegisterBookingDate}
-                        valueFormat="YYYY-MM-DD"
-                        disabled={registerSaving}
-                      />
-                      <TimeInput
-                        style={{ flex: "1 1 0", minWidth: 0 }}
-                        label="Giờ đến"
-                        value={registerBookingTime}
-                        onChange={(event) => setRegisterBookingTime(event.currentTarget.value)}
-                        withSeconds={false}
-                        disabled={registerSaving}
-                      />
-                    </Flex>
-                  ) : null}
-                  <TextInput
-                    label="Tên khách"
-                    placeholder="Họ và tên"
-                    value={registerCustomerName}
-                    onChange={(event) => setRegisterCustomerName(event.currentTarget.value)}
-                    onBlur={() =>
-                      setRegisterCustomerName((value) => formatVietnamesePersonName(value))
-                    }
-                    disabled={registerSaving}
-                  />
-                  <TextInput
-                    label="Số điện thoại"
-                    placeholder="09… (tùy chọn)"
-                    inputMode="tel"
-                    value={registerCustomerPhone}
-                    onChange={(event) => setRegisterCustomerPhone(event.currentTarget.value)}
-                    disabled={registerSaving}
-                  />
-                  <GuestCountNumberInput
-                    label="Số khách"
-                    required
-                    value={registerGuestCount}
-                    onChange={(value) => setRegisterGuestCount(value ?? 1)}
-                    max={
-                      registerMergeGroup
-                        ? getMergeGroupEffectiveGuestCapacity(registerMergeGroup.totalCapacity)
-                        : registerTable!.seats > 0
-                          ? getTableEffectiveGuestCapacity(registerTable!.seats)
-                          : undefined
-                    }
-                    disabled={registerSaving}
-                  />
-                  <Select
-                    label="Loại khách"
-                    placeholder="Chọn loại khách"
-                    data={BOOKING_GUEST_TYPE_OPTIONS.map((label) => ({ value: label, label }))}
-                    value={registerGuestType}
-                    onChange={setRegisterGuestType}
-                    allowDeselect={false}
-                    disabled={registerSaving}
-                  />
-                  <Textarea
-                    label="Ghi chú"
-                    placeholder="Tùy chọn"
-                    value={registerNote}
-                    onChange={(event) => setRegisterNote(event.currentTarget.value)}
-                    autosize
-                    minRows={2}
-                    disabled={registerSaving}
-                  />
                   <Group justify="flex-end" gap={8}>
                     <Button variant="default" disabled={registerSaving} onClick={closeRegistrationPanel}>
                       Hủy
@@ -4695,6 +5003,16 @@ export default function FloorMapPage() {
           onRequestRelease={(groupId) => {
             setReleaseMergeGroupId(groupId);
           }}
+          onRowSelect={(group) => {
+            const navDate = resolveMergeGroupNavigationDate(group, floorMapSelectedDate);
+            setFloorMapSelectedDate(dayjs(navDate));
+            if (group.areaId !== areaId) {
+              setActiveAreaId(group.areaId);
+            }
+            setDetailTable(null);
+            setDetailMergeGroup(null);
+            setMergeGroupsListModalOpen(false);
+          }}
         />
       </Modal>
 
@@ -4833,7 +5151,14 @@ export default function FloorMapPage() {
         onClose={() => setOpenedMergeGroupId(null)}
         onRequestRelease={(groupId) => setReleaseMergeGroupId(groupId)}
         onRequestRemoveMember={async (groupId, tableId) => {
-          const result = await removeTableFromMergeGroup({ groupId, tableId });
+          const result = await removeTableFromMergeGroup({
+            groupId,
+            tableId,
+            layoutDate: selectedLayoutDate,
+          });
+          if (result.ok) {
+            await refreshDayLayout();
+          }
           notifications.show({
             color: result.ok ? "green" : "red",
             message: result.message,
@@ -4863,6 +5188,21 @@ export default function FloorMapPage() {
             message: result.message,
           });
         }}
+      />
+
+      <FloorLayoutTemplatesModal
+        opened={layoutTemplatesOpen}
+        onClose={() => setLayoutTemplatesOpen(false)}
+        areaId={areaId}
+        layoutDate={selectedLayoutDate}
+        layoutDateLabel={floorMapSelectedDate.format("DD/MM/YYYY")}
+        hasDayOverride={resolvedLayout.hasDayOverride}
+        currentSnapshot={currentLayoutSnapshot}
+        listTemplates={listFloorLayoutTemplates}
+        createTemplate={createFloorLayoutTemplate}
+        deleteTemplate={deleteFloorLayoutTemplate}
+        applyTemplate={applyFloorLayoutTemplateToDate}
+        onApplied={() => void refreshDayLayout()}
       />
 
       <CreateBookingModal
@@ -4903,6 +5243,36 @@ export default function FloorMapPage() {
           </Group>
         </Stack>
       </Modal>
+
+      <BookingOrderDetailModal
+        booking={dayListDetailBooking}
+        opened={dayListDetailBooking != null}
+        onClose={() => setDayListDetailBooking(null)}
+        source="list"
+        isBookingRowBusy={isBookingRowBusy}
+        onEdit={(b) => {
+          setDayListDetailBooking(null);
+          openEditBookingModal(b);
+        }}
+        onChangeTable={(b) => {
+          setDayListDetailBooking(null);
+          setMgmtChangeTableBooking(b);
+        }}
+        onAssign={(b) => {
+          setDayListDetailBooking(null);
+          openAssignOptions(b);
+        }}
+        onCheckIn={(id) => void runCheckIn(id)}
+        onComplete={(b) => {
+          setDayListDetailBooking(null);
+          openCompleteBookingConfirm(b);
+        }}
+        onCancel={(b) => {
+          setDayListDetailBooking(null);
+          openCancelBookingConfirm(b);
+        }}
+      />
+      {bookingManagementModals}
     </Stack>
   );
 }

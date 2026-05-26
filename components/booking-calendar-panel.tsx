@@ -41,6 +41,7 @@ import { PortalPageTitle, PortalSectionCard, PortalStickyHeader } from "@/compon
 import { useAppContext } from "@/contexts/app-context";
 
 import { bookingStatusLabel } from "@/lib/display";
+import { bookingAreaTableSortKey } from "@/lib/booking-meta";
 
 import { type Booking, type BookingStatus } from "@/lib/types";
 
@@ -224,7 +225,14 @@ export const BookingCalendarPanel = forwardRef<
 
   );
 
-
+  const bookingAreaTableLookup = useMemo(
+    () => ({
+      areas: state.areas,
+      tables: state.tables,
+      mergeGroups: state.mergeGroups,
+    }),
+    [state.areas, state.mergeGroups, state.tables]
+  );
 
   const sortDayBookings = useCallback(
 
@@ -239,19 +247,7 @@ export const BookingCalendarPanel = forwardRef<
         }
 
         if (sortStatus.columnAccessor === "areaTable") {
-
-          if (!booking.areaId || !booking.tableId) {
-
-            return "Chờ xếp bàn";
-
-          }
-
-          const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
-
-          const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
-
-          return `${area} ${table}`;
-
+          return bookingAreaTableSortKey(booking, bookingAreaTableLookup);
         }
 
         if (sortStatus.columnAccessor === "status") {
@@ -284,7 +280,7 @@ export const BookingCalendarPanel = forwardRef<
 
     },
 
-    [state.areas, state.customers, state.tables]
+    [bookingAreaTableLookup, state.customers]
 
   );
 
@@ -296,11 +292,7 @@ export const BookingCalendarPanel = forwardRef<
 
       const customer = state.customers.find((item) => item.id === booking.customerId);
 
-      const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
-
-      const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
-
-      const location = booking.areaId && booking.tableId ? `${area} ${table}` : "Chờ xếp bàn";
+      const location = bookingAreaTableSortKey(booking, bookingAreaTableLookup);
 
       return [
 
@@ -326,7 +318,7 @@ export const BookingCalendarPanel = forwardRef<
 
     },
 
-    [state.areas, state.customers, state.tables]
+    [bookingAreaTableLookup, state.customers]
 
   );
 

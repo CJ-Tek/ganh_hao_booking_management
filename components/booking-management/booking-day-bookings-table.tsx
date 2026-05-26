@@ -9,9 +9,11 @@ import { bookingListRowStyle } from "@/lib/busy-row-style";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import {
   displayCustomerPhone,
+  formatBookingAreaTable,
   isGuestCountSpecified,
 } from "@/lib/booking-meta";
 import { type Booking, type BookingStatus } from "@/lib/types";
+import { useMemo } from "react";
 
 const DAY_LIST_BOOKING_PULSE_CYCLE_MS = 600;
 const DAY_LIST_BOOKING_PULSE_CYCLES = 2;
@@ -42,6 +44,15 @@ export function BookingDayBookingsTable(props: {
     focusBookingId = null,
   } = props;
   const { state } = useAppContext();
+
+  const bookingAreaTableLookup = useMemo(
+    () => ({
+      areas: state.areas,
+      tables: state.tables,
+      mergeGroups: state.mergeGroups,
+    }),
+    [state.areas, state.mergeGroups, state.tables]
+  );
 
   return (
     <PortalDataTable<Booking>
@@ -79,8 +90,6 @@ export function BookingDayBookingsTable(props: {
       }
       mobileCardRender={(booking) => {
         const customer = state.customers.find((item) => item.id === booking.customerId);
-        const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
-        const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
         return (
           <Card
             key={booking.id}
@@ -106,7 +115,9 @@ export function BookingDayBookingsTable(props: {
                 </Text>
               ) : null}
               <Text size="sm" c="dimmed">
-                {booking.areaId && booking.tableId ? `${area} · Bàn ${table}` : "Chờ xếp bàn"}
+                {formatBookingAreaTable(booking, bookingAreaTableLookup, {
+                  tableNamePrefix: true,
+                })}
               </Text>
               <Text size="xs" c="dimmed">
                 {isGuestCountSpecified(booking) ? `${booking.guestCount} khách` : "Chưa rõ số khách"}
@@ -155,14 +166,7 @@ export function BookingDayBookingsTable(props: {
           accessor: "areaTable",
           title: "Khu vực / Bàn",
           sortable: true,
-          render: (booking) => {
-            if (!booking.areaId || !booking.tableId) {
-              return "Chờ xếp bàn";
-            }
-            const area = state.areas.find((item) => item.id === booking.areaId);
-            const table = state.tables.find((item) => item.id === booking.tableId);
-            return `${area?.name ?? "—"} · ${table?.name ?? "—"}`;
-          },
+          render: (booking) => formatBookingAreaTable(booking, bookingAreaTableLookup),
         },
         {
           accessor: "guestCount",

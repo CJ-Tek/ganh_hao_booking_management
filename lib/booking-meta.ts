@@ -27,6 +27,44 @@ export function isImmediateBookingArrival(
   return !dayjs(bookingAtIso).isAfter(now);
 }
 
+export type BookingArrivalIntent = "hold" | "immediate";
+
+/** Whether create-booking should auto-seat (Ngồi ngay). Giữ chỗ never seats. */
+export function shouldAutoSeatOnCreate(
+  bookingAtIso: string,
+  arrivalIntent?: BookingArrivalIntent
+): boolean {
+  if (arrivalIntent === "hold") {
+    return false;
+  }
+  if (arrivalIntent === "immediate") {
+    return true;
+  }
+  return isImmediateBookingArrival(bookingAtIso);
+}
+
+/** Optimistic / post-create table status when a table is assigned at booking creation. */
+export function tableStatusForCreateBooking(
+  bookingAtIso: string,
+  arrivalIntent?: BookingArrivalIntent
+): Extract<TableStatus, "hold" | "occupied"> {
+  return shouldAutoSeatOnCreate(bookingAtIso, arrivalIntent) ? "occupied" : "hold";
+}
+
+/** After create, refresh table availability without seating (Giữ chỗ). */
+export function shouldRefreshTableHoldAfterCreate(
+  bookingAtIso: string,
+  arrivalIntent?: BookingArrivalIntent
+): boolean {
+  if (arrivalIntent === "hold") {
+    return true;
+  }
+  if (arrivalIntent === "immediate") {
+    return false;
+  }
+  return !isImmediateBookingArrival(bookingAtIso);
+}
+
 /** Nhãn loại khách — dùng trong form tạo booking và lọc màn hôm nay. */
 export const BOOKING_GUEST_TYPE_OPTIONS = [
   "Khách thường",
@@ -270,16 +308,66 @@ export function getReceptionBookingStatus(
   };
 }
 
+export type BookingAreaTableLookup = {
+  areas: readonly { id: string; name: string }[];
+  tables: readonly { id: string; name: string; areaId?: string }[];
+  mergeGroups: readonly { id: string; areaId: string; mergedName: string }[];
+};
+
+/** True when booking has a single table or a merge group (Bàn gộp). */
+export function isBookingTableAssigned(
+  booking: Pick<Booking, "areaId" | "tableId" | "mergeGroupId">
+): boolean {
+  if (booking.mergeGroupId) {
+    return true;
+  }
+  return Boolean(booking.areaId && booking.tableId);
+}
+
+/** Display line for Khu vực / Bàn columns (list, detail, search). */
+export function formatBookingAreaTable(
+  booking: Pick<Booking, "areaId" | "tableId" | "mergeGroupId">,
+  lookup: BookingAreaTableLookup,
+  options?: {
+    pendingLabel?: string;
+    /** Prefix single table with `Bàn ` (list mobile cards). */
+    tableNamePrefix?: boolean;
+  }
+): string {
+  const pendingLabel = options?.pendingLabel ?? "Chờ xếp bàn";
+  if (!isBookingTableAssigned(booking)) {
+    return pendingLabel;
+  }
+  if (booking.mergeGroupId) {
+    const group = lookup.mergeGroups.find((item) => item.id === booking.mergeGroupId);
+    const areaName =
+      (booking.areaId
+        ? lookup.areas.find((item) => item.id === booking.areaId)?.name
+        : null) ??
+      (group ? lookup.areas.find((item) => item.id === group.areaId)?.name : null) ??
+      "—";
+    return `${areaName} · ${group?.mergedName ?? "Bàn gộp"}`;
+  }
+  const areaName = lookup.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
+  const tableName = lookup.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
+  const tablePart = options?.tableNamePrefix ? `Bàn ${tableName}` : tableName;
+  return `${areaName} · ${tablePart}`;
+}
+
+/** Sort/search key for areaTable column — same labels as display. */
+export function bookingAreaTableSortKey(
+  booking: Pick<Booking, "areaId" | "tableId" | "mergeGroupId">,
+  lookup: BookingAreaTableLookup
+): string {
+  return formatBookingAreaTable(booking, lookup, { pendingLabel: "Chờ xếp bàn" });
+}
+
 /** Nhãn khu/bàn trên màn hôm nay — rút gọn khi chưa gán. */
 export function formatTodayBookingAreaTable(
-  booking: Pick<Booking, "areaId" | "tableId">,
-  areaName?: string,
-  tableName?: string
+  booking: Pick<Booking, "areaId" | "tableId" | "mergeGroupId">,
+  lookup: BookingAreaTableLookup
 ): string {
-  if (!booking.areaId || !booking.tableId) {
-    return "Chờ xếp";
-  }
-  return `${areaName ?? "—"} · ${tableName ?? "—"}`;
+  return formatBookingAreaTable(booking, lookup, { pendingLabel: "Chờ xếp" });
 }
 
 function slotStartMs(booking: Pick<Booking, "startTime" | "bookingAt">): number {
@@ -739,6 +827,14 @@ export function recommendMergeGroups(
 ): MergeRecommendation[] {
   const targetSeats = Math.max(1, Math.round(options.targetSeats));
   const branchId = booking.branchId;
+  const candidateDay = dayjs(booking.bookingAt);
+  const candidateDayLabel = candidateDay.isValid() ? candidateDay.format("YYYY-MM-DD") : null;
+  const allBookingsOnCandidateDay = candidateDayLabel
+    ? options.allBookings.filter((b) => {
+        const d = dayjs(b.bookingAt);
+        return d.isValid() && d.format("YYYY-MM-DD") === candidateDayLabel;
+      })
+    : options.allBookings;
 
   const existingGroupSuggestions: MergeRecommendation[] = options.mergeGroups
     .filter((group) => {
@@ -748,10 +844,16 @@ export function recommendMergeGroups(
       if (options.areaId && group.areaId !== options.areaId) {
         return false;
       }
+      if (
+        candidateDayLabel &&
+        (candidateDayLabel < group.startDate || candidateDayLabel > group.endDate)
+      ) {
+        return false;
+      }
       if (getMergeGroupEffectiveGuestCapacity(group.totalCapacity) < targetSeats) {
         return false;
       }
-      return !hasAssignableSlotConflictAtMergeGroup(booking, group, options.allBookings);
+      return !hasAssignableSlotConflictAtMergeGroup(booking, group, allBookingsOnCandidateDay);
     })
     .map((group) => ({
       key: `group:${group.id}`,
@@ -771,7 +873,7 @@ export function recommendMergeGroups(
     if (table.positionX < 0 || table.positionY < 0) {
       return false;
     }
-    return !hasAssignableSlotConflictAtTable(booking, table.id, options.allBookings);
+    return !hasAssignableSlotConflictAtTable(booking, table.id, allBookingsOnCandidateDay);
   });
 
   const newCombinations = enumerateBestCombinations(availableTables, targetSeats);
