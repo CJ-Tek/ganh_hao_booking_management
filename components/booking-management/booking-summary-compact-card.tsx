@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge, Card, Group, Stack, Text } from "@mantine/core";
-import { Fragment, type CSSProperties } from "react";
+import { Fragment, type CSSProperties, type ReactNode } from "react";
 
 export type BookingSummaryMetaSegment = {
   text: string;
@@ -9,7 +9,7 @@ export type BookingSummaryMetaSegment = {
   emphasize?: boolean;
 };
 
-export function BookingSummaryCompactCard(props: {
+export type BookingSummaryCompactCardProps = {
   timeLabel?: string;
   /** When false, the leading time column is omitted (e.g. customer cards). */
   showTimeColumn?: boolean;
@@ -17,29 +17,37 @@ export function BookingSummaryCompactCard(props: {
   /** Shown beside the title (e.g. guest count — only `bold` is emphasized). */
   titleSuffix?: { bold: string; normal: string };
   badge: { label: string; color: string };
-  /** Trailing text on the meta row (e.g. Người nhận). */
-  assigneeLabel?: string | null;
+  /** Creator on the meta row: bold name + " tạo đơn". */
+  createdBy?: { name: string } | null;
+  /** Optional second line under assignee: [name] cập nhật lúc [time]. */
+  updatedLabel?: { name: string; time: string } | null;
   metaSegments: BookingSummaryMetaSegment[];
   note?: string | null;
   onClick?: () => void;
   className?: string;
   style?: CSSProperties;
-}) {
+  /** Optional control before the time column (e.g. selection checkbox). */
+  leadingSlot?: ReactNode;
+};
+
+export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps) {
   const {
     timeLabel = "",
     showTimeColumn = true,
     title,
     titleSuffix,
     badge,
-    assigneeLabel,
+    createdBy,
+    updatedLabel,
     metaSegments,
     note,
     onClick,
     className,
     style,
+    leadingSlot,
   } = props;
 
-  const hasMetaRow = metaSegments.length > 0 || Boolean(assigneeLabel);
+  const hasMetaRow = metaSegments.length > 0 || Boolean(createdBy);
 
   return (
     <Card
@@ -51,15 +59,16 @@ export function BookingSummaryCompactCard(props: {
       onClick={onClick}
     >
       <Group wrap="nowrap" align="flex-start" gap="sm">
+        {leadingSlot}
         {showTimeColumn ? (
           <Text size="md" fw={700} lh={1.2} style={{ flexShrink: 0, minWidth: "2.75rem" }}>
             {timeLabel}
           </Text>
         ) : null}
         <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
-          <Group justify="space-between" wrap="nowrap" gap="xs" align="center">
-            <Group gap={6} wrap="nowrap" align="center" style={{ flex: 1, minWidth: 0 }}>
-              <Text fw={700} size="sm" c="brand" lineClamp={1} style={{ minWidth: 0 }}>
+          <Group justify="space-between" wrap="wrap" gap="xs" align="flex-start">
+            <Group gap={6} wrap="wrap" align="center" style={{ flex: "1 1 12rem", minWidth: 0 }}>
+              <Text fw={700} size="sm" c="brand" style={{ minWidth: 0, wordBreak: "break-word" }}>
                 {title}
               </Text>
               {titleSuffix && (titleSuffix.bold || titleSuffix.normal) ? (
@@ -85,9 +94,13 @@ export function BookingSummaryCompactCard(props: {
             </Badge>
           </Group>
           {hasMetaRow ? (
-            <Group justify="space-between" wrap="nowrap" gap="sm" align="center">
+            <Group justify="space-between" wrap="wrap" gap="xs" align="flex-start">
               {metaSegments.length > 0 ? (
-                <Text size="xs" lineClamp={1} lh={1.45} style={{ flex: 1, minWidth: 0 }}>
+                <Text
+                  size="xs"
+                  lh={1.45}
+                  style={{ flex: "1 1 12rem", minWidth: 0, wordBreak: "break-word" }}
+                >
                   {metaSegments.map((segment, index) => (
                     <Fragment key={`${segment.text}-${index}`}>
                       {index > 0 ? (
@@ -108,23 +121,48 @@ export function BookingSummaryCompactCard(props: {
               ) : (
                 <span style={{ flex: 1, minWidth: 0 }} />
               )}
-              {assigneeLabel ? (
-                <Text
-                  size="xs"
-                  c="dimmed"
-                  fw={500}
-                  ta="right"
-                  lineClamp={1}
-                  lh={1.45}
-                  style={{ flexShrink: 0, maxWidth: "48%" }}
+              {createdBy ? (
+                <Stack
+                  gap={2}
+                  align="flex-end"
+                  style={{ flex: "1 1 10rem", minWidth: 0, maxWidth: "100%" }}
                 >
-                  {assigneeLabel}
-                </Text>
+                  <Text
+                    size="xs"
+                    c="dimmed"
+                    fw={500}
+                    ta="right"
+                    lh={1.45}
+                    style={{ wordBreak: "break-word" }}
+                  >
+                    <Text component="span" fw={700}>
+                      {createdBy.name}
+                    </Text>{" "}
+                    tạo đơn
+                  </Text>
+                  {updatedLabel ? (
+                    <Text
+                      size="xs"
+                      c="dimmed"
+                      ta="right"
+                      lh={1.45}
+                      style={{ wordBreak: "break-word" }}
+                    >
+                      <Text component="span" fw={700}>
+                        {updatedLabel.name}
+                      </Text>{" "}
+                      cập nhật lúc{" "}
+                      <Text component="span" fw={700}>
+                        {updatedLabel.time}
+                      </Text>
+                    </Text>
+                  ) : null}
+                </Stack>
               ) : null}
             </Group>
           ) : null}
           {note ? (
-            <Text size="xs" lineClamp={1} lh={1.35}>
+            <Text size="xs" lh={1.35} style={{ wordBreak: "break-word" }}>
               <Text component="span" fw={700}>
                 Ghi chú:{" "}
               </Text>

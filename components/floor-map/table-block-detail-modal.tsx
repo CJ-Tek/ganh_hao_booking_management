@@ -7,7 +7,6 @@ import {
   Divider,
   Group,
   Loader,
-  Modal,
   Stack,
   Tabs,
   Text,
@@ -18,6 +17,7 @@ import { TableBlockConfirmedScheduleTable } from "@/components/floor-map/table-b
 import { WaitlistEntryDetailModal } from "@/components/booking-management/waitlist-entry-detail-modal";
 import { TableBlockWaitlistTable } from "@/components/floor-map/table-block-waitlist-table";
 import { canChangeBookingTable } from "@/components/booking-management/shared";
+import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
 import { inferGuestTypeLabel, stripUnknownGuestTag } from "@/lib/booking-meta";
 import { formatMergeGroupDateRange } from "@/lib/merge-group-utils";
@@ -103,7 +103,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
   const targetReady = Boolean(table || mergeGroup);
 
   return (
-    <Modal
+    <PortalStandardModal
       opened={opened}
       onClose={onClose}
       title={modalTitle}
@@ -343,6 +343,6 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
           </Stack>
         </Stack>
       ) : null}
-    </Modal>
+    </PortalStandardModal>
   );
 }

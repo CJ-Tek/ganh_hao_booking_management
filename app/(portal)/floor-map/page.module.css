@@ -2,24 +2,6 @@
   min-height: calc(100dvh - 88px - var(--manager-dock-reserve, 0px));
 }
 
-.floorMapCalendarAccordion :global([data-accordion-item]) {
-  background-color: var(--mantine-color-white);
-  border: 1px solid var(--mantine-color-default-border);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.floorMapCalendarAccordion :global([data-accordion-control]) {
-  background-color: var(--mantine-color-white);
-  border: none;
-  border-radius: 10px;
-}
-
-.floorMapCalendarAccordion :global([data-accordion-panel]) {
-  padding-top: 4px;
-  background-color: var(--mantine-color-white);
-}
-
 .canvasFrame {
   position: relative;
   height: calc(100dvh - 210px - var(--manager-dock-reserve, 0px));

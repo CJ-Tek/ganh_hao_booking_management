@@ -23,6 +23,8 @@ export function getBookingCompactCardProps(props: {
   receptionThresholds: Partial<ReceptionThresholdSettings>;
   getGuestTypeLabel?: (booking: Booking) => string;
   lastEditorName?: string;
+  /** Prepended to meta row when set (e.g. customer phone on assign tables). */
+  customerPhone?: string | null;
 }) {
   const {
     booking,
@@ -33,13 +35,14 @@ export function getBookingCompactCardProps(props: {
     receptionThresholds,
     getGuestTypeLabel,
     lastEditorName,
+    customerPhone,
   } = props;
 
   const titleSuffix = isGuestCountSpecified(booking)
     ? { bold: String(booking.guestCount), normal: " khách" }
     : { bold: "", normal: "Chưa rõ số khách" };
 
-  const assigneeLabel = `Người nhận: ${creatorName}`;
+  const createdBy = { name: creatorName };
 
   const metaSegments: BookingSummaryMetaSegment[] =
     variant === "today"
@@ -67,11 +70,17 @@ export function getBookingCompactCardProps(props: {
     });
   }
 
-  if (variant === "list" && booking.lastEditedAt && lastEditorName) {
-    metaSegments.push({
-      text: `Sửa ${lastEditorName} ${dayjs(booking.lastEditedAt).format("HH:mm DD/MM")}`,
-    });
+  if (customerPhone) {
+    metaSegments.unshift({ text: customerPhone, emphasize: false });
   }
+
+  const updatedLabel =
+    variant === "list" && booking.lastEditedAt && lastEditorName
+      ? {
+          name: lastEditorName,
+          time: dayjs(booking.lastEditedAt).format("HH:mm DD/MM"),
+        }
+      : null;
 
   const badge =
     variant === "today"
@@ -88,7 +97,8 @@ export function getBookingCompactCardProps(props: {
     timeLabel: dayjs(booking.bookingAt).format("HH:mm"),
     title: customerName,
     titleSuffix,
-    assigneeLabel,
+    createdBy,
+    updatedLabel,
     badge,
     metaSegments,
     note: stripUnknownGuestTag(booking.note),

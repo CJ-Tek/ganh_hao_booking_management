@@ -3,18 +3,17 @@
 import dayjs from "dayjs";
 import {
   Badge,
-  Button,
-  Card,
   Grid,
   Group,
   RingProgress,
-  Select,
   SimpleGrid,
   Stack,
   Tabs,
   Text,
   Title,
 } from "@mantine/core";
+import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
+import { BookingListPaginationBar } from "@/components/booking-management/booking-list-pagination";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { useCallback, useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -23,13 +22,7 @@ import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
-import {
-  bookingAreaTableSortKey,
-  displayCustomerPhone,
-  formatBookingAreaTable,
-  isGuestCountSpecified,
-  stripUnknownGuestTag,
-} from "@/lib/booking-meta";
+import { bookingAreaTableSortKey, displayCustomerPhone, stripUnknownGuestTag } from "@/lib/booking-meta";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
 
@@ -262,20 +255,22 @@ export default function DashboardPage() {
             size="md"
             voiceIconSize="md"
           />
-          {mobileSortedBookings.length > 0 ? (
-            <Select
-              label="Số thẻ mỗi trang"
-              size="sm"
-              data={["6", "8", "10", "12", "20"].map((value) => ({ value, label: value }))}
-              value={String(mobilePageSize)}
-              onChange={(value) => {
-                if (!value) return;
-                setMobilePageSize(Number(value));
-                setMobilePage(1);
-              }}
-              allowDeselect={false}
-            />
-          ) : null}
+          <BookingListPaginationBar
+            pageSize={mobilePageSize}
+            pageSizeSelectData={["6", "8", "10", "12", "20"].map((value) => ({
+              value,
+              label: value,
+            }))}
+            onPageSizeChange={(size) => {
+              setMobilePageSize(size);
+              setMobilePage(1);
+            }}
+            page={mobilePageSafe}
+            totalPages={mobileTotalPages}
+            onPageChange={setMobilePage}
+            totalBookings={mobileSortedBookings.length}
+            summaryItemLabel="booking"
+          />
           {pagedMobileBookings.length === 0 ? (
             <Text c="dimmed" size="sm">
               Chưa có booking nào.
@@ -284,75 +279,47 @@ export default function DashboardPage() {
             pagedMobileBookings.map((booking) => {
               const customer =
                 state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—";
-              const phone =
-                displayCustomerPhone(
-                  state.customers.find((item) => item.id === booking.customerId)?.phone
-                );
-              const locationLine = formatBookingAreaTable(booking, bookingAreaTableLookup, {
-                tableNamePrefix: true,
-              });
+              const phone = displayCustomerPhone(
+                state.customers.find((item) => item.id === booking.customerId)?.phone
+              );
               const creator =
                 state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
                 "Không rõ";
+              const lastEditor =
+                booking.lastEditedByUserId != null
+                  ? state.users.find((item) => item.id === booking.lastEditedByUserId)?.fullName
+                  : undefined;
+
               return (
-                <Card key={booking.id} withBorder radius="md" padding="sm">
-                  <Group justify="space-between" align="flex-start" wrap="nowrap">
-                    <Stack gap={4} style={{ minWidth: 0 }}>
-                      <Text fw={700} lineClamp={2}>
-                        {customer}
-                      </Text>
-                      <Text size="sm" c="dimmed">
-                        {phone}
-                      </Text>
-                      <Text size="sm" fw={500}>
-                        {dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}
-                      </Text>
-                      <Text size="sm" c="dimmed">
-                        {locationLine}
-                      </Text>
-                      <Text size="xs" c="dimmed">
-                        {isGuestCountSpecified(booking)
-                          ? `${booking.guestCount} khách`
-                          : "Chưa rõ số khách"}{" "}
-                        · {creator}
-                      </Text>
-                      {stripUnknownGuestTag(booking.note) ? (
-                        <Text size="xs" c="dimmed" lineClamp={3}>
-                          {stripUnknownGuestTag(booking.note)}
-                        </Text>
-                      ) : null}
-                    </Stack>
-                    <Badge color={bookingStatusColor[booking.status]} variant="light" size="lg">
-                      {bookingStatusLabel[booking.status]}
-                    </Badge>
-                  </Group>
-                </Card>
+                <BookingCompactCard
+                  key={booking.id}
+                  booking={booking}
+                  variant="list"
+                  customerName={customer}
+                  creatorName={creator}
+                  bookingAreaTableLookup={bookingAreaTableLookup}
+                  customerPhone={phone}
+                  lastEditorName={lastEditor}
+                />
               );
             })
           )}
-          {mobileSortedBookings.length > mobilePageSize ? (
-            <Group justify="center" gap="xs">
-              <Button
-                variant="default"
-                size="compact-sm"
-                disabled={mobilePageSafe <= 1}
-                onClick={() => setMobilePage((p) => Math.max(1, p - 1))}
-              >
-                Trước
-              </Button>
-              <Text size="sm" c="dimmed">
-                {mobilePageSafe}/{mobileTotalPages}
-              </Text>
-              <Button
-                variant="default"
-                size="compact-sm"
-                disabled={mobilePageSafe >= mobileTotalPages}
-                onClick={() => setMobilePage((p) => Math.min(mobileTotalPages, p + 1))}
-              >
-                Sau
-              </Button>
-            </Group>
-          ) : null}
+          <BookingListPaginationBar
+            pageSize={mobilePageSize}
+            pageSizeSelectData={["6", "8", "10", "12", "20"].map((value) => ({
+              value,
+              label: value,
+            }))}
+            onPageSizeChange={(size) => {
+              setMobilePageSize(size);
+              setMobilePage(1);
+            }}
+            page={mobilePageSafe}
+            totalPages={mobileTotalPages}
+            onPageChange={setMobilePage}
+            totalBookings={mobileSortedBookings.length}
+            summaryItemLabel="booking"
+          />
         </Stack>
       ) : (
         <PortalDataTable<Booking>

@@ -1,7 +1,8 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Badge, Button, Card, Drawer, Group, Stack, Text } from "@mantine/core";
+import { Button, Drawer, Group, Stack, Text } from "@mantine/core";
+import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { Phone } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
@@ -23,9 +24,8 @@ import {
 } from "@/components/portal-list/portal-list-section-mobile";
 import { PortalPageTitle } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
-import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import { usePortalCompact } from "@/lib/use-portal-compact";
-import { displayCustomerPhone, formatBookingAreaTable } from "@/lib/booking-meta";
+import { displayCustomerPhone } from "@/lib/booking-meta";
 import { openPortalAlertModal, openPortalConfirmModal } from "@/lib/portal-confirm-modal";
 
 const DRAWER_BOOKING_PAGE_SIZE = 8;
@@ -374,30 +374,29 @@ export default function CustomersPage() {
             ) : (
               <>
                 {pagedDrawerBookings.map((booking) => {
-                  const locationLine = formatBookingAreaTable(booking, {
-                    areas: state.areas,
-                    tables: state.tables,
-                    mergeGroups: state.mergeGroups,
-                  });
+                  const creator =
+                    state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
+                    "Không rõ";
+                  const lastEditor =
+                    booking.lastEditedByUserId != null
+                      ? state.users.find((item) => item.id === booking.lastEditedByUserId)
+                          ?.fullName
+                      : undefined;
+
                   return (
-                    <Card key={booking.id} withBorder radius="md" padding="sm">
-                      <Group justify="space-between" align="flex-start" wrap="nowrap">
-                        <Stack gap={4} style={{ minWidth: 0 }}>
-                          <Text size="xs" c="dimmed">
-                            Mã {booking.id}
-                          </Text>
-                          <Text size="sm" fw={600}>
-                            {dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            {locationLine}
-                          </Text>
-                        </Stack>
-                        <Badge color={bookingStatusColor[booking.status]} variant="light">
-                          {bookingStatusLabel[booking.status]}
-                        </Badge>
-                      </Group>
-                    </Card>
+                    <BookingCompactCard
+                      key={booking.id}
+                      booking={booking}
+                      variant="list"
+                      customerName={selectedCustomer?.fullName ?? "—"}
+                      creatorName={creator}
+                      bookingAreaTableLookup={{
+                        areas: state.areas,
+                        tables: state.tables,
+                        mergeGroups: state.mergeGroups,
+                      }}
+                      lastEditorName={lastEditor}
+                    />
                   );
                 })}
                 {customerBookings.length > DRAWER_BOOKING_PAGE_SIZE ? (

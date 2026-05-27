@@ -14,8 +14,6 @@ import {
 
   Group,
 
-  Modal,
-
   Paper,
 
   SimpleGrid,
@@ -29,20 +27,18 @@ import {
 import { DatePickerInput } from "@mantine/dates";
 import { useMediaQuery } from "@mantine/hooks";
 
-import { type DataTableSortStatus } from "mantine-datatable";
-
 import { useRouter } from "next/navigation";
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useState } from "react";
+import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from "react";
 
-import { BookingDayBookingsTable } from "@/components/booking-management/booking-day-bookings-table";
+import {
+  BookingDayListModal,
+  type BookingDayListModalHandle,
+} from "@/components/booking-management/booking-day-list-modal";
 import { BookingStatusFilterChips } from "@/components/booking-management/booking-status-filter-chips";
 
 import { PortalPageTitle, PortalSectionCard, PortalStickyHeader } from "@/components/portal-page";
 
 import { useAppContext } from "@/contexts/app-context";
-
-import { bookingStatusLabel } from "@/lib/display";
-import { bookingAreaTableSortKey } from "@/lib/booking-meta";
 
 import { type Booking, type BookingStatus } from "@/lib/types";
 
@@ -52,8 +48,6 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 
 
 type CalendarStatusFilter = "all" | BookingStatus;
-
-type DayTableStatusFilter = BookingStatus | null;
 
 type BookingCalendarInteraction = "modal-on-day-click" | "select-day-only";
 
@@ -114,11 +108,7 @@ export const BookingCalendarPanel = forwardRef<
 
   const selectedDate = selectedDateProp ?? internalSelectedDate;
 
-  const [dayTableModalOpened, setDayTableModalOpened] = useState(false);
-
-  const [dayListFocusBookingId, setDayListFocusBookingId] = useState<string | null>(null);
-
-  const [dayTableStatusFilter, setDayTableStatusFilter] = useState<DayTableStatusFilter>(null);
+  const dayListModalRef = useRef<BookingDayListModalHandle | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<CalendarStatusFilter>("all");
 
@@ -195,119 +185,6 @@ export const BookingCalendarPanel = forwardRef<
     return grouped;
 
   }, [activeMonth, filteredBookings]);
-
-
-
-  const selectedDayBookings = useMemo(
-
-    () =>
-
-      filteredBookings
-
-        .filter((booking) => dayjs(booking.bookingAt).isSame(selectedDate, "day"))
-
-        .filter((booking) => !dayTableStatusFilter || booking.status === dayTableStatusFilter),
-
-    [dayTableStatusFilter, filteredBookings, selectedDate]
-
-  );
-
-  const bookingAreaTableLookup = useMemo(
-    () => ({
-      areas: state.areas,
-      tables: state.tables,
-      mergeGroups: state.mergeGroups,
-    }),
-    [state.areas, state.mergeGroups, state.tables]
-  );
-
-  const sortDayBookings = useCallback(
-
-    (records: Booking[], sortStatus: DataTableSortStatus<Booking>) => {
-
-      const getValue = (booking: Booking) => {
-
-        if (sortStatus.columnAccessor === "customerId") {
-
-          return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
-
-        }
-
-        if (sortStatus.columnAccessor === "areaTable") {
-          return bookingAreaTableSortKey(booking, bookingAreaTableLookup);
-        }
-
-        if (sortStatus.columnAccessor === "status") {
-
-          return bookingStatusLabel[booking.status];
-
-        }
-
-        return dayjs(booking.bookingAt).valueOf();
-
-      };
-
-      return [...records].sort((a, b) => {
-
-        const left = getValue(a);
-
-        const right = getValue(b);
-
-        const compare =
-
-          typeof left === "number" && typeof right === "number"
-
-            ? left - right
-
-            : String(left).localeCompare(String(right), "vi");
-
-        return sortStatus.direction === "asc" ? compare : -compare;
-
-      });
-
-    },
-
-    [bookingAreaTableLookup, state.customers]
-
-  );
-
-
-
-  const getDayBookingSearchValue = useCallback(
-
-    (booking: Booking) => {
-
-      const customer = state.customers.find((item) => item.id === booking.customerId);
-
-      const location = bookingAreaTableSortKey(booking, bookingAreaTableLookup);
-
-      return [
-
-        customer?.fullName,
-
-        customer?.phone,
-
-        location,
-
-        bookingStatusLabel[booking.status],
-
-        dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
-
-        booking.note,
-
-      ]
-
-        .filter(Boolean)
-
-        .join(" ")
-
-        .toLowerCase();
-
-    },
-
-    [bookingAreaTableLookup, state.customers]
-
-  );
 
 
 
@@ -410,24 +287,14 @@ export const BookingCalendarPanel = forwardRef<
 
 
   const handleDayClick = (day: dayjs.Dayjs) => {
-
     setSelectedDate(day);
-
     if (!selectDayOnly) {
-
-      setDayTableStatusFilter(null);
-
-      setDayTableModalOpened(true);
-
+      dayListModalRef.current?.openDayListModal();
     }
-
   };
-
-
 
   const handleDayBookingRowClick = useCallback(
     (booking: Booking) => {
-      setDayTableModalOpened(false);
       if (onDayBookingRowClick) {
         onDayBookingRowClick(booking);
         return;
@@ -441,20 +308,12 @@ export const BookingCalendarPanel = forwardRef<
     [onDayBookingRowClick, router]
   );
 
-  const openDayTableModal = useCallback(() => {
-    setDayListFocusBookingId(null);
-    setDayTableStatusFilter(null);
-    setDayTableModalOpened(true);
-  }, []);
-
   const openDayListModalForBooking = useCallback(
     (booking: Booking) => {
       const date = dayjs(booking.bookingAt);
       setActiveMonth(date.startOf("month"));
       setSelectedDate(date);
-      setDayTableStatusFilter(null);
-      setDayListFocusBookingId(booking.id);
-      setDayTableModalOpened(true);
+      dayListModalRef.current?.openDayListModalForBooking(booking);
     },
     [setSelectedDate]
   );
@@ -462,10 +321,10 @@ export const BookingCalendarPanel = forwardRef<
   useImperativeHandle(
     ref,
     () => ({
-      openDayListModal: openDayTableModal,
+      openDayListModal: () => dayListModalRef.current?.openDayListModal(),
       openDayListModalForBooking,
     }),
-    [openDayListModalForBooking, openDayTableModal]
+    [openDayListModalForBooking]
   );
 
 
@@ -548,7 +407,7 @@ export const BookingCalendarPanel = forwardRef<
         <Group justify="flex-end" wrap="wrap" gap="xs">
           <Button
             size={isCompact || isNarrowCalendar ? "sm" : "compact-sm"}
-            onClick={openDayTableModal}
+            onClick={() => dayListModalRef.current?.openDayListModal()}
           >
             Danh sách booking
           </Button>
@@ -694,34 +553,12 @@ export const BookingCalendarPanel = forwardRef<
         </PortalSectionCard>
       )}
 
-      <Modal
-
-        opened={dayTableModalOpened}
-
-        onClose={() => {
-          setDayTableModalOpened(false);
-          setDayListFocusBookingId(null);
-        }}
-
-        title={`Danh sách booking ngày ${selectedDate.format("DD/MM/YYYY")}`}
-
-        size="xl"
-
-        centered
-
-      >
-
-        <BookingDayBookingsTable
-          records={selectedDayBookings}
-          statusFilter={dayTableStatusFilter}
-          onStatusFilterChange={setDayTableStatusFilter}
-          sortRecords={sortDayBookings}
-          getRecordSearchValue={getDayBookingSearchValue}
-          onRowClick={handleDayBookingRowClick}
-          focusBookingId={dayListFocusBookingId}
-        />
-
-      </Modal>
+      <BookingDayListModal
+        ref={dayListModalRef}
+        selectedDate={selectedDate}
+        onSelectedDateChange={setSelectedDate}
+        onDayBookingRowClick={handleDayBookingRowClick}
+      />
 
     </Stack>
   );

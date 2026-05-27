@@ -1,7 +1,8 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Alert, Badge, Card, Checkbox, Group, Stack, Text } from "@mantine/core";
+import { Alert, Badge, Checkbox, Group, Stack, Text } from "@mantine/core";
+import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { useCallback, useMemo } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
@@ -37,6 +38,15 @@ export function RegisterPendingAssignTable(props: {
     disabled,
   } = props;
   const { state } = useAppContext();
+
+  const bookingAreaTableLookup = useMemo(
+    () => ({
+      areas: state.areas,
+      tables: state.tables,
+      mergeGroups: state.mergeGroups,
+    }),
+    [state.areas, state.mergeGroups, state.tables]
+  );
 
   const assignPlan = useMemo(() => {
     if (mergeGroup) {
@@ -206,74 +216,62 @@ export function RegisterPendingAssignTable(props: {
         }}
         mobileCardRender={(booking) => {
           const customer = state.customers.find((item) => item.id === booking.customerId);
-          const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
-          const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
+          const creator =
+            state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
+            "Không rõ";
           const isSelected = selectedIds.has(booking.id);
           const willAssign = isSelected && assignableIds.has(booking.id);
           const willSkip = isSelected && !assignableIds.has(booking.id);
+          const selectionStyle = willAssign
+            ? { backgroundColor: "var(--mantine-color-brand-light)" }
+            : willSkip
+              ? { backgroundColor: "var(--mantine-color-yellow-light)" }
+              : undefined;
+
           return (
-            <Card
-              key={booking.id}
-              withBorder
-              radius="md"
-              padding="md"
-              style={
-                willAssign
-                  ? { backgroundColor: "var(--mantine-color-brand-light)" }
-                  : willSkip
-                    ? { backgroundColor: "var(--mantine-color-yellow-light)" }
-                    : undefined
-              }
-            >
-              <Stack gap="xs">
-                <Group justify="space-between" align="flex-start" wrap="nowrap">
+            <Stack key={booking.id} gap={4}>
+              <BookingCompactCard
+                booking={booking}
+                variant="list"
+                customerName={customer?.fullName ?? "Khách vãng lai"}
+                creatorName={creator}
+                bookingAreaTableLookup={bookingAreaTableLookup}
+                customerPhone={displayCustomerPhone(customer?.phone)}
+                style={selectionStyle}
+                leadingSlot={
                   <Checkbox
                     checked={isSelected}
                     disabled={disabled}
+                    aria-label={`Chọn booking ${customer?.fullName ?? booking.id}`}
                     onChange={(event) => {
-                      if (disabled) return;
+                      if (disabled) {
+                        return;
+                      }
                       const checked = event.currentTarget.checked;
                       const next = checked
                         ? [...selectedBookings, booking]
                         : selectedBookings.filter((item) => item.id !== booking.id);
                       onSelectedBookingsChange(next);
                     }}
-                    label={
-                      <Stack gap={2}>
-                        <Text fw={700}>{customer?.fullName ?? "Khách vãng lai"}</Text>
-                        <Text size="xs" c="dimmed">
-                          {displayCustomerPhone(customer?.phone)}
-                        </Text>
-                      </Stack>
-                    }
+                    onClick={(event) => event.stopPropagation()}
                   />
-                  <Badge color={bookingStatusColor[booking.status]} variant="light" size="sm">
-                    {bookingStatusLabel[booking.status]}
-                  </Badge>
-                </Group>
-                <Text size="sm">{dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}</Text>
-                <Text size="sm" c="dimmed">
-                  {booking.areaId && booking.tableId ? `${area} · ${table}` : "Chưa gán"}
+                }
+              />
+              {onNavigateToBookingList ? (
+                <Text
+                  size="xs"
+                  c={disabled ? "dimmed" : "blue"}
+                  style={{ cursor: disabled ? "default" : "pointer" }}
+                  onClick={() => {
+                    if (!disabled) {
+                      onNavigateToBookingList(booking);
+                    }
+                  }}
+                >
+                  Xem chi tiết
                 </Text>
-                <Text size="xs" c="dimmed">
-                  {booking.guestCount} khách
-                </Text>
-                {onNavigateToBookingList ? (
-                  <Text
-                    size="xs"
-                    c={disabled ? "dimmed" : "blue"}
-                    style={{ cursor: disabled ? "default" : "pointer" }}
-                    onClick={() => {
-                      if (!disabled) {
-                        onNavigateToBookingList(booking);
-                      }
-                    }}
-                  >
-                    Xem chi tiết
-                  </Text>
-                ) : null}
-              </Stack>
-            </Card>
+              ) : null}
+            </Stack>
           );
         }}
         rowStyle={(record) => {

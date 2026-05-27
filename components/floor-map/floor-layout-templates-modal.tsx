@@ -3,7 +3,6 @@
 import {
   Button,
   Group,
-  Modal,
   Stack,
   Text,
   TextInput,
@@ -12,6 +11,7 @@ import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { LayoutTemplate, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import type { FloorLayoutSnapshot } from "@/lib/floor-layout-snapshot";
 import type { FloorLayoutTemplate } from "@/lib/supabase-store";
 
@@ -210,7 +210,7 @@ export function FloorLayoutTemplatesModal({
   };
 
   return (
-    <Modal
+    <PortalStandardModal
       opened={opened}
       onClose={onClose}
       title="Mẫu sơ đồ"
@@ -307,6 +307,6 @@ export function FloorLayoutTemplatesModal({
           )}
         </Stack>
       </Stack>
-    </Modal>
+    </PortalStandardModal>
   );
 }

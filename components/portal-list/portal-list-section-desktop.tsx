@@ -5,15 +5,20 @@ import { PortalListPanelHeader } from "@/components/portal-list/portal-list-pane
 import { PortalSectionCard } from "@/components/portal-page";
 
 export function PortalListSectionDesktop(props: {
-  title: string;
+  title?: string;
+  showTitle?: boolean;
   headerFilters?: ReactNode;
   children: ReactNode;
 }) {
-  const { title, headerFilters, children } = props;
+  const { title, showTitle = true, headerFilters, children } = props;
 
   return (
     <PortalSectionCard>
-      <PortalListPanelHeader title={title} filters={headerFilters} />
+      {showTitle && title ? (
+        <PortalListPanelHeader title={title} filters={headerFilters} />
+      ) : headerFilters ? (
+        <PortalListPanelHeader title="" filters={headerFilters} hideTitle />
+      ) : null}
       {children}
     </PortalSectionCard>
   );

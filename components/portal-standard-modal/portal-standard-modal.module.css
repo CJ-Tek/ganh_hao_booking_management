@@ -1,0 +1,23 @@
+.modalContent {
+  display: flex;
+  flex-direction: column;
+  max-height: min(90dvh, 900px);
+  overflow: hidden;
+}
+
+.modalHeader {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex-shrink: 0;
+  background: var(--mantine-color-body);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.modalBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-top: 12px;
+}
+

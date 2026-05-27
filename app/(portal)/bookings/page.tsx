@@ -26,11 +26,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { BranchWaitlistSection } from "@/components/booking-management/branch-waitlist-section";
-import { BookingCalendarPanel } from "@/components/booking-calendar-panel";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingOrderDetailModal } from "@/components/booking-management/booking-order-detail-modal";
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
-import { getBookingCompactCardProps } from "@/components/booking-management/booking-compact-card-props";
+import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
 import { BookingListDesktopSection } from "@/components/booking-management/booking-list-desktop-section";
 import {
   BookingListFiltersToolbar,
@@ -41,7 +40,6 @@ import {
   BookingListMobileView,
 } from "@/components/booking-management/booking-list-mobile-view";
 import { BookingListPaginationBar } from "@/components/booking-management/booking-list-pagination";
-import { BookingSummaryCompactCard } from "@/components/booking-management/booking-summary-compact-card";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import { MergeRecommendationCard } from "@/components/booking-management/merge-recommendation-card";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
@@ -1356,17 +1354,15 @@ function BookingsPageContent() {
     const cardBusy = bookingCardBusyProps(isBookingRowBusy(booking.id));
 
     return (
-      <BookingSummaryCompactCard
+      <BookingCompactCard
         key={booking.id}
-        {...getBookingCompactCardProps({
-          booking,
-          variant: "list",
-          customerName: customer,
-          creatorName: creator,
-          bookingAreaTableLookup,
-          receptionThresholds,
-          lastEditorName: bookingLastEditorName(booking, state.users),
-        })}
+        booking={booking}
+        variant="list"
+        customerName={customer}
+        creatorName={creator}
+        bookingAreaTableLookup={bookingAreaTableLookup}
+        receptionThresholds={receptionThresholds}
+        lastEditorName={bookingLastEditorName(booking, state.users)}
         className={
           [booking.id === listFocusBookingId ? "booking-list-row-pulse" : undefined, cardBusy.className]
             .filter(Boolean)
@@ -1610,17 +1606,15 @@ function BookingsPageContent() {
       state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "Không rõ";
 
     return (
-      <BookingSummaryCompactCard
+      <BookingCompactCard
         key={booking.id}
-        {...getBookingCompactCardProps({
-          booking,
-          variant: "today",
-          customerName: customer,
-          creatorName: creator,
-          bookingAreaTableLookup,
-          receptionThresholds,
-          getGuestTypeLabel: getTodayGuestTypeLabel,
-        })}
+        booking={booking}
+        variant="today"
+        customerName={customer}
+        creatorName={creator}
+        bookingAreaTableLookup={bookingAreaTableLookup}
+        receptionThresholds={receptionThresholds}
+        getGuestTypeLabel={getTodayGuestTypeLabel}
         onClick={() => openMobileBookingDetail(booking, "today")}
       />
     );
@@ -2098,7 +2092,6 @@ function BookingsPageContent() {
           <Tabs.Tab value="today">Booking hôm nay</Tabs.Tab>
           <Tabs.Tab value="list">Danh sách booking</Tabs.Tab>
           <Tabs.Tab value="waitlist">Hàng chờ</Tabs.Tab>
-          <Tabs.Tab value="calendar">Lịch</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="today" pt="md">
           {isCompact ? (
@@ -2158,14 +2151,6 @@ function BookingsPageContent() {
           <BranchWaitlistSection
             branchIds={filteredBranchIds}
             isEmployee={isEmployee}
-          />
-        </Tabs.Panel>
-        <Tabs.Panel value="calendar" pt="md">
-          <BookingCalendarPanel
-            title="Lịch booking"
-            compactTitle="Lịch booking"
-            showHeader={false}
-            onDayBookingRowClick={openBookingInList}
           />
         </Tabs.Panel>
       </Tabs>

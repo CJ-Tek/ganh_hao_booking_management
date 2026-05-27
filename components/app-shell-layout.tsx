@@ -51,13 +51,13 @@ import classes from "./app-shell-layout.module.css";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode; adminOnly?: boolean };
 
-const MANAGER_SECTION_HREFS = ["/bookings", "/floor-map", "/customers"] as const;
-const MANAGER_DOCK_HREFS = MANAGER_SECTION_HREFS;
+const MANAGER_SECTION_HREFS = ["/calendar", "/floor-map", "/bookings", "/customers"] as const;
+const MANAGER_DOCK_HREFS = ["/calendar", "/floor-map", "/bookings"] as const;
 
 const managerDockShortLabel: Record<(typeof MANAGER_DOCK_HREFS)[number], string> = {
-  "/bookings": "Đặt bàn",
+  "/calendar": "Lịch đặt bàn",
   "/floor-map": "Sơ đồ",
-  "/customers": "Khách hàng",
+  "/bookings": "Đặt bàn",
 };
 
 const navItems: NavItem[] = [
@@ -159,8 +159,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
       return navItems.filter((item) => item.href === "/floor-map");
     }
     if (currentUser?.role === "manager") {
-      return navItems.filter((item) =>
-        (MANAGER_SECTION_HREFS as readonly string[]).includes(item.href)
+      return MANAGER_SECTION_HREFS.map((href) => navItems.find((item) => item.href === href)).filter(
+        (item): item is NavItem => Boolean(item)
       );
     }
     const base =

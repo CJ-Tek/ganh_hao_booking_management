@@ -6,12 +6,13 @@ import type { ReactNode } from "react";
 export function PortalListPanelHeader(props: {
   title: string;
   filters?: ReactNode;
+  hideTitle?: boolean;
 }) {
-  const { title, filters } = props;
+  const { title, filters, hideTitle = false } = props;
 
   return (
     <Stack gap="sm">
-      <Text fw={600}>{title}</Text>
+      {hideTitle ? null : <Text fw={600}>{title}</Text>}
       {filters}
     </Stack>
   );

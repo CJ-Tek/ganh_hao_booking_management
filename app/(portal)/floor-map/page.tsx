@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Accordion,
   ActionIcon,
   Alert,
   Badge,
@@ -27,7 +26,7 @@ import { DatePickerInput, TimeInput } from "@mantine/dates";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronDown,
   ChevronUp,
@@ -48,9 +47,9 @@ import { GuestCountNumberInput } from "@/components/booking-management/guest-cou
 import { EditableNumberInput } from "@/components/editable-number-input";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import {
-  BookingCalendarPanel,
-  type BookingCalendarPanelHandle,
-} from "@/components/booking-calendar-panel";
+  BookingDayListModal,
+  type BookingDayListModalHandle,
+} from "@/components/booking-management/booking-day-list-modal";
 import { BookingOrderDetailModal } from "@/components/booking-management/booking-order-detail-modal";
 import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
 import { useBookingManagement } from "@/components/booking-management/use-booking-management";
@@ -115,6 +114,7 @@ import {
   resolveTableDropAtCell,
 } from "@/lib/floor-map-merge-layout";
 import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
+import { FLOOR_MAP_DATE_PARAM, parseFloorMapDateParam } from "@/lib/floor-map-routes";
 import { openPortalConfirmModal } from "@/lib/portal-confirm-modal";
 import {
   applySnapshotToTablesInArea,
@@ -492,6 +492,7 @@ export default function FloorMapPage() {
     updateTableMergeGroupDates,
   } = useAppContext();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const isCompact = usePortalCompact();
   const reserveManagerDock =
     (currentUser?.role === "manager" || currentUser?.role === "employee") && isCompact;
@@ -597,6 +598,13 @@ export default function FloorMapPage() {
   const [createBookingModalOpened, setCreateBookingModalOpened] = useState(false);
   const [waitlistModalOpened, setWaitlistModalOpened] = useState(false);
 
+  useEffect(() => {
+    const dateFromUrl = parseFloorMapDateParam(searchParams.get(FLOOR_MAP_DATE_PARAM));
+    if (dateFromUrl) {
+      setFloorMapSelectedDate(dateFromUrl);
+    }
+  }, [searchParams]);
+
   const blockCanvasForOverlay =
     Boolean(registerTable || registerMergeGroup || detailTable || detailMergeGroup) ||
     statusMenuOpen;
@@ -604,7 +612,7 @@ export default function FloorMapPage() {
   const editBlockedByOther = Boolean(layoutLockHolderName);
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const calendarPanelRef = useRef<BookingCalendarPanelHandle | null>(null);
+  const dayListModalRef = useRef<BookingDayListModalHandle | null>(null);
   const panStateRef = useRef<PanState | null>(null);
   const placementTapRef = useRef<{
     pointerId: number;
@@ -3773,13 +3781,29 @@ export default function FloorMapPage() {
                 : "Chạm bàn để đổi trạng thái. Kéo nền để xem sơ đồ, cuộn/chụm để zoom."}
           </Text>
         </div>
-        {isEditMode && isLayoutDirty ? (
-          <Group gap="xs">
+        <Group gap="sm" align="flex-end" wrap="wrap">
+          {!isEmployee ? (
+            <DatePickerInput
+              label="Ngày xem sơ đồ"
+              value={floorMapSelectedDate.format("YYYY-MM-DD")}
+              onChange={(value) => {
+                if (!value) {
+                  return;
+                }
+                setFloorMapSelectedDate(dayjs(value, "YYYY-MM-DD"));
+              }}
+              valueFormat="DD/MM/YYYY"
+              size={isCompact ? "xs" : "sm"}
+              maw={isCompact ? undefined : 280}
+              style={{ flex: "1 1 auto", minWidth: isCompact ? "100%" : 200 }}
+            />
+          ) : null}
+          {isEditMode && isLayoutDirty ? (
             <Badge color="orange" variant="light">
               Chưa lưu
             </Badge>
-          </Group>
-        ) : null}
+          ) : null}
+        </Group>
       </Group>
 
       {layoutLockHolderName ? (
@@ -3792,41 +3816,6 @@ export default function FloorMapPage() {
         <Alert color="gray" variant="light">
           Chưa kết nối Supabase — kích thước lưới chỉ lưu trên máy bạn (mock). Kết nối database để đồng bộ sơ đồ cho mọi người.
         </Alert>
-      ) : null}
-
-      {!isEmployee && !isEditMode ? (
-        <Accordion
-          variant="separated"
-          defaultValue="floor-map-calendar"
-          className={classes.floorMapCalendarAccordion}
-        >
-          <Accordion.Item value="floor-map-calendar">
-            <Accordion.Control>
-              <Group justify="space-between" wrap="nowrap" gap="sm" pr="xs" style={{ width: "100%" }}>
-                <Text fw={600} size={isCompact ? "sm" : "md"}>
-                  {isCompact ? "Lịch booking" : "Lịch booking theo sơ đồ"}
-                </Text>
-                <Text size="sm" fw={500} c="dimmed" style={{ flexShrink: 0 }}>
-                  {floorMapSelectedDate.format("DD/MM/YYYY")}
-                </Text>
-              </Group>
-            </Accordion.Control>
-            <Accordion.Panel>
-              <BookingCalendarPanel
-                ref={calendarPanelRef}
-                title="Lịch booking theo sơ đồ"
-                compactTitle="Lịch booking"
-                showHeader={false}
-                embedded
-                interaction="select-day-only"
-                showDayListButton={false}
-                selectedDate={floorMapSelectedDate}
-                onSelectedDateChange={setFloorMapSelectedDate}
-                onDayBookingRowClick={(booking) => setDayListDetailBooking(booking)}
-              />
-            </Accordion.Panel>
-          </Accordion.Item>
-        </Accordion>
       ) : null}
 
       <PortalSectionCard>
@@ -4457,7 +4446,7 @@ export default function FloorMapPage() {
                               size={isCompact ? "sm" : "compact-sm"}
                               variant="filled"
                               className={classes.toolbarDayListBtn}
-                              onClick={() => calendarPanelRef.current?.openDayListModal()}
+                              onClick={() => dayListModalRef.current?.openDayListModal()}
                             >
                               Danh sách booking
                             </Button>
@@ -5148,7 +5137,7 @@ export default function FloorMapPage() {
         opened={createBookingModalOpened}
         onClose={() => setCreateBookingModalOpened(false)}
         onFocusExistingBooking={(booking) => {
-          calendarPanelRef.current?.openDayListModalForBooking(booking);
+          dayListModalRef.current?.openDayListModalForBooking(booking);
         }}
       />
 
@@ -5182,6 +5171,16 @@ export default function FloorMapPage() {
           </Group>
         </Stack>
       </Modal>
+
+      {!isEmployee ? (
+        <BookingDayListModal
+          ref={dayListModalRef}
+          selectedDate={floorMapSelectedDate}
+          onSelectedDateChange={setFloorMapSelectedDate}
+          onDayBookingRowClick={(booking) => setDayListDetailBooking(booking)}
+          onNavigateToFloorMap={setFloorMapSelectedDate}
+        />
+      ) : null}
 
       <BookingOrderDetailModal
         booking={dayListDetailBooking}

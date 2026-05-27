@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, Button, Group, Select, Stack, Text } from "@mantine/core";
+import { Button, Group, Select, Stack, Text } from "@mantine/core";
 import type { ReactNode } from "react";
 
 const MOBILE_PAGE_SIZE_SELECT_WIDTH = "9.5rem";
@@ -13,7 +13,7 @@ export function BookingListPaginationNav(props: {
   const { page, totalPages, onPageChange } = props;
 
   return (
-    <Group justify="center" gap="xs">
+    <Group justify="center" gap="xs" wrap="nowrap">
       <Button
         variant="default"
         size="compact-sm"
@@ -63,30 +63,29 @@ export function BookingListPaginationBar(props: {
   }
 
   return (
-    <Group align="center" wrap="nowrap" w="100%" gap="sm">
-      <Select
-        aria-label="Số thẻ mỗi trang"
-        size="sm"
-        data={pageSizeSelectData}
-        value={String(pageSize)}
-        onChange={(value) => {
-          if (!value) {
-            return;
-          }
-          onPageSizeChange(Number(value));
-        }}
-        allowDeselect={false}
-        w={MOBILE_PAGE_SIZE_SELECT_WIDTH}
-        style={{ flexShrink: 0 }}
-      />
-      <Stack gap={4} align="center" style={{ flex: 1, minWidth: 0 }}>
+    <Stack gap={4} align="stretch" w="100%">
+      <Group align="center" wrap="nowrap" w="100%" gap="sm" justify="space-between">
+        <Select
+          aria-label="Số thẻ mỗi trang"
+          size="sm"
+          data={pageSizeSelectData}
+          value={String(pageSize)}
+          onChange={(value) => {
+            if (!value) {
+              return;
+            }
+            onPageSizeChange(Number(value));
+          }}
+          allowDeselect={false}
+          w={MOBILE_PAGE_SIZE_SELECT_WIDTH}
+          style={{ flexShrink: 0 }}
+        />
         <BookingListPaginationNav page={page} totalPages={totalPages} onPageChange={onPageChange} />
-        <Text size="xs" c="dimmed" ta="center">
-          {totalBookings} {summaryItemLabel} · trang {page}/{totalPages}
-        </Text>
-      </Stack>
-      <Box w={MOBILE_PAGE_SIZE_SELECT_WIDTH} style={{ flexShrink: 0 }} aria-hidden />
-    </Group>
+      </Group>
+      <Text size="xs" c="dimmed" ta="right">
+        {totalBookings} {summaryItemLabel} · trang {page}/{totalPages}
+      </Text>
+    </Stack>
   );
 }
 

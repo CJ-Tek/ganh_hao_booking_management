@@ -1,7 +1,8 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Badge, Card, Group, Select, Stack, Text } from "@mantine/core";
+import { Select, Text } from "@mantine/core";
+import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { useCallback, useMemo, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
@@ -28,6 +29,14 @@ const scheduleStatusFilterData = (["confirmed", "seated", "checked_in"] as const
 export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) {
   const { records } = props;
   const { state } = useAppContext();
+  const bookingAreaTableLookup = useMemo(
+    () => ({
+      areas: state.areas,
+      tables: state.tables,
+      mergeGroups: state.mergeGroups,
+    }),
+    [state.areas, state.mergeGroups, state.tables]
+  );
   const [statusFilter, setStatusFilter] = useState<BookingStatus | null>(null);
 
   const filteredRecords = useMemo(
@@ -112,26 +121,23 @@ export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) 
       }
       mobileCardRender={(booking) => {
         const customer = state.customers.find((item) => item.id === booking.customerId);
+        const creator =
+          state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "Không rõ";
+        const lastEditor =
+          booking.lastEditedByUserId != null
+            ? state.users.find((item) => item.id === booking.lastEditedByUserId)?.fullName
+            : undefined;
+
         return (
-          <Card key={booking.id} withBorder radius="md" padding="md">
-            <Stack gap="xs">
-              <Group justify="space-between" align="flex-start" wrap="nowrap">
-                <Text fw={700} lineClamp={2}>
-                  {customer?.fullName ?? "—"}
-                </Text>
-                <Badge color={bookingStatusColor[booking.status]} variant="light" size="sm">
-                  {bookingStatusLabel[booking.status]}
-                </Badge>
-              </Group>
-              <Text size="sm">
-                {formatScheduleVisitDate(booking.startTime ?? booking.bookingAt)} ·{" "}
-                {dayjs(booking.startTime).format("HH:mm")} – {dayjs(booking.endTime).format("HH:mm")}
-              </Text>
-              <Text size="xs" c="dimmed">
-                {booking.guestCount} khách
-              </Text>
-            </Stack>
-          </Card>
+          <BookingCompactCard
+            key={booking.id}
+            booking={booking}
+            variant="list"
+            customerName={customer?.fullName ?? "—"}
+            creatorName={creator}
+            bookingAreaTableLookup={bookingAreaTableLookup}
+            lastEditorName={lastEditor}
+          />
         );
       }}
       columns={[
