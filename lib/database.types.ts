@@ -805,6 +805,35 @@ export type Database = {
         Args: { p_waitlist_entry_id: string }
         Returns: Json
       }
+      promote_waitlist_entry_now: {
+        Args: {
+          p_waitlist_entry_id: string
+          p_area_id?: string | null
+          p_table_id?: string | null
+        }
+        Returns: Json
+      }
+      transfer_waitlist_entry_branch: {
+        Args: {
+          p_waitlist_entry_id: string
+          p_branch_id: string
+          p_area_id: string
+          p_table_id: string
+          p_party_size?: number | null
+        }
+        Returns: Json
+      }
+      update_waitlist_entry: {
+        Args: {
+          p_waitlist_entry_id: string
+          p_party_size: number
+          p_desired_start_time: string
+          p_desired_end_time: string
+          p_area_id: string
+          p_table_id: string
+        }
+        Returns: Json
+      }
       create_or_queue_booking: {
         Args: {
           p_area_id: string

@@ -1,7 +1,7 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Badge, Button, Stack, Text } from "@mantine/core";
+import { Badge, Stack, Text } from "@mantine/core";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { useCallback, useMemo, useState } from "react";
 import { WaitlistCompactCard } from "@/components/booking-management/waitlist-compact-card";
@@ -16,8 +16,10 @@ import { type BookingWaitlistEntry, type WaitlistStatus } from "@/lib/types";
 export function TableBlockWaitlistTable(props: {
   records: BookingWaitlistEntry[];
   isEmployee: boolean;
-  confirmLoadingId: string | null;
-  onConfirmOffer: (entryId: string) => void;
+  actionLoadingId?: string | null;
+  /** @deprecated Use actionLoadingId */
+  confirmLoadingId?: string | null;
+  onRowClick?: (entry: BookingWaitlistEntry) => void;
   /** Show khu vực / bàn columns (branch-wide list). */
   showLocationColumns?: boolean;
   statusFilter?: WaitlistStatus | null;
@@ -29,8 +31,9 @@ export function TableBlockWaitlistTable(props: {
   const {
     records,
     isEmployee,
-    confirmLoadingId,
-    onConfirmOffer,
+    actionLoadingId = null,
+    confirmLoadingId = null,
+    onRowClick,
     showLocationColumns = false,
     statusFilter: controlledStatusFilter,
     onStatusFilterChange,
@@ -38,6 +41,7 @@ export function TableBlockWaitlistTable(props: {
     onSearchQueryChange,
     hideToolbar = false,
   } = props;
+  const busyEntryId = actionLoadingId ?? confirmLoadingId;
   const { state } = useAppContext();
   const [internalStatusFilter, setInternalStatusFilter] = useState<WaitlistStatus | null>(null);
   const statusFilter = controlledStatusFilter ?? internalStatusFilter;
@@ -155,6 +159,15 @@ export function TableBlockWaitlistTable(props: {
       ]
     : [];
 
+  const handleRowClick = onRowClick
+    ? (entry: BookingWaitlistEntry) => {
+        if (busyEntryId === entry.id) {
+          return;
+        }
+        onRowClick(entry);
+      }
+    : undefined;
+
   return (
     <PortalDataTable<BookingWaitlistEntry>
       records={filteredRecords}
@@ -171,6 +184,8 @@ export function TableBlockWaitlistTable(props: {
       minHeight={220}
       defaultRecordsPerPage={8}
       mobileSummaryItemLabel="khách"
+      onRowClick={handleRowClick ? ({ record }) => handleRowClick(record) : undefined}
+      rowStyle={handleRowClick ? () => ({ cursor: "pointer" }) : undefined}
       mobileCardRender={(entry) => {
         const customer = state.customers.find((item) => item.id === entry.customerId);
         return (
@@ -181,9 +196,7 @@ export function TableBlockWaitlistTable(props: {
             areaLabel={resolveAreaLabel(entry)}
             tableLabel={resolveTableLabel(entry)}
             showLocation={showLocationColumns}
-            isEmployee={isEmployee}
-            confirmLoading={confirmLoadingId === entry.id}
-            onConfirmOffer={() => onConfirmOffer(entry.id)}
+            onClick={handleRowClick ? () => handleRowClick(entry) : undefined}
           />
         );
       }}
@@ -237,30 +250,6 @@ export function TableBlockWaitlistTable(props: {
             </Stack>
           ),
         },
-        ...(!isEmployee
-          ? [
-              {
-                accessor: "actions" as const,
-                title: "Thao tác",
-                render: (entry: BookingWaitlistEntry) =>
-                  entry.status === "offered" ? (
-                    <Button
-                      size="compact-xs"
-                      variant="filled"
-                      color="green"
-                      loading={confirmLoadingId === entry.id}
-                      onClick={() => onConfirmOffer(entry.id)}
-                    >
-                      Xác nhận
-                    </Button>
-                  ) : (
-                    <Text size="xs" c="dimmed">
-                      —
-                    </Text>
-                  ),
-              },
-            ]
-          : []),
       ]}
     />
   );

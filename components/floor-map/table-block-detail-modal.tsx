@@ -15,6 +15,7 @@ import {
 } from "@mantine/core";
 import { useEffect, useState } from "react";
 import { TableBlockConfirmedScheduleTable } from "@/components/floor-map/table-block-confirmed-schedule-table";
+import { WaitlistEntryDetailModal } from "@/components/booking-management/waitlist-entry-detail-modal";
 import { TableBlockWaitlistTable } from "@/components/floor-map/table-block-waitlist-table";
 import { canChangeBookingTable } from "@/components/booking-management/shared";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
@@ -23,6 +24,7 @@ import { formatMergeGroupDateRange } from "@/lib/merge-group-utils";
 import {
   type Booking,
   type DiningTable,
+  type BookingWaitlistEntry,
   type TableBlockState,
   type TableMergeGroup,
   type TableStatus,
@@ -49,7 +51,7 @@ export type TableBlockDetailModalProps = {
   onComplete: () => void;
   onChangeTable: () => void;
   onCancelBooking: () => void;
-  onConfirmWaitlistOffer: (entryId: string) => void;
+  onConfirmWaitlistOffer: (entry: BookingWaitlistEntry) => void | Promise<void>;
 };
 
 export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
@@ -76,6 +78,9 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
   } = props;
 
   const [historySubTab, setHistorySubTab] = useState<HistorySubTab>("schedule");
+  const [waitlistDetailEntry, setWaitlistDetailEntry] = useState<BookingWaitlistEntry | null>(
+    null
+  );
   const waitlistCount = blockState?.waitlistQueue.length ?? 0;
   const isMerge = Boolean(mergeGroup);
   const displayStatus = isMerge ? mergeStatus : (table?.status ?? "available");
@@ -84,6 +89,8 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
   useEffect(() => {
     if (opened) {
       setHistorySubTab("schedule");
+    } else {
+      setWaitlistDetailEntry(null);
     }
   }, [opened, table?.id, mergeGroup?.id]);
 
@@ -314,8 +321,21 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                   <TableBlockWaitlistTable
                     records={blockState?.waitlistQueue ?? []}
                     isEmployee={isEmployee}
-                    confirmLoadingId={waitlistConfirmLoadingId}
-                    onConfirmOffer={onConfirmWaitlistOffer}
+                    actionLoadingId={waitlistConfirmLoadingId}
+                    onRowClick={setWaitlistDetailEntry}
+                    showLocationColumns={false}
+                  />
+                  <WaitlistEntryDetailModal
+                    entry={waitlistDetailEntry}
+                    opened={waitlistDetailEntry != null}
+                    onClose={() => setWaitlistDetailEntry(null)}
+                    isEmployee={isEmployee}
+                    actionLoadingId={waitlistConfirmLoadingId}
+                    showLocation={false}
+                    onConfirmOffer={async (entry) => {
+                      await onConfirmWaitlistOffer(entry);
+                      setWaitlistDetailEntry(null);
+                    }}
                   />
                 </Stack>
               </Tabs.Panel>

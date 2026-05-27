@@ -163,6 +163,7 @@ import {
 } from "@/lib/supabase-store";
 import {
   type Booking,
+  type BookingWaitlistEntry,
   type Customer,
   type DiningTable,
   type TableBlockState,
@@ -1158,13 +1159,13 @@ export default function FloorMapPage() {
     };
   }, [bookingsForFloorTableDisplay, detailMergeGroup, detailTable, hasSupabase]);
 
-  const handleConfirmWaitlistOffer = async (entryId: string) => {
+  const handleConfirmWaitlistOffer = async (entry: BookingWaitlistEntry) => {
     if (!hasSupabase || isEmployee) {
       return;
     }
-    setDetailWaitlistActionId(entryId);
+    setDetailWaitlistActionId(entry.id);
     try {
-      const result = await confirmWaitlistOfferInSupabase(entryId);
+      const result = await confirmWaitlistOfferInSupabase(entry.id);
       notifications.show({
         color: result.ok ? "green" : "red",
         message: result.message,
@@ -4894,7 +4895,7 @@ export default function FloorMapPage() {
         onComplete={() => void handleDetailComplete()}
         onChangeTable={openChangeTableForActiveBooking}
         onCancelBooking={openDetailCancelBookingConfirm}
-        onConfirmWaitlistOffer={(entryId: string) => void handleConfirmWaitlistOffer(entryId)}
+        onConfirmWaitlistOffer={(entry) => void handleConfirmWaitlistOffer(entry)}
       />
 
       <ChangeBookingTableModal

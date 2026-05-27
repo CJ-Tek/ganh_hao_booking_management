@@ -64,6 +64,18 @@ const handlers: Record<string, StoreHandler> = {
     store.getTableBlockStateInSupabase(payload as Parameters<typeof store.getTableBlockStateInSupabase>[0]),
   confirmWaitlistOffer: (payload) =>
     store.confirmWaitlistOfferInSupabase(payload as string),
+  updateWaitlistEntry: (payload) =>
+    store.updateWaitlistEntryInSupabase(
+      payload as Parameters<typeof store.updateWaitlistEntryInSupabase>[0]
+    ),
+  transferWaitlistEntryBranch: (payload) =>
+    store.transferWaitlistEntryBranchInSupabase(
+      payload as Parameters<typeof store.transferWaitlistEntryBranchInSupabase>[0]
+    ),
+  promoteWaitlistEntryNow: (payload) =>
+    store.promoteWaitlistEntryNowInSupabase(
+      payload as Parameters<typeof store.promoteWaitlistEntryNowInSupabase>[0]
+    ),
   listBranchWaitlistEntries: (payload) =>
     store.listBranchWaitlistEntriesInSupabase(
       payload as Parameters<typeof store.listBranchWaitlistEntriesInSupabase>[0]

@@ -7,6 +7,11 @@ import { notifications } from "@mantine/notifications";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TableBlockWaitlistTable } from "@/components/floor-map/table-block-waitlist-table";
 import { BookingListFiltersToolbar } from "@/components/booking-management/booking-list-filters-toolbar";
+import {
+  WaitlistEntryModals,
+  type WaitlistEntryModalMode,
+} from "@/components/booking-management/waitlist-entry-modals";
+import { WaitlistEntryDetailModal } from "@/components/booking-management/waitlist-entry-detail-modal";
 import { WaitlistStatusFilterChips } from "@/components/booking-management/waitlist-status-filter-chips";
 import { PortalListSectionDesktop } from "@/components/portal-list/portal-list-section-desktop";
 import { PortalListSectionMobile } from "@/components/portal-list/portal-list-section-mobile";
@@ -39,11 +44,14 @@ export function BranchWaitlistSection(props: {
   const isCompact = usePortalCompact();
   const [entries, setEntries] = useState<BookingWaitlistEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [confirmLoadingId, setConfirmLoadingId] = useState<string | null>(null);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [filterDay, setFilterDay] = useState<string | null>(fixedDay ?? null);
   const [statusFilter, setStatusFilter] = useState<WaitlistStatus | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [detailEntry, setDetailEntry] = useState<BookingWaitlistEntry | null>(null);
+  const [formModalEntry, setFormModalEntry] = useState<BookingWaitlistEntry | null>(null);
+  const [formModalMode, setFormModalMode] = useState<WaitlistEntryModalMode | null>(null);
 
   const effectiveDay = fixedDay ?? filterDay ?? undefined;
 
@@ -101,20 +109,51 @@ export function BranchWaitlistSection(props: {
 
   const sectionTitle = showHeader ? `Hàng chờ (${displayCount})` : "";
 
-  const handleConfirmOffer = async (entryId: string) => {
+  const detailEntryLive = useMemo(() => {
+    if (!detailEntry) {
+      return null;
+    }
+    return entries.find((item) => item.id === detailEntry.id) ?? detailEntry;
+  }, [detailEntry, entries]);
+
+  const refreshAfterMutation = useCallback(async () => {
+    await reload({ scope: "floor" });
+    await loadEntries();
+  }, [loadEntries, reload]);
+
+  const closeDetail = useCallback(() => {
+    setDetailEntry(null);
+  }, []);
+
+  const openDetail = useCallback((entry: BookingWaitlistEntry) => {
+    setDetailEntry(entry);
+  }, []);
+
+  const openFormModal = (entry: BookingWaitlistEntry, mode: WaitlistEntryModalMode) => {
+    closeDetail();
+    setFormModalEntry(entry);
+    setFormModalMode(mode);
+  };
+
+  const closeFormModal = () => {
+    setFormModalEntry(null);
+    setFormModalMode(null);
+  };
+
+  const handleConfirmOffer = async (entry: BookingWaitlistEntry) => {
     if (!hasSupabase || isEmployee) {
       return;
     }
-    setConfirmLoadingId(entryId);
+    setActionLoadingId(entry.id);
     try {
-      const result = await confirmWaitlistOfferInSupabase(entryId);
+      const result = await confirmWaitlistOfferInSupabase(entry.id);
       notifications.show({
         color: result.ok ? "green" : "red",
         message: result.message,
       });
       if (result.ok) {
-        await reload({ scope: "floor" });
-        await loadEntries();
+        closeDetail();
+        await refreshAfterMutation();
       }
     } catch (error) {
       notifications.show({
@@ -123,7 +162,7 @@ export function BranchWaitlistSection(props: {
           error instanceof Error ? error.message : "Không xác nhận được suất hàng chờ.",
       });
     } finally {
-      setConfirmLoadingId(null);
+      setActionLoadingId(null);
     }
   };
 
@@ -152,8 +191,8 @@ export function BranchWaitlistSection(props: {
     <TableBlockWaitlistTable
       records={entries}
       isEmployee={isEmployee}
-      confirmLoadingId={confirmLoadingId}
-      onConfirmOffer={handleConfirmOffer}
+      actionLoadingId={actionLoadingId}
+      onRowClick={openDetail}
       showLocationColumns
       statusFilter={statusFilter}
       onStatusFilterChange={setStatusFilter}
@@ -169,55 +208,85 @@ export function BranchWaitlistSection(props: {
     />
   );
 
+  const overlays = (
+    <>
+      <WaitlistEntryDetailModal
+        entry={detailEntryLive}
+        opened={detailEntryLive != null}
+        onClose={closeDetail}
+        isEmployee={isEmployee}
+        actionLoadingId={actionLoadingId}
+        showLocation
+        onConfirmOffer={handleConfirmOffer}
+        onEdit={isEmployee ? undefined : (entry) => openFormModal(entry, "edit")}
+        onPromote={isEmployee ? undefined : (entry) => openFormModal(entry, "promote")}
+        onTransfer={isEmployee ? undefined : (entry) => openFormModal(entry, "transfer")}
+      />
+      <WaitlistEntryModals
+        entry={formModalEntry}
+        mode={formModalMode}
+        onClose={closeFormModal}
+        onSaved={refreshAfterMutation}
+      />
+    </>
+  );
+
   if (embedded) {
     return (
       <Stack gap="sm">
         {dateFilterControl}
         {waitlistTable}
+        {overlays}
       </Stack>
     );
   }
 
   if (isCompact) {
     return (
-      <PortalListSectionMobile
-        title={sectionTitle}
-        headerFilters={
-          <WaitlistStatusFilterChips
-            value={statusFilter}
-            onChange={setStatusFilter}
-            size="xs"
-          />
-        }
-        filtersToolbar={
-          <BookingListFiltersToolbar
-            searchQuery={searchQuery}
-            onSearchQueryChange={setSearchQuery}
-            searchPlaceholder="Khách, khung giờ, trạng thái..."
-            filtersOpen={filtersOpen}
-            onFiltersOpenChange={setFiltersOpen}
-            collapseFilters={dateFilterControl ?? <Text size="sm" c="dimmed">Không có bộ lọc thêm.</Text>}
-          />
-        }
-      >
-        {waitlistTable}
-      </PortalListSectionMobile>
+      <>
+        <PortalListSectionMobile
+          title={sectionTitle}
+          headerFilters={
+            <WaitlistStatusFilterChips
+              value={statusFilter}
+              onChange={setStatusFilter}
+              size="xs"
+            />
+          }
+          filtersToolbar={
+            <BookingListFiltersToolbar
+              searchQuery={searchQuery}
+              onSearchQueryChange={setSearchQuery}
+              searchPlaceholder="Khách, khung giờ, trạng thái..."
+              filtersOpen={filtersOpen}
+              onFiltersOpenChange={setFiltersOpen}
+              collapseFilters={dateFilterControl ?? <Text size="sm" c="dimmed">Không có bộ lọc thêm.</Text>}
+            />
+          }
+        >
+          {waitlistTable}
+        </PortalListSectionMobile>
+        {overlays}
+      </>
     );
   }
 
   return (
-    <PortalListSectionDesktop
-      title={sectionTitle}
-      headerFilters={
-        <WaitlistStatusFilterChips value={statusFilter} onChange={setStatusFilter} />
-      }
-    >
-      {dateFilterControl ? (
-        <Stack gap="sm" mb="sm">
-          {dateFilterControl}
-        </Stack>
-      ) : null}
-      {waitlistTable}
-    </PortalListSectionDesktop>
+    <>
+      <PortalListSectionDesktop
+        title={sectionTitle}
+        headerFilters={
+          <WaitlistStatusFilterChips value={statusFilter} onChange={setStatusFilter} />
+        }
+      >
+        {dateFilterControl ? (
+          <Stack gap="sm" mb="sm">
+            {dateFilterControl}
+          </Stack>
+        ) : null}
+        {waitlistTable}
+      </PortalListSectionDesktop>
+      {overlays}
+    </>
   );
 }

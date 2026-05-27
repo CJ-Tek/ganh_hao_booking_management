@@ -1,7 +1,6 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Button, Stack } from "@mantine/core";
 import { BookingSummaryCompactCard } from "@/components/booking-management/booking-summary-compact-card";
 import {
   waitlistStatusColor,
@@ -15,20 +14,9 @@ export function WaitlistCompactCard(props: {
   areaLabel: string;
   tableLabel: string;
   showLocation: boolean;
-  isEmployee: boolean;
-  confirmLoading: boolean;
-  onConfirmOffer: () => void;
+  onClick?: () => void;
 }) {
-  const {
-    entry,
-    customerName,
-    areaLabel,
-    tableLabel,
-    showLocation,
-    isEmployee,
-    confirmLoading,
-    onConfirmOffer,
-  } = props;
+  const { entry, customerName, areaLabel, tableLabel, showLocation, onClick } = props;
 
   const metaSegments = [
     {
@@ -50,27 +38,15 @@ export function WaitlistCompactCard(props: {
   }
 
   return (
-    <Stack gap={6}>
-      <BookingSummaryCompactCard
-        timeLabel={`#${entry.position}`}
-        title={customerName}
-        badge={{
-          label: waitlistStatusLabel[entry.status],
-          color: waitlistStatusColor[entry.status],
-        }}
-        metaSegments={metaSegments}
-      />
-      {!isEmployee && entry.status === "offered" ? (
-        <Button
-          size="compact-sm"
-          variant="filled"
-          color="green"
-          loading={confirmLoading}
-          onClick={onConfirmOffer}
-        >
-          Xác nhận
-        </Button>
-      ) : null}
-    </Stack>
+    <BookingSummaryCompactCard
+      timeLabel={`#${entry.position}`}
+      title={customerName}
+      badge={{
+        label: waitlistStatusLabel[entry.status],
+        color: waitlistStatusColor[entry.status],
+      }}
+      metaSegments={metaSegments}
+      onClick={onClick}
+    />
   );
 }

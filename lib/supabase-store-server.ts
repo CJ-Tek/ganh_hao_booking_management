@@ -2632,6 +2632,22 @@ export async function getTableBlockStateInSupabase(input: {
   };
 }
 
+function parseWaitlistJsonRpcResult(
+  data: unknown,
+  fallbackMessage: string
+): Result & { bookingId?: string } {
+  const response = Array.isArray(data) ? data[0] : data;
+  if (!response || typeof response !== "object") {
+    return { ok: false, message: fallbackMessage };
+  }
+  const row = response as { ok?: boolean; message?: string; booking_id?: string };
+  return {
+    ok: Boolean(row.ok),
+    message: row.message ?? fallbackMessage,
+    ...(row.booking_id ? { bookingId: row.booking_id } : {}),
+  };
+}
+
 export async function confirmWaitlistOfferInSupabase(waitlistEntryId: string): Promise<Result> {
   const client = ensureClient();
   const { data, error } = await (client as any).rpc("confirm_waitlist_offer", {
@@ -2640,15 +2656,68 @@ export async function confirmWaitlistOfferInSupabase(waitlistEntryId: string): P
   if (error) {
     return { ok: false, message: error.message };
   }
-  const response = Array.isArray(data) ? data[0] : data;
-  if (!response || typeof response !== "object") {
-    return { ok: false, message: "Không thể xác nhận suất từ hàng chờ." };
+  return parseWaitlistJsonRpcResult(data, "Không thể xác nhận suất từ hàng chờ.");
+}
+
+export async function updateWaitlistEntryInSupabase(input: {
+  waitlistEntryId: string;
+  partySize: number;
+  desiredStartTime: string;
+  desiredEndTime: string;
+  areaId: string;
+  tableId: string;
+}): Promise<Result> {
+  const client = ensureClient();
+  const { data, error } = await (client as any).rpc("update_waitlist_entry", {
+    p_waitlist_entry_id: input.waitlistEntryId,
+    p_party_size: input.partySize,
+    p_desired_start_time: input.desiredStartTime,
+    p_desired_end_time: input.desiredEndTime,
+    p_area_id: input.areaId,
+    p_table_id: input.tableId,
+  });
+  if (error) {
+    return { ok: false, message: error.message };
   }
-  return {
-    ok: Boolean((response as { ok?: boolean }).ok),
-    message:
-      ((response as { message?: string }).message ?? "Đã xử lý xác nhận hàng chờ."),
-  };
+  return parseWaitlistJsonRpcResult(data, "Không thể cập nhật suất hàng chờ.");
+}
+
+export async function transferWaitlistEntryBranchInSupabase(input: {
+  waitlistEntryId: string;
+  branchId: string;
+  areaId: string;
+  tableId: string;
+  partySize?: number;
+}): Promise<Result> {
+  const client = ensureClient();
+  const { data, error } = await (client as any).rpc("transfer_waitlist_entry_branch", {
+    p_waitlist_entry_id: input.waitlistEntryId,
+    p_branch_id: input.branchId,
+    p_area_id: input.areaId,
+    p_table_id: input.tableId,
+    p_party_size: input.partySize ?? null,
+  });
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  return parseWaitlistJsonRpcResult(data, "Không thể chuyển suất hàng chờ sang chi nhánh khác.");
+}
+
+export async function promoteWaitlistEntryNowInSupabase(input: {
+  waitlistEntryId: string;
+  areaId?: string | null;
+  tableId?: string | null;
+}): Promise<Result & { bookingId?: string }> {
+  const client = ensureClient();
+  const { data, error } = await (client as any).rpc("promote_waitlist_entry_now", {
+    p_waitlist_entry_id: input.waitlistEntryId,
+    p_area_id: input.areaId ?? null,
+    p_table_id: input.tableId ?? null,
+  });
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  return parseWaitlistJsonRpcResult(data, "Không thể mời khách vào bàn.");
 }
 
 type MergeGroupCreateInput = {
