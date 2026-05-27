@@ -6,7 +6,6 @@ import {
   Badge,
   Button,
   Card,
-  Collapse,
   Divider,
   Drawer,
   Group,
@@ -18,13 +17,12 @@ import {
   TextInput,
   Textarea,
 } from "@mantine/core";
-import { ChevronDown, ChevronUp } from "lucide-react";
 import { DateTimePicker } from "@mantine/dates";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { BranchWaitlistSection } from "@/components/booking-management/branch-waitlist-section";
@@ -32,10 +30,21 @@ import { BookingCalendarPanel } from "@/components/booking-calendar-panel";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingOrderDetailModal } from "@/components/booking-management/booking-order-detail-modal";
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
+import { getBookingCompactCardProps } from "@/components/booking-management/booking-compact-card-props";
+import { BookingListDesktopSection } from "@/components/booking-management/booking-list-desktop-section";
+import {
+  BookingListFiltersToolbar,
+  BookingListTableAssignFilter,
+} from "@/components/booking-management/booking-list-filters-toolbar";
+import {
+  BookingListMobileEmptyState,
+  BookingListMobileView,
+} from "@/components/booking-management/booking-list-mobile-view";
+import { BookingListPaginationBar } from "@/components/booking-management/booking-list-pagination";
+import { BookingSummaryCompactCard } from "@/components/booking-management/booking-summary-compact-card";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import { MergeRecommendationCard } from "@/components/booking-management/merge-recommendation-card";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
-import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import {
   bookingSlotKey,
@@ -44,7 +53,12 @@ import {
   isPlausibleVietnamPhone,
   normalizeVietnamPhone,
 } from "@/lib/booking-duplicate";
-import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
+import {
+  bookingListStatusFilterStatuses,
+  bookingPipelineStatusFilterStatuses,
+  bookingStatusColor,
+  bookingStatusLabel,
+} from "@/lib/display";
 import {
   displayCustomerPhone,
   findAssignableSlotConflictsAtTable,
@@ -182,12 +196,8 @@ function BookingsPageContent() {
 
   const [todaySearchQuery, setTodaySearchQuery] = useState("");
   const [todayStatusFilter, setTodayStatusFilter] = useState<BookingStatus | null>(null);
-  const [todayReceptionStatusFilter, setTodayReceptionStatusFilter] = useState<string | null>(null);
   const [todayGuestTypeFilter, setTodayGuestTypeFilter] = useState<string | null>(null);
 
-  const [todayTableAssignFilter, setTodayTableAssignFilter] = useState<
-    "all" | "assigned" | "unassigned"
-  >("all");
   const [todaySortStatus, setTodaySortStatus] = useState<DataTableSortStatus<Booking>>({
     columnAccessor: "bookingAt",
     direction: "asc",
@@ -431,15 +441,6 @@ function BookingsPageContent() {
     state.tables,
   ]);
 
-  const bookingStatusFilterOptions = useMemo(
-    () =>
-      (["pending", "confirmed", "seated", "checked_in", "no_show", "cancelled"] as const).map((s) => ({
-        value: s,
-        label: bookingStatusLabel[s],
-      })),
-    []
-  );
-
   const tableAssignFilterOptions = useMemo(
     () => [
       { value: "all", label: "Tất cả" },
@@ -451,10 +452,11 @@ function BookingsPageContent() {
 
   const pipelineFilteredBookings = useMemo(() => {
     return branchBookings.filter((booking) => {
-      if (booking.status === "completed") {
-        return false;
-      }
-      if (listStatusFilter && booking.status !== listStatusFilter) {
+      if (listStatusFilter === null) {
+        if (booking.status === "completed") {
+          return false;
+        }
+      } else if (booking.status !== listStatusFilter) {
         return false;
       }
       const hasTable = isBookingTableAssigned(booking);
@@ -963,12 +965,9 @@ function BookingsPageContent() {
     [searchedBookings, sortListBookings, sortStatus]
   );
 
-  const completedBookings = useMemo(
-    () =>
-      [...branchBookings]
-        .filter((booking) => booking.status === "completed")
-        .sort((a, b) => dayjs(b.bookingAt).valueOf() - dayjs(a.bookingAt).valueOf()),
-    [branchBookings]
+  const listSectionTitle = useMemo(
+    () => `Danh sách booking (${sortedBookings.length})`,
+    [sortedBookings.length]
   );
 
   const completedBookingsByCustomer = useMemo(() => {
@@ -1014,15 +1013,6 @@ function BookingsPageContent() {
     [receptionThresholds]
   );
 
-  const todayReceptionStatusFilterOptions = useMemo(() => {
-    const labels = new Set(
-      todayBookings.map((booking) => getTodayReceptionStatusLabel(booking))
-    );
-    return [...labels]
-      .sort((a, b) => a.localeCompare(b, "vi"))
-      .map((label) => ({ value: label, label }));
-  }, [getTodayReceptionStatusLabel, todayBookings]);
-
   const todayGuestTypeFilterOptions = useMemo(() => {
     const labels = new Set(todayBookings.map((booking) => getTodayGuestTypeLabel(booking)));
     return [...labels]
@@ -1035,19 +1025,6 @@ function BookingsPageContent() {
       if (todayStatusFilter && booking.status !== todayStatusFilter) {
         return false;
       }
-      const hasTable = isBookingTableAssigned(booking);
-      if (todayTableAssignFilter === "assigned" && !hasTable) {
-        return false;
-      }
-      if (todayTableAssignFilter === "unassigned" && hasTable) {
-        return false;
-      }
-      if (
-        todayReceptionStatusFilter &&
-        getTodayReceptionStatusLabel(booking) !== todayReceptionStatusFilter
-      ) {
-        return false;
-      }
       if (todayGuestTypeFilter && getTodayGuestTypeLabel(booking) !== todayGuestTypeFilter) {
         return false;
       }
@@ -1055,12 +1032,9 @@ function BookingsPageContent() {
     });
   }, [
     getTodayGuestTypeLabel,
-    getTodayReceptionStatusLabel,
     todayBookings,
     todayGuestTypeFilter,
-    todayReceptionStatusFilter,
     todayStatusFilter,
-    todayTableAssignFilter,
   ]);
 
   const todaySearchPlaceholder =
@@ -1182,6 +1156,11 @@ function BookingsPageContent() {
     [sortTodayBookings, todaySearchedBookings, todaySortStatus]
   );
 
+  const todaySectionTitle = useMemo(
+    () => `Booking hôm nay (${todaySortedBookings.length})`,
+    [todaySortedBookings.length]
+  );
+
   const totalTodayListPages = useMemo(
     () => Math.max(1, Math.ceil(todaySortedBookings.length / todayPageSize)),
     [todayPageSize, todaySortedBookings.length]
@@ -1232,7 +1211,7 @@ function BookingsPageContent() {
   const openBookingInList = useCallback(
     (booking: Booking) => {
       const customer = state.customers.find((item) => item.id === booking.customerId);
-      setListStatusFilter(null);
+      setListStatusFilter(booking.status === "completed" ? "completed" : null);
       setListTableAssignFilter("all");
       setSearchQuery(customer?.fullName ?? "");
       setListFocusBookingId(booking.id);
@@ -1254,6 +1233,12 @@ function BookingsPageContent() {
   useEffect(() => {
     if (tabFromUrl === "waitlist") {
       setActiveTab("waitlist");
+      return;
+    }
+    if (tabFromUrl === "completed") {
+      setActiveTab("list");
+      setListStatusFilter("completed");
+      setPage(1);
     }
   }, [tabFromUrl]);
 
@@ -1311,67 +1296,104 @@ function BookingsPageContent() {
   const bookingsSearchPlaceholder =
     "Tìm theo khách, SĐT, giờ đến, giờ check-in, khu, bàn, trạng thái...";
 
-  const bookingsListFiltersCompact = (
-    <Stack gap="sm">
-      <Group align="flex-end" gap="sm" wrap="nowrap">
-        <TextInputWithVoice
-          placeholder={bookingsSearchPlaceholder}
-          value={searchQuery}
-          onChange={(event) => {
-            setSearchQuery(event.currentTarget.value);
+  const listFiltersToolbar = (
+    <BookingListFiltersToolbar
+      searchQuery={searchQuery}
+      onSearchQueryChange={(value) => {
+        setSearchQuery(value);
+        setPage(1);
+      }}
+      searchPlaceholder={bookingsSearchPlaceholder}
+      filtersOpen={listMobileFiltersOpen}
+      onFiltersOpenChange={setListMobileFiltersOpen}
+      collapseFilters={
+        <BookingListTableAssignFilter
+          value={listTableAssignFilter}
+          onChange={(value) => {
+            setListTableAssignFilter(value);
             setPage(1);
           }}
+          data={tableAssignFilterOptions}
           size="md"
-          voiceIconSize="md"
-          style={{ flex: 1, minWidth: 0 }}
         />
-        <Button
-          variant="default"
-          size="md"
-          aria-expanded={listMobileFiltersOpen}
-          onClick={() => setListMobileFiltersOpen((open) => !open)}
-          rightSection={
-            listMobileFiltersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />
-          }
-        >
-          {listMobileFiltersOpen ? "Ẩn bộ lọc" : "Bộ lọc"}
-        </Button>
-      </Group>
-      <Collapse expanded={listMobileFiltersOpen}>
-        <Stack gap="sm" pt="xs">
-          <Select
-            label="Trạng thái"
-            placeholder="Tất cả"
-            clearable
-            data={bookingStatusFilterOptions}
-            value={listStatusFilter}
-            onChange={(value) => {
-              setListStatusFilter((value as BookingStatus | null) ?? null);
-              setPage(1);
-            }}
-            size="md"
-          />
-          <Select
-            label="Bàn"
-            data={tableAssignFilterOptions}
-            value={listTableAssignFilter}
-            onChange={(value) => {
-              setListTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
-              setPage(1);
-            }}
-            size="md"
-          />
-        </Stack>
-      </Collapse>
-    </Stack>
+      }
+    />
   );
 
+  const listTableAssignFilterControl = (
+    <BookingListTableAssignFilter
+      value={listTableAssignFilter}
+      onChange={(value) => {
+        setListTableAssignFilter(value);
+        setPage(1);
+      }}
+      data={tableAssignFilterOptions}
+      size="sm"
+      width={168}
+    />
+  );
+
+  const listPaginationBar = (
+    <BookingListPaginationBar
+      pageSize={mobileBookingsPageSize}
+      pageSizeSelectData={mobilePageSizeSelectData}
+      onPageSizeChange={(size) => {
+        setMobileBookingsPageSize(size);
+        setPage(1);
+      }}
+      page={page}
+      totalPages={totalListPages}
+      onPageChange={setPage}
+      totalBookings={sortedBookings.length}
+    />
+  );
+
+  const renderListBookingCard = (booking: Booking) => {
+    const customer =
+      state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—";
+    const creator =
+      state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "Không rõ";
+    const cardBusy = bookingCardBusyProps(isBookingRowBusy(booking.id));
+
+    return (
+      <BookingSummaryCompactCard
+        key={booking.id}
+        {...getBookingCompactCardProps({
+          booking,
+          variant: "list",
+          customerName: customer,
+          creatorName: creator,
+          bookingAreaTableLookup,
+          receptionThresholds,
+          lastEditorName: bookingLastEditorName(booking, state.users),
+        })}
+        className={
+          [booking.id === listFocusBookingId ? "booking-list-row-pulse" : undefined, cardBusy.className]
+            .filter(Boolean)
+            .join(" ") || undefined
+        }
+        style={cardBusy.style}
+        onClick={() => {
+          if (isBookingRowBusy(booking.id)) {
+            return;
+          }
+          openMobileBookingDetail(booking, "list");
+        }}
+      />
+    );
+  };
+
   const bookingsTable = (
-    <PortalSectionCard>
-      <Stack gap="sm">
-        <Text fw={600}>Danh sách booking</Text>
-      </Stack>
-      <PortalDataTable<Booking>
+    <BookingListDesktopSection
+      title={listSectionTitle}
+      statusFilter={listStatusFilter}
+      onStatusFilterChange={(value) => {
+        setListStatusFilter(value);
+        setPage(1);
+      }}
+      statusFilterStatuses={bookingListStatusFilterStatuses}
+      table={
+        <PortalDataTable<Booking>
         records={pipelineFilteredBookings}
         searchQuery={searchQuery}
         onSearchQueryChange={(value) => {
@@ -1395,36 +1417,7 @@ function BookingsPageContent() {
         recordsPerPageOptions={[...DESKTOP_BOOKINGS_PAGE_SIZE_OPTIONS]}
         defaultSort={{ columnAccessor: "bookingAt", direction: "desc" }}
         searchPlaceholder={bookingsSearchPlaceholder}
-        filters={
-          <>
-            <Select
-              label="Trạng thái"
-              placeholder="Tất cả"
-              clearable
-              data={bookingStatusFilterOptions}
-              value={listStatusFilter}
-              onChange={(value) => {
-                setListStatusFilter((value as BookingStatus | null) ?? null);
-                setPage(1);
-              }}
-              size="sm"
-              w={168}
-              miw={168}
-            />
-            <Select
-              label="Bàn"
-              data={tableAssignFilterOptions}
-              value={listTableAssignFilter}
-              onChange={(value) => {
-                setListTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
-                setPage(1);
-              }}
-              size="sm"
-              w={168}
-              miw={168}
-            />
-          </>
-        }
+        filters={listTableAssignFilterControl}
         minHeight={260}
         pinLastColumn
         onRowClick={({ record }) => {
@@ -1547,424 +1540,103 @@ function BookingsPageContent() {
           },
         ]}
       />
-    </PortalSectionCard>
+      }
+    />
   );
 
-  const mobileListPaginationNav = (
-    <Group justify="center" gap="xs">
-      <Button
-        variant="default"
-        size="compact-sm"
-        disabled={page <= 1}
-        onClick={() => setPage((p) => Math.max(1, p - 1))}
-      >
-        Trước
-      </Button>
-      <Text size="sm" c="dimmed">
-        {page}/{totalListPages}
-      </Text>
-      <Button
-        variant="default"
-        size="compact-sm"
-        disabled={page >= totalListPages}
-        onClick={() => setPage((p) => Math.min(totalListPages, p + 1))}
-      >
-        Sau
-      </Button>
-    </Group>
-  );
-
-  const mobileTodayPaginationNav = (
-    <Group justify="center" gap="xs">
-      <Button
-        variant="default"
-        size="compact-sm"
-        disabled={todayPage <= 1}
-        onClick={() => setTodayPage((p) => Math.max(1, p - 1))}
-      >
-        Trước
-      </Button>
-      <Text size="sm" c="dimmed">
-        {todayPage}/{totalTodayListPages}
-      </Text>
-      <Button
-        variant="default"
-        size="compact-sm"
-        disabled={todayPage >= totalTodayListPages}
-        onClick={() => setTodayPage((p) => Math.min(totalTodayListPages, p + 1))}
-      >
-        Sau
-      </Button>
-    </Group>
-  );
-
-  const mobileListPaginationBar =
-    sortedBookings.length > 0 ? (
-      <Stack gap="xs">
+  const todayFiltersToolbar = (
+    <BookingListFiltersToolbar
+      searchQuery={todaySearchQuery}
+      onSearchQueryChange={(value) => {
+        setTodaySearchQuery(value);
+        setTodayPage(1);
+      }}
+      searchPlaceholder={todaySearchPlaceholder}
+      filtersOpen={todayMobileFiltersOpen}
+      onFiltersOpenChange={setTodayMobileFiltersOpen}
+      collapseFilters={
         <Select
-          label="Số thẻ mỗi trang"
-          size="sm"
-          data={mobilePageSizeSelectData}
-          value={String(mobileBookingsPageSize)}
-          onChange={(v) => {
-            if (!v) return;
-            setMobileBookingsPageSize(Number(v));
-            setPage(1);
-          }}
-          allowDeselect={false}
-        />
-        {mobileListPaginationNav}
-        <Text size="xs" c="dimmed" ta="center">
-          {sortedBookings.length} booking · trang {page}/{totalListPages}
-        </Text>
-      </Stack>
-    ) : null;
-
-  const bookingsCards = (
-    <Stack gap="sm">
-      {mobileListPaginationBar}
-      {pagedBookings.length === 0 ? (
-        <Text c="dimmed" size="sm">
-          Chưa có booking nào.
-        </Text>
-      ) : (
-        pagedBookings.map((booking) => {
-          const cust = state.customers.find((item) => item.id === booking.customerId);
-          const customer = cust?.fullName ?? "—";
-          const phone = displayCustomerPhone(cust?.phone);
-          const creator =
-            state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
-            "Không rõ";
-          const locationLine = formatBookingAreaTable(booking, bookingAreaTableLookup, {
-            tableNamePrefix: true,
-          });
-          const cardBusy = bookingCardBusyProps(isBookingRowBusy(booking.id));
-          return (
-            <Card
-              key={booking.id}
-              withBorder
-              radius="md"
-              padding="md"
-              style={{ cursor: cardBusy.style ? undefined : "pointer", ...cardBusy.style }}
-              className={[
-                booking.id === listFocusBookingId ? "booking-list-row-pulse" : undefined,
-                cardBusy.className,
-              ]
-                .filter(Boolean)
-                .join(" ") || undefined}
-              onClick={() => {
-                if (isBookingRowBusy(booking.id)) {
-                  return;
-                }
-                openMobileBookingDetail(booking, "list");
-              }}
-            >
-              <Stack gap="sm">
-                <Group justify="space-between" align="flex-start" wrap="nowrap" gap="xs">
-                  <div style={{ minWidth: 0 }}>
-                    <Text fw={700} lineClamp={2}>
-                      {customer}
-                    </Text>
-                    <Text size="sm" c="dimmed" mt={4}>
-                      {phone}
-                    </Text>
-                  </div>
-                  <Badge color={bookingStatusColor[booking.status]} variant="light" size="lg">
-                    {bookingStatusLabel[booking.status]}
-                  </Badge>
-                </Group>
-                <Text size="sm" fw={500}>
-                  {dayjs(booking.bookingAt).format("HH:mm · DD/MM/YYYY")}
-                </Text>
-                {booking.checkedInAt ? (
-                  <Text size="xs" c="dimmed">
-                    Check-in: {dayjs(booking.checkedInAt).format("HH:mm · DD/MM/YYYY")}
-                  </Text>
-                ) : null}
-                <Text size="sm" c="dimmed">
-                  {locationLine}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  {isGuestCountSpecified(booking) ? `${booking.guestCount} khách` : "Chưa rõ số khách"} ·{" "}
-                  {creator}
-                </Text>
-                {booking.lastEditedAt ? (
-                  <Text size="xs" c="dimmed">
-                    Sửa: {bookingLastEditorName(booking, state.users)} ·{" "}
-                    {dayjs(booking.lastEditedAt).format("HH:mm DD/MM/YYYY")}
-                  </Text>
-                ) : null}
-                {stripUnknownGuestTag(booking.note) ? (
-                  <Text size="xs" c="dimmed" lineClamp={3}>
-                    {stripUnknownGuestTag(booking.note)}
-                  </Text>
-                ) : null}
-              </Stack>
-            </Card>
-          );
-        })
-      )}
-      {mobileListPaginationBar}
-    </Stack>
-  );
-
-  const completedBookingsPanel = (
-    <PortalSectionCard>
-      <Stack gap="sm">
-        <Text fw={600}>Booking hoàn thành</Text>
-        <Text size="sm" c="dimmed">
-          {completedBookings.length} booking đã hoàn thành.
-        </Text>
-        {completedBookings.length === 0 ? (
-          <Text c="dimmed" size="sm">
-            Chưa có booking hoàn thành.
-          </Text>
-        ) : (
-          <PortalDataTable<Booking>
-            records={completedBookings}
-            getRecordSearchValue={getListBookingSearchValue}
-            sortRecords={sortListBookings}
-            defaultSort={{ columnAccessor: "bookingAt", direction: "desc" }}
-            searchPlaceholder="Khách, SĐT, khu, bàn, ghi chú..."
-            minHeight={220}
-            mobileCardRender={(booking) => {
-              const customer = state.customers.find((item) => item.id === booking.customerId);
-              return (
-                <Card key={booking.id} withBorder radius="md" padding="md">
-                  <Stack gap="xs">
-                    <Group justify="space-between" align="flex-start" gap="xs">
-                      <Text fw={700} lineClamp={2}>
-                        {customer?.fullName ?? "—"}
-                      </Text>
-                      <Badge color={bookingStatusColor[booking.status]} variant="light">
-                        {bookingStatusLabel[booking.status]}
-                      </Badge>
-                    </Group>
-                    <Text size="sm">{dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY")}</Text>
-                    <Text size="sm" c="dimmed">
-                      {formatBookingAreaTable(booking, bookingAreaTableLookup, {
-                        tableNamePrefix: true,
-                      })}
-                    </Text>
-                  </Stack>
-                </Card>
-              );
-            }}
-            columns={[
-              {
-                accessor: "bookingAt",
-                title: "Giờ đặt",
-                render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
-              },
-              {
-                accessor: "customerId",
-                title: "Khách",
-                render: (booking) =>
-                  state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—",
-              },
-              {
-                accessor: "areaTable",
-                title: "Khu vực / Bàn",
-                render: (booking) =>
-                  formatBookingAreaTable(booking, bookingAreaTableLookup),
-              },
-              {
-                accessor: "status",
-                title: "Trạng thái",
-                render: (booking) => (
-                  <Badge color={bookingStatusColor[booking.status]} variant="light">
-                    {bookingStatusLabel[booking.status]}
-                  </Badge>
-                ),
-              },
-            ]}
-          />
-        )}
-      </Stack>
-    </PortalSectionCard>
-  );
-
-  const mobileTodayPaginationBar =
-    todaySortedBookings.length > 0 ? (
-      <Stack gap="xs">
-        <Select
-          label="Số thẻ mỗi trang"
-          size="sm"
-          data={mobilePageSizeSelectData}
-          value={String(mobileBookingsPageSize)}
-          onChange={(v) => {
-            if (!v) return;
-            setMobileBookingsPageSize(Number(v));
-            setTodayPage(1);
-          }}
-          allowDeselect={false}
-        />
-        {mobileTodayPaginationNav}
-        <Text size="xs" c="dimmed" ta="center">
-          {todaySortedBookings.length} booking · trang {todayPage}/{totalTodayListPages}
-        </Text>
-      </Stack>
-    ) : null;
-
-  const todayCards = (
-    <Stack gap="sm">
-      {mobileTodayPaginationBar}
-      {pagedTodayBookings.length === 0 ? (
-        <Text c="dimmed" size="sm">
-          {todayBookings.length === 0
-            ? "Chưa có booking nào cho hôm nay."
-            : "Không có booking khớp bộ lọc hiện tại."}
-        </Text>
-      ) : (
-        pagedTodayBookings.map((booking) => {
-          const cust = state.customers.find((item) => item.id === booking.customerId);
-          const customer = cust?.fullName ?? "—";
-          const phone = displayCustomerPhone(cust?.phone);
-          const locationLine = formatTodayBookingAreaTable(booking, bookingAreaTableLookup);
-          const receptionStatus = getReceptionBookingStatus(booking, receptionThresholds);
-          const creator =
-            state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
-            "Không rõ";
-          const note = stripUnknownGuestTag(booking.note);
-          return (
-            <Card
-              key={booking.id}
-              withBorder
-              radius="md"
-              padding="md"
-              style={{ cursor: "pointer" }}
-              onClick={() => openMobileBookingDetail(booking, "today")}
-            >
-              <Stack gap="sm">
-                <Group justify="space-between" align="flex-start" wrap="nowrap" gap="xs">
-                  <div style={{ minWidth: 0 }}>
-                    <Text fw={700} lineClamp={2}>
-                      {customer}
-                    </Text>
-                    <Text size="sm" c="dimmed" mt={4}>
-                      {phone}
-                    </Text>
-                  </div>
-                  <Badge color={receptionStatus.color} variant="light" size="lg">
-                    {receptionStatus.label}
-                  </Badge>
-                </Group>
-                <Text size="sm" fw={500}>
-                  {dayjs(booking.bookingAt).format("HH:mm")}
-                </Text>
-                <Text size="sm" c="dimmed">
-                  {isGuestCountSpecified(booking) ? `${booking.guestCount} khách` : "Chưa rõ số khách"} ·{" "}
-                  {getTodayGuestTypeLabel(booking)}
-                </Text>
-                <Text size="sm" c="dimmed">
-                  {locationLine}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  Người nhận: {creator}
-                </Text>
-                {note ? (
-                  <Text size="xs" c="dimmed" lineClamp={3}>
-                    {note}
-                  </Text>
-                ) : null}
-              </Stack>
-            </Card>
-          );
-        })
-      )}
-      {mobileTodayPaginationBar}
-    </Stack>
-  );
-
-  const todayTableFiltersCompact = (
-    <Stack gap="sm">
-      <Group align="flex-end" gap="sm" wrap="nowrap">
-        <TextInputWithVoice
-          placeholder={todaySearchPlaceholder}
-          value={todaySearchQuery}
-          onChange={(event) => {
-            setTodaySearchQuery(event.currentTarget.value);
+          label="Loại khách"
+          placeholder="Tất cả"
+          clearable
+          data={todayGuestTypeFilterOptions}
+          value={todayGuestTypeFilter}
+          onChange={(value) => {
+            setTodayGuestTypeFilter(value);
             setTodayPage(1);
           }}
           size="md"
-          voiceIconSize="md"
-          style={{ flex: 1, minWidth: 0 }}
         />
-        <Button
-          variant="default"
-          size="md"
-          aria-expanded={todayMobileFiltersOpen}
-          onClick={() => setTodayMobileFiltersOpen((open) => !open)}
-          rightSection={
-            todayMobileFiltersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />
-          }
-        >
-          {todayMobileFiltersOpen ? "Ẩn bộ lọc" : "Bộ lọc"}
-        </Button>
-      </Group>
-      <Collapse expanded={todayMobileFiltersOpen}>
-        <Stack gap="sm" pt="xs">
-          <Select
-            label="Trạng thái"
-            placeholder="Tất cả"
-            clearable
-            data={bookingStatusFilterOptions}
-            value={todayStatusFilter}
-            onChange={(value) => {
-              setTodayStatusFilter((value as BookingStatus | null) ?? null);
-              setTodayPage(1);
-            }}
-            size="md"
-          />
-          <Select
-            label="Hiển thị lễ tân"
-            placeholder="Tất cả"
-            clearable
-            data={todayReceptionStatusFilterOptions}
-            value={todayReceptionStatusFilter}
-            onChange={(value) => {
-              setTodayReceptionStatusFilter(value);
-              setTodayPage(1);
-            }}
-            size="md"
-          />
-          <Select
-            label="Loại khách"
-            placeholder="Tất cả"
-            clearable
-            data={todayGuestTypeFilterOptions}
-            value={todayGuestTypeFilter}
-            onChange={(value) => {
-              setTodayGuestTypeFilter(value);
-              setTodayPage(1);
-            }}
-            size="md"
-          />
-          <Select
-            label="Bàn"
-            data={tableAssignFilterOptions}
-            value={todayTableAssignFilter}
-            onChange={(value) => {
-              setTodayTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
-              setTodayPage(1);
-            }}
-            size="md"
-          />
-        </Stack>
-      </Collapse>
-    </Stack>
+      }
+    />
   );
+
+  const todayDesktopFilters = (
+    <Select
+      label="Loại khách"
+      placeholder="Tất cả"
+      clearable
+      data={todayGuestTypeFilterOptions}
+      value={todayGuestTypeFilter}
+      onChange={(value) => {
+        setTodayGuestTypeFilter(value);
+        setTodayPage(1);
+      }}
+      size="sm"
+      w={148}
+      miw={148}
+    />
+  );
+
+  const todayPaginationBar = (
+    <BookingListPaginationBar
+      pageSize={mobileBookingsPageSize}
+      pageSizeSelectData={mobilePageSizeSelectData}
+      onPageSizeChange={(size) => {
+        setMobileBookingsPageSize(size);
+        setTodayPage(1);
+      }}
+      page={todayPage}
+      totalPages={totalTodayListPages}
+      onPageChange={setTodayPage}
+      totalBookings={todaySortedBookings.length}
+    />
+  );
+
+  const renderTodayBookingCard = (booking: Booking) => {
+    const customer =
+      state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—";
+    const creator =
+      state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "Không rõ";
+
+    return (
+      <BookingSummaryCompactCard
+        key={booking.id}
+        {...getBookingCompactCardProps({
+          booking,
+          variant: "today",
+          customerName: customer,
+          creatorName: creator,
+          bookingAreaTableLookup,
+          receptionThresholds,
+          getGuestTypeLabel: getTodayGuestTypeLabel,
+        })}
+        onClick={() => openMobileBookingDetail(booking, "today")}
+      />
+    );
+  };
 
   const bookingsTodayTable = (
-    <PortalSectionCard>
-      <Stack gap="sm">
-        <Text fw={600}>Booking hôm nay</Text>
-        <Text size="sm" c="dimmed">
-          {todaySortedBookings.length}/{todayBookings.length} booking
-          {todayBookings.length !== todaySortedBookings.length ? " (đã lọc)" : ""} trong ngày.
-        </Text>
-      </Stack>
-      <PortalDataTable<Booking>
+    <BookingListDesktopSection
+      title={todaySectionTitle}
+      statusFilter={todayStatusFilter}
+      onStatusFilterChange={(value) => {
+        setTodayStatusFilter(value);
+        setTodayPage(1);
+      }}
+      statusFilterStatuses={bookingPipelineStatusFilterStatuses}
+      table={
+        <PortalDataTable<Booking>
         records={todayPipelineFilteredBookings}
         searchQuery={todaySearchQuery}
         onSearchQueryChange={(value) => {
@@ -1988,70 +1660,13 @@ function BookingsPageContent() {
         recordsPerPageOptions={[...TODAY_DESKTOP_PAGE_SIZE_OPTIONS]}
         defaultSort={{ columnAccessor: "bookingAt", direction: "asc" }}
         searchPlaceholder={todaySearchPlaceholder}
-        filters={
-          <>
-            <Select
-              label="Trạng thái"
-              placeholder="Tất cả"
-              clearable
-              data={bookingStatusFilterOptions}
-              value={todayStatusFilter}
-              onChange={(value) => {
-                setTodayStatusFilter((value as BookingStatus | null) ?? null);
-                setTodayPage(1);
-              }}
-              size="sm"
-              w={148}
-              miw={148}
-            />
-            <Select
-              label="Hiển thị lễ tân"
-              placeholder="Tất cả"
-              clearable
-              data={todayReceptionStatusFilterOptions}
-              value={todayReceptionStatusFilter}
-              onChange={(value) => {
-                setTodayReceptionStatusFilter(value);
-                setTodayPage(1);
-              }}
-              size="sm"
-              w={148}
-              miw={148}
-            />
-            <Select
-              label="Loại khách"
-              placeholder="Tất cả"
-              clearable
-              data={todayGuestTypeFilterOptions}
-              value={todayGuestTypeFilter}
-              onChange={(value) => {
-                setTodayGuestTypeFilter(value);
-                setTodayPage(1);
-              }}
-              size="sm"
-              w={148}
-              miw={148}
-            />
-            <Select
-              label="Bàn"
-              data={tableAssignFilterOptions}
-              value={todayTableAssignFilter}
-              onChange={(value) => {
-                setTodayTableAssignFilter((value as "all" | "assigned" | "unassigned") ?? "all");
-                setTodayPage(1);
-              }}
-              size="sm"
-              w={132}
-              miw={132}
-            />
-          </>
-        }
+        filters={todayDesktopFilters}
         minHeight={260}
         onRowClick={({ record }) => {
           if (isBookingRowBusy(record.id)) {
             return;
           }
-          openBookingInList(record);
+          openMobileBookingDetail(record, "today");
         }}
         rowStyle={(booking) =>
           bookingListRowStyle(booking.id, {
@@ -2142,7 +1757,8 @@ function BookingsPageContent() {
           },
         ]}
       />
-    </PortalSectionCard>
+      }
+    />
   );
 
   const assignModalTableOptions = useMemo(() => {
@@ -2482,35 +2098,58 @@ function BookingsPageContent() {
           <Tabs.Tab value="today">Booking hôm nay</Tabs.Tab>
           <Tabs.Tab value="list">Danh sách booking</Tabs.Tab>
           <Tabs.Tab value="waitlist">Hàng chờ</Tabs.Tab>
-          <Tabs.Tab value="completed">Hoàn thành</Tabs.Tab>
           <Tabs.Tab value="calendar">Lịch</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="today" pt="md">
           {isCompact ? (
-            <PortalSectionCard>
-              <Stack gap="md">
-                <Text fw={600}>Booking hôm nay</Text>
-                <Text size="sm" c="dimmed">
-                  {todaySortedBookings.length}/{todayBookings.length} booking
-                  {todayBookings.length !== todaySortedBookings.length ? " (đã lọc)" : ""} trong ngày.
-                </Text>
-                {todayTableFiltersCompact}
-                {todayCards}
-              </Stack>
-            </PortalSectionCard>
+            <BookingListMobileView
+              title={todaySectionTitle}
+              statusFilter={todayStatusFilter}
+              onStatusFilterChange={(value) => {
+                setTodayStatusFilter(value);
+                setTodayPage(1);
+              }}
+              statusFilterStatuses={bookingPipelineStatusFilterStatuses}
+              filtersToolbar={todayFiltersToolbar}
+              paginationBar={todayPaginationBar}
+              bookingsContent={
+                pagedTodayBookings.length === 0 ? (
+                  <BookingListMobileEmptyState
+                    message={
+                      todayBookings.length === 0
+                        ? "Chưa có booking nào cho hôm nay."
+                        : "Không có booking khớp bộ lọc hiện tại."
+                    }
+                  />
+                ) : (
+                  pagedTodayBookings.map(renderTodayBookingCard)
+                )
+              }
+            />
           ) : (
             bookingsTodayTable
           )}
         </Tabs.Panel>
         <Tabs.Panel value="list" pt="md">
           {isCompact ? (
-            <PortalSectionCard>
-              <Stack gap="md">
-                <Text fw={600}>Danh sách booking</Text>
-                {bookingsListFiltersCompact}
-                {bookingsCards}
-              </Stack>
-            </PortalSectionCard>
+            <BookingListMobileView
+              title={listSectionTitle}
+              statusFilter={listStatusFilter}
+              onStatusFilterChange={(value) => {
+                setListStatusFilter(value);
+                setPage(1);
+              }}
+              statusFilterStatuses={bookingListStatusFilterStatuses}
+              filtersToolbar={listFiltersToolbar}
+              paginationBar={listPaginationBar}
+              bookingsContent={
+                pagedBookings.length === 0 ? (
+                  <BookingListMobileEmptyState message="Chưa có booking nào cho bộ lọc hiện tại." />
+                ) : (
+                  pagedBookings.map(renderListBookingCard)
+                )
+              }
+            />
           ) : (
             bookingsTable
           )}
@@ -2520,9 +2159,6 @@ function BookingsPageContent() {
             branchIds={filteredBranchIds}
             isEmployee={isEmployee}
           />
-        </Tabs.Panel>
-        <Tabs.Panel value="completed" pt="md">
-          {completedBookingsPanel}
         </Tabs.Panel>
         <Tabs.Panel value="calendar" pt="md">
           <BookingCalendarPanel

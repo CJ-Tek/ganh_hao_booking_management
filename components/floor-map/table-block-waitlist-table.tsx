@@ -1,35 +1,17 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Badge, Button, Card, Group, Select, Stack, Text } from "@mantine/core";
+import { Badge, Button, Stack, Text } from "@mantine/core";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { useCallback, useMemo, useState } from "react";
+import { WaitlistCompactCard } from "@/components/booking-management/waitlist-compact-card";
+import {
+  waitlistStatusColor,
+  waitlistStatusLabel,
+} from "@/components/booking-management/waitlist-status-filter-chips";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { useAppContext } from "@/contexts/app-context";
 import { type BookingWaitlistEntry, type WaitlistStatus } from "@/lib/types";
-
-const waitlistStatusLabel: Record<WaitlistStatus, string> = {
-  waiting: "Đang chờ",
-  offered: "Được mời xác nhận",
-  expired: "Hết hạn",
-  cancelled: "Đã hủy",
-  promoted: "Đã xác nhận",
-};
-
-const waitlistStatusColor: Record<WaitlistStatus, string> = {
-  waiting: "orange",
-  offered: "cyan",
-  expired: "gray",
-  cancelled: "red",
-  promoted: "green",
-};
-
-const waitlistStatusFilterData = (
-  ["waiting", "offered", "expired", "cancelled", "promoted"] as const
-).map((status) => ({
-  value: status,
-  label: waitlistStatusLabel[status],
-}));
 
 export function TableBlockWaitlistTable(props: {
   records: BookingWaitlistEntry[];
@@ -38,19 +20,34 @@ export function TableBlockWaitlistTable(props: {
   onConfirmOffer: (entryId: string) => void;
   /** Show khu vực / bàn columns (branch-wide list). */
   showLocationColumns?: boolean;
+  statusFilter?: WaitlistStatus | null;
+  onStatusFilterChange?: (value: WaitlistStatus | null) => void;
+  searchQuery?: string;
+  onSearchQueryChange?: (query: string) => void;
+  hideToolbar?: boolean;
 }) {
-  const { records, isEmployee, confirmLoadingId, onConfirmOffer, showLocationColumns = false } =
-    props;
+  const {
+    records,
+    isEmployee,
+    confirmLoadingId,
+    onConfirmOffer,
+    showLocationColumns = false,
+    statusFilter: controlledStatusFilter,
+    onStatusFilterChange,
+    searchQuery,
+    onSearchQueryChange,
+    hideToolbar = false,
+  } = props;
   const { state } = useAppContext();
-  const [statusFilter, setStatusFilter] = useState<WaitlistStatus | null>(null);
+  const [internalStatusFilter, setInternalStatusFilter] = useState<WaitlistStatus | null>(null);
+  const statusFilter = controlledStatusFilter ?? internalStatusFilter;
 
   const resolveTableLabel = useCallback(
     (entry: BookingWaitlistEntry) => {
       const table = state.tables.find((item) => item.id === entry.tableId);
       const tableName = table?.name ?? "—";
       const mergeGroup = state.mergeGroups.find(
-        (group) =>
-          group.status === "active" && group.tableIds.includes(entry.tableId)
+        (group) => group.status === "active" && group.tableIds.includes(entry.tableId)
       );
       if (mergeGroup) {
         return `${tableName} · ${mergeGroup.mergedName}`;
@@ -166,65 +163,28 @@ export function TableBlockWaitlistTable(props: {
       sortRecords={sortRecords}
       defaultSort={{ columnAccessor: "position", direction: "asc" }}
       searchPlaceholder="Khách, khung giờ, trạng thái..."
+      searchQuery={searchQuery}
+      onSearchQueryChange={onSearchQueryChange}
+      hideSearch={hideToolbar}
+      withToolbar={!hideToolbar}
       noRecordsText="Không có khách trong hàng chờ."
       minHeight={220}
       defaultRecordsPerPage={8}
-      filters={
-        <Select
-          label="Trạng thái"
-          placeholder="Tất cả"
-          clearable
-          data={waitlistStatusFilterData}
-          value={statusFilter}
-          onChange={(value) => setStatusFilter((value as WaitlistStatus | null) ?? null)}
-          size="sm"
-          w={200}
-          miw={200}
-        />
-      }
+      mobileSummaryItemLabel="khách"
       mobileCardRender={(entry) => {
         const customer = state.customers.find((item) => item.id === entry.customerId);
         return (
-          <Card key={entry.id} withBorder radius="md" padding="md">
-            <Stack gap="xs">
-              <Group justify="space-between" align="flex-start" wrap="nowrap">
-                <Text fw={700} lineClamp={2}>
-                  #{entry.position} · {customer?.fullName ?? "—"}
-                </Text>
-                <Badge color={waitlistStatusColor[entry.status]} variant="light" size="sm">
-                  {waitlistStatusLabel[entry.status]}
-                </Badge>
-              </Group>
-              <Text size="sm">
-                {dayjs(entry.desiredStartTime).format("HH:mm")} –{" "}
-                {dayjs(entry.desiredEndTime).format("HH:mm")}
-              </Text>
-              {showLocationColumns ? (
-                <Text size="xs" c="dimmed">
-                  {resolveAreaLabel(entry)} · {resolveTableLabel(entry)}
-                </Text>
-              ) : null}
-              <Text size="xs" c="dimmed">
-                {entry.partySize} khách
-              </Text>
-              {entry.status === "offered" && entry.offerExpiresAt ? (
-                <Text size="xs" c="dimmed">
-                  Hết hạn: {dayjs(entry.offerExpiresAt).format("HH:mm DD/MM/YYYY")}
-                </Text>
-              ) : null}
-              {!isEmployee && entry.status === "offered" ? (
-                <Button
-                  size="compact-sm"
-                  variant="filled"
-                  color="green"
-                  loading={confirmLoadingId === entry.id}
-                  onClick={() => onConfirmOffer(entry.id)}
-                >
-                  Xác nhận
-                </Button>
-              ) : null}
-            </Stack>
-          </Card>
+          <WaitlistCompactCard
+            key={entry.id}
+            entry={entry}
+            customerName={customer?.fullName ?? "—"}
+            areaLabel={resolveAreaLabel(entry)}
+            tableLabel={resolveTableLabel(entry)}
+            showLocation={showLocationColumns}
+            isEmployee={isEmployee}
+            confirmLoading={confirmLoadingId === entry.id}
+            onConfirmOffer={() => onConfirmOffer(entry.id)}
+          />
         );
       }}
       columns={[

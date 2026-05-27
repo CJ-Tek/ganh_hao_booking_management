@@ -1,12 +1,17 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Badge, Card, Group, Select, Stack, Text } from "@mantine/core";
+import { Badge, Card, Group, Stack, Text } from "@mantine/core";
+import { BookingStatusFilterChips } from "@/components/booking-management/booking-status-filter-chips";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingListRowStyle } from "@/lib/busy-row-style";
-import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
+import {
+  bookingCalendarStatusFilterStatuses,
+  bookingStatusColor,
+  bookingStatusLabel,
+} from "@/lib/display";
 import {
   displayCustomerPhone,
   formatBookingAreaTable,
@@ -17,13 +22,6 @@ import { useMemo } from "react";
 
 const DAY_LIST_BOOKING_PULSE_CYCLE_MS = 600;
 const DAY_LIST_BOOKING_PULSE_CYCLES = 2;
-
-const bookingStatusSelectData = (
-  ["pending", "confirmed", "seated", "checked_in", "no_show", "completed", "cancelled"] as const
-).map((status) => ({
-  value: status,
-  label: bookingStatusLabel[status],
-}));
 
 export function BookingDayBookingsTable(props: {
   records: Booking[];
@@ -55,15 +53,21 @@ export function BookingDayBookingsTable(props: {
   );
 
   return (
-    <PortalDataTable<Booking>
-      records={records}
-      getRecordSearchValue={getRecordSearchValue}
-      sortRecords={sortRecords}
-      defaultSort={{ columnAccessor: "bookingAt", direction: "asc" }}
-      searchPlaceholder="Khách, bàn, trạng thái, ghi chú..."
-      noRecordsText="Không có booking trong ngày đã chọn."
-      minHeight={260}
-      onRowClick={({ record }) => onRowClick(record)}
+    <Stack gap="sm">
+      <BookingStatusFilterChips
+        value={statusFilter}
+        onChange={onStatusFilterChange}
+        statuses={bookingCalendarStatusFilterStatuses}
+      />
+      <PortalDataTable<Booking>
+        records={records}
+        getRecordSearchValue={getRecordSearchValue}
+        sortRecords={sortRecords}
+        defaultSort={{ columnAccessor: "bookingAt", direction: "asc" }}
+        searchPlaceholder="Khách, bàn, trạng thái, ghi chú..."
+        noRecordsText="Không có booking trong ngày đã chọn."
+        minHeight={260}
+        onRowClick={({ record }) => onRowClick(record)}
       rowStyle={(record) =>
         bookingListRowStyle(record.id, {
           busyBookingId: null,
@@ -74,19 +78,6 @@ export function BookingDayBookingsTable(props: {
           },
           extra: { cursor: "pointer" },
         })
-      }
-      filters={
-        <Select
-          label="Trạng thái"
-          placeholder="Tất cả"
-          clearable
-          data={bookingStatusSelectData}
-          value={statusFilter}
-          onChange={(value) => onStatusFilterChange((value as BookingStatus | null) ?? null)}
-          size="sm"
-          w={168}
-          miw={168}
-        />
       }
       mobileCardRender={(booking) => {
         const customer = state.customers.find((item) => item.id === booking.customerId);
@@ -193,5 +184,6 @@ export function BookingDayBookingsTable(props: {
         },
       ]}
     />
+    </Stack>
   );
 }

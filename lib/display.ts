@@ -33,3 +33,23 @@ export const bookingStatusColor: Record<BookingStatus, string> = {
   checked_in: "green",
   completed: "teal",
 };
+
+/** Active pipeline statuses (today tab; list “Tất cả” excludes completed). */
+export const bookingPipelineStatusFilterStatuses = [
+  "pending",
+  "confirmed",
+  "seated",
+  "checked_in",
+  "no_show",
+  "cancelled",
+] as const satisfies readonly BookingStatus[];
+
+/** Danh sách booking status chips (includes Hoàn thành). */
+export const bookingListStatusFilterStatuses = [
+  ...bookingPipelineStatusFilterStatuses,
+  "completed",
+] as const satisfies readonly BookingStatus[];
+
+/** Statuses for calendar and day-list filters. */
+export const bookingCalendarStatusFilterStatuses =
+  bookingListStatusFilterStatuses satisfies readonly BookingStatus[];

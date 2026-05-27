@@ -8,6 +8,7 @@ import {
   type DataTableSortStatus,
 } from "mantine-datatable";
 import { useMemo, useState, type ReactNode } from "react";
+import { BookingListPaginationBar } from "@/components/booking-management/booking-list-pagination";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import {
   PORTAL_DATA_TABLE_DEFAULT_PAGE_SIZE,
@@ -91,6 +92,8 @@ export type PortalDataTableProps<T> = {
   mobileRecordsPerPageOptions?: readonly number[];
   withToolbar?: boolean;
   hideSearch?: boolean;
+  /** Label in mobile summary line (e.g. "booking", "mục", "khách"). */
+  mobileSummaryItemLabel?: string;
 } & Omit<
   DataTableWithBuiltinLoaderProps<T>,
   | "records"
@@ -135,6 +138,7 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
     mobileRecordsPerPageOptions = [6, 8, 10, 12],
     withToolbar = true,
     hideSearch = false,
+    mobileSummaryItemLabel = "mục",
     minHeight = 260,
     withTableBorder = true,
     noRecordsText = "Không có dữ liệu phù hợp.",
@@ -262,50 +266,23 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
         </Group>
       ) : null}
       {isCompact && mobileCardRender ? (
-        <Stack gap="sm">
-          {sortedRecords.length > 0 ? (
-            <Stack gap="xs">
-              <Select
-                label="Số thẻ mỗi trang"
-                size="sm"
-                data={[...mobileRecordsPerPageOptions].map((size) => ({
-                  value: String(size),
-                  label: String(size),
-                }))}
-                value={String(mobileRecordsPerPage)}
-                onChange={(value) => {
-                  if (!value) return;
-                  setMobileRecordsPerPage(Number(value));
-                  setMobilePage(1);
-                }}
-                allowDeselect={false}
-              />
-              <Group justify="center" gap="xs">
-                <Button
-                  variant="default"
-                  size="compact-sm"
-                  disabled={mobilePageSafe <= 1}
-                  onClick={() => setMobilePage((p) => Math.max(1, p - 1))}
-                >
-                  Trước
-                </Button>
-                <Text size="sm" c="dimmed">
-                  {mobilePageSafe}/{totalMobilePages}
-                </Text>
-                <Button
-                  variant="default"
-                  size="compact-sm"
-                  disabled={mobilePageSafe >= totalMobilePages}
-                  onClick={() => setMobilePage((p) => Math.min(totalMobilePages, p + 1))}
-                >
-                  Sau
-                </Button>
-              </Group>
-              <Text size="xs" c="dimmed" ta="center">
-                {sortedRecords.length} mục · trang {mobilePageSafe}/{totalMobilePages}
-              </Text>
-            </Stack>
-          ) : null}
+        <Stack gap="xs">
+          <BookingListPaginationBar
+            pageSize={mobileRecordsPerPage}
+            pageSizeSelectData={[...mobileRecordsPerPageOptions].map((size) => ({
+              value: String(size),
+              label: String(size),
+            }))}
+            onPageSizeChange={(size) => {
+              setMobileRecordsPerPage(size);
+              setMobilePage(1);
+            }}
+            page={mobilePageSafe}
+            totalPages={totalMobilePages}
+            onPageChange={setMobilePage}
+            totalBookings={sortedRecords.length}
+            summaryItemLabel={mobileSummaryItemLabel}
+          />
           {pagedMobileRecords.length === 0 ? (
             <Text c="dimmed" size="sm">
               {noRecordsText}
@@ -313,29 +290,22 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
           ) : (
             pagedMobileRecords.map((record) => mobileCardRender(record))
           )}
-          {sortedRecords.length > 0 ? (
-            <Group justify="center" gap="xs">
-              <Button
-                variant="default"
-                size="compact-sm"
-                disabled={mobilePageSafe <= 1}
-                onClick={() => setMobilePage((p) => Math.max(1, p - 1))}
-              >
-                Trước
-              </Button>
-              <Text size="sm" c="dimmed">
-                {mobilePageSafe}/{totalMobilePages}
-              </Text>
-              <Button
-                variant="default"
-                size="compact-sm"
-                disabled={mobilePageSafe >= totalMobilePages}
-                onClick={() => setMobilePage((p) => Math.min(totalMobilePages, p + 1))}
-              >
-                Sau
-              </Button>
-            </Group>
-          ) : null}
+          <BookingListPaginationBar
+            pageSize={mobileRecordsPerPage}
+            pageSizeSelectData={[...mobileRecordsPerPageOptions].map((size) => ({
+              value: String(size),
+              label: String(size),
+            }))}
+            onPageSizeChange={(size) => {
+              setMobileRecordsPerPage(size);
+              setMobilePage(1);
+            }}
+            page={mobilePageSafe}
+            totalPages={totalMobilePages}
+            onPageChange={setMobilePage}
+            totalBookings={sortedRecords.length}
+            summaryItemLabel={mobileSummaryItemLabel}
+          />
         </Stack>
       ) : (
         <DataTable {...dataTableElementProps} />

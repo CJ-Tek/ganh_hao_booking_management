@@ -35,6 +35,7 @@ import { useRouter } from "next/navigation";
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useState } from "react";
 
 import { BookingDayBookingsTable } from "@/components/booking-management/booking-day-bookings-table";
+import { BookingStatusFilterChips } from "@/components/booking-management/booking-status-filter-chips";
 
 import { PortalPageTitle, PortalSectionCard, PortalStickyHeader } from "@/components/portal-page";
 
@@ -57,20 +58,6 @@ type DayTableStatusFilter = BookingStatus | null;
 type BookingCalendarInteraction = "modal-on-day-click" | "select-day-only";
 
 const weekdayLabels = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"] as const;
-
-
-
-const bookingStatusSelectData = (
-
-  ["pending", "confirmed", "seated", "checked_in", "no_show", "completed", "cancelled"] as const
-
-).map((status) => ({
-
-  value: status,
-
-  label: bookingStatusLabel[status],
-
-}));
 
 
 
@@ -324,28 +311,6 @@ export const BookingCalendarPanel = forwardRef<
 
 
 
-  const statusChipData: { value: CalendarStatusFilter; label: string }[] = useMemo(
-
-    () => [
-
-      { value: "all", label: "Tất cả" },
-
-      ...bookingStatusSelectData.map((item) => ({
-
-        value: item.value as CalendarStatusFilter,
-
-        label: item.label,
-
-      })),
-
-    ],
-
-    []
-
-  );
-
-
-
   const calendarDays = useMemo(() => {
 
     const startOfMonth = activeMonth.startOf("month");
@@ -517,31 +482,11 @@ export const BookingCalendarPanel = forwardRef<
 
     <Stack gap="sm">
 
-      <Group gap="xs" wrap="wrap">
-
-        {statusChipData.map((item) => (
-
-          <Button
-
-            key={item.value}
-
-            size={isCompact || isNarrowCalendar ? "xs" : "compact-sm"}
-
-            radius="xl"
-
-            variant={statusFilter === item.value ? "filled" : "outline"}
-
-            onClick={() => setStatusFilter(item.value)}
-
-          >
-
-            {item.label}
-
-          </Button>
-
-        ))}
-
-      </Group>
+      <BookingStatusFilterChips
+        value={statusFilter === "all" ? null : statusFilter}
+        onChange={(value) => setStatusFilter(value ?? "all")}
+        size={isCompact || isNarrowCalendar ? "xs" : "compact-sm"}
+      />
 
       <Group justify="space-between" wrap="wrap" gap="xs" align="flex-end">
         <Group gap="xs">

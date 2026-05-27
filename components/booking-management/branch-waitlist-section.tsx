@@ -6,13 +6,16 @@ import { DatePickerInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { TableBlockWaitlistTable } from "@/components/floor-map/table-block-waitlist-table";
-import { PortalSectionCard } from "@/components/portal-page";
+import { BookingListFiltersToolbar } from "@/components/booking-management/booking-list-filters-toolbar";
+import { WaitlistStatusFilterChips } from "@/components/booking-management/waitlist-status-filter-chips";
+import { PortalListSectionDesktop } from "@/components/portal-list/portal-list-section-desktop";
+import { PortalListSectionMobile } from "@/components/portal-list/portal-list-section-mobile";
 import { useAppContext } from "@/contexts/app-context";
 import {
   confirmWaitlistOfferInSupabase,
   listBranchWaitlistEntriesInSupabase,
 } from "@/lib/supabase-store";
-import { type BookingWaitlistEntry } from "@/lib/types";
+import { type BookingWaitlistEntry, type WaitlistStatus } from "@/lib/types";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 
 export function BranchWaitlistSection(props: {
@@ -38,6 +41,9 @@ export function BranchWaitlistSection(props: {
   const [loading, setLoading] = useState(false);
   const [confirmLoadingId, setConfirmLoadingId] = useState<string | null>(null);
   const [filterDay, setFilterDay] = useState<string | null>(fixedDay ?? null);
+  const [statusFilter, setStatusFilter] = useState<WaitlistStatus | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const effectiveDay = fixedDay ?? filterDay ?? undefined;
 
@@ -69,11 +75,31 @@ export function BranchWaitlistSection(props: {
     void loadEntries();
   }, [loadEntries]);
 
-  const summary = useMemo(() => {
-    const waiting = entries.filter((item) => item.status === "waiting").length;
-    const offered = entries.filter((item) => item.status === "offered").length;
-    return { waiting, offered, total: entries.length };
-  }, [entries]);
+  const statusFilteredEntries = useMemo(
+    () =>
+      statusFilter ? entries.filter((entry) => entry.status === statusFilter) : entries,
+    [entries, statusFilter]
+  );
+
+  const displayCount = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) {
+      return statusFilteredEntries.length;
+    }
+    return statusFilteredEntries.filter((entry) => {
+      const haystack = [
+        entry.position,
+        entry.partySize,
+        entry.status,
+        effectiveDay ? dayjs(effectiveDay).format("DD/MM/YYYY") : "",
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(q);
+    }).length;
+  }, [effectiveDay, searchQuery, statusFilteredEntries]);
+
+  const sectionTitle = showHeader ? `Hàng chờ (${displayCount})` : "";
 
   const handleConfirmOffer = async (entryId: string) => {
     if (!hasSupabase || isEmployee) {
@@ -101,62 +127,97 @@ export function BranchWaitlistSection(props: {
     }
   };
 
-  const content = (
-    <Stack gap="sm">
-      {showHeader ? (
-        <Stack gap={4}>
-          <Text fw={600} size={isCompact ? "sm" : "md"}>
-            Khách trong hàng chờ
-          </Text>
-          <Text size="sm" c="dimmed">
-            {effectiveDay
-              ? `Ngày ${dayjs(effectiveDay).format("DD/MM/YYYY")} · `
-              : "Tất cả ngày · "}
-            {summary.total} khách ({summary.waiting} đang chờ
-            {summary.offered > 0 ? `, ${summary.offered} được mời` : ""})
-          </Text>
-        </Stack>
-      ) : null}
+  const dateFilterControl =
+    showDateFilter && !fixedDay ? (
+      <DatePickerInput
+        label="Lọc theo ngày đến"
+        placeholder="Tất cả ngày"
+        clearable
+        value={filterDay}
+        onChange={setFilterDay}
+        valueFormat="DD/MM/YYYY"
+        size={isCompact ? "md" : "sm"}
+        w={isCompact ? undefined : 220}
+      />
+    ) : null;
 
-      {showDateFilter && !fixedDay ? (
-        <Group align="flex-end" wrap="wrap" gap="sm">
-          <DatePickerInput
-            label="Lọc theo ngày đến"
-            placeholder="Tất cả ngày"
-            clearable
-            value={filterDay ? dayjs(filterDay).toDate() : null}
-            onChange={(value) => {
-              setFilterDay(value ? dayjs(value).format("YYYY-MM-DD") : null);
-            }}
-            valueFormat="DD/MM/YYYY"
-            size={isCompact ? "md" : "sm"}
-            w={isCompact ? "100%" : 220}
-          />
-        </Group>
-      ) : null}
-
-      {loading ? (
-        <Group gap="xs" justify="center" py="lg">
-          <Loader size="sm" />
-          <Text size="sm" c="dimmed">
-            Đang tải hàng chờ...
-          </Text>
-        </Group>
-      ) : (
-        <TableBlockWaitlistTable
-          records={entries}
-          isEmployee={isEmployee}
-          confirmLoadingId={confirmLoadingId}
-          onConfirmOffer={handleConfirmOffer}
-          showLocationColumns
-        />
-      )}
-    </Stack>
+  const waitlistTable = loading ? (
+    <Group gap="xs" justify="center" py="lg">
+      <Loader size="sm" />
+      <Text size="sm" c="dimmed">
+        Đang tải hàng chờ...
+      </Text>
+    </Group>
+  ) : (
+    <TableBlockWaitlistTable
+      records={entries}
+      isEmployee={isEmployee}
+      confirmLoadingId={confirmLoadingId}
+      onConfirmOffer={handleConfirmOffer}
+      showLocationColumns
+      statusFilter={statusFilter}
+      onStatusFilterChange={setStatusFilter}
+      searchQuery={isCompact && !embedded ? searchQuery : undefined}
+      onSearchQueryChange={
+        isCompact && !embedded
+          ? (value) => {
+              setSearchQuery(value);
+            }
+          : undefined
+      }
+      hideToolbar={isCompact && !embedded}
+    />
   );
 
   if (embedded) {
-    return content;
+    return (
+      <Stack gap="sm">
+        {dateFilterControl}
+        {waitlistTable}
+      </Stack>
+    );
   }
 
-  return <PortalSectionCard>{content}</PortalSectionCard>;
+  if (isCompact) {
+    return (
+      <PortalListSectionMobile
+        title={sectionTitle}
+        headerFilters={
+          <WaitlistStatusFilterChips
+            value={statusFilter}
+            onChange={setStatusFilter}
+            size="xs"
+          />
+        }
+        filtersToolbar={
+          <BookingListFiltersToolbar
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+            searchPlaceholder="Khách, khung giờ, trạng thái..."
+            filtersOpen={filtersOpen}
+            onFiltersOpenChange={setFiltersOpen}
+            collapseFilters={dateFilterControl ?? <Text size="sm" c="dimmed">Không có bộ lọc thêm.</Text>}
+          />
+        }
+      >
+        {waitlistTable}
+      </PortalListSectionMobile>
+    );
+  }
+
+  return (
+    <PortalListSectionDesktop
+      title={sectionTitle}
+      headerFilters={
+        <WaitlistStatusFilterChips value={statusFilter} onChange={setStatusFilter} />
+      }
+    >
+      {dateFilterControl ? (
+        <Stack gap="sm" mb="sm">
+          {dateFilterControl}
+        </Stack>
+      ) : null}
+      {waitlistTable}
+    </PortalListSectionDesktop>
+  );
 }
