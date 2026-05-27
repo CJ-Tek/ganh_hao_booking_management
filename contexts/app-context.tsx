@@ -139,6 +139,7 @@ type ActionResult = {
   message: string;
   code?: typeof DUPLICATE_BOOKING_CODE;
   duplicates?: BookingDuplicateInfo[];
+  bookingId?: string;
 };
 
 interface AppContextValue {

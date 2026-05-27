@@ -34,6 +34,7 @@ import {
   BookingDayListModal,
   type BookingDayListModalHandle,
 } from "@/components/booking-management/booking-day-list-modal";
+import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
 import { BookingStatusFilterChips } from "@/components/booking-management/booking-status-filter-chips";
 
 import { PortalPageTitle, PortalSectionCard, PortalStickyHeader } from "@/components/portal-page";
@@ -76,6 +77,8 @@ export const BookingCalendarPanel = forwardRef<
     onDayBookingRowClick?: (booking: Booking) => void;
     /** Omit section card + intro copy when parent wraps the panel (e.g. floor-map accordion). */
     embedded?: boolean;
+    /** Show "Tạo booking" in page header. Default true when `showHeader` and not `embedded`. */
+    showCreateBookingButton?: boolean;
   }
 >(function BookingCalendarPanel(props, ref) {
   const {
@@ -88,11 +91,15 @@ export const BookingCalendarPanel = forwardRef<
     showDayListButton = true,
     onDayBookingRowClick,
     embedded = false,
+    showCreateBookingButton: showCreateBookingButtonProp,
   } = props;
 
   const router = useRouter();
 
-  const { state, filteredBranchIds } = useAppContext();
+  const { state, filteredBranchIds, currentUser } = useAppContext();
+  const isEmployee = currentUser?.role === "employee";
+  const showCreateBookingButton =
+    showCreateBookingButtonProp ?? (showHeader && !embedded && !isEmployee);
 
   const isCompact = usePortalCompact();
 
@@ -111,12 +118,20 @@ export const BookingCalendarPanel = forwardRef<
   const dayListModalRef = useRef<BookingDayListModalHandle | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<CalendarStatusFilter>("all");
+  const [createBookingModalOpened, setCreateBookingModalOpened] = useState(false);
 
   const today = dayjs();
 
   const selectDayOnly = interaction === "select-day-only";
 
-
+  const calendarIntroText = useMemo(() => {
+    if (selectDayOnly) {
+      return showDayListButton
+        ? "Chọn ngày để cập nhật trạng thái bàn trên sơ đồ. Dùng nút Danh sách booking để xem chi tiết."
+        : "Chọn ngày để cập nhật trạng thái bàn trên sơ đồ. Dùng Danh sách booking trên thanh công cụ sơ đồ để xem chi tiết.";
+    }
+    return "Lịch tháng hiển thị tổng quan booking từng ngày. Chọn một ngày để xem bảng chi tiết.";
+  }, [selectDayOnly, showDayListButton]);
 
   const setSelectedDate = useCallback(
 
@@ -526,13 +541,26 @@ export const BookingCalendarPanel = forwardRef<
 
       {showHeader ? (
 
-        <PortalStickyHeader justify="space-between" align="end" wrap="wrap" gap="sm">
+        <PortalStickyHeader justify="space-between" align="center" wrap="wrap" gap="sm">
 
-          <PortalPageTitle order={isCompact ? 3 : 2}>
+          <div style={{ minWidth: 0, flex: "1 1 auto" }}>
+            <PortalPageTitle order={isCompact ? 3 : 2} mb={0}>
+              {isCompact ? compactTitle : title}
+            </PortalPageTitle>
+            <Text c="dimmed" size={isCompact ? "xs" : "sm"}>
+              {calendarIntroText}
+            </Text>
+          </div>
 
-            {isCompact ? compactTitle : title}
-
-          </PortalPageTitle>
+          {showCreateBookingButton ? (
+            <Button
+              color="brand"
+              size={isCompact || isNarrowCalendar ? "sm" : "compact-sm"}
+              onClick={() => setCreateBookingModalOpened(true)}
+            >
+              Tạo booking
+            </Button>
+          ) : null}
 
         </PortalStickyHeader>
 
@@ -542,13 +570,11 @@ export const BookingCalendarPanel = forwardRef<
         calendarLayout
       ) : (
         <PortalSectionCard>
-          <Text c="dimmed" mb="sm" size={isCompact ? "xs" : "sm"}>
-            {selectDayOnly
-              ? showDayListButton
-                ? "Chọn ngày để cập nhật trạng thái bàn trên sơ đồ. Dùng nút Danh sách booking để xem chi tiết."
-                : "Chọn ngày để cập nhật trạng thái bàn trên sơ đồ. Dùng Danh sách booking trên thanh công cụ sơ đồ để xem chi tiết."
-              : "Lịch tháng hiển thị tổng quan booking từng ngày. Chọn một ngày để xem bảng chi tiết."}
-          </Text>
+          {!showHeader ? (
+            <Text c="dimmed" mb="sm" size={isCompact ? "xs" : "sm"}>
+              {calendarIntroText}
+            </Text>
+          ) : null}
           {calendarLayout}
         </PortalSectionCard>
       )}
@@ -559,6 +585,16 @@ export const BookingCalendarPanel = forwardRef<
         onSelectedDateChange={setSelectedDate}
         onDayBookingRowClick={handleDayBookingRowClick}
       />
+
+      {showCreateBookingButton ? (
+        <CreateBookingModal
+          opened={createBookingModalOpened}
+          onClose={() => setCreateBookingModalOpened(false)}
+          onFocusExistingBooking={(booking) => {
+            openDayListModalForBooking(booking);
+          }}
+        />
+      ) : null}
 
     </Stack>
   );

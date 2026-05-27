@@ -85,6 +85,8 @@ export type ActionResult = {
   message: string;
   code?: typeof DUPLICATE_BOOKING_CODE;
   duplicates?: BookingDuplicateInfo[];
+  /** Set when a booking row was created (not waitlist-only). */
+  bookingId?: string;
 };
 
 type Result = ActionResult;
@@ -1231,7 +1233,11 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
         branch_id: input.branchId,
       });
 
-      return { ok: true, message: `Đã tạo booking trên cụm ${groupCheck.mergedName}.` };
+      return {
+        ok: true,
+        message: `Đã tạo booking trên cụm ${groupCheck.mergedName}.`,
+        bookingId: mergeOutcome.booking_id,
+      };
     }
 
     return { ok: false, message: "Không nhận được kết quả khi tạo booking cụm bàn gộp." };
@@ -1340,10 +1346,16 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
       branch_id: input.branchId,
     });
 
-    return { ok: true, message: "Đã tạo booking thành công." };
+    return {
+      ok: true,
+      message: "Đã tạo booking thành công.",
+      bookingId: normalizedOutcome.booking_id,
+    };
   }
 
-  const { error: bookingError } = await (client as any).from("bookings").insert({
+  const { data: insertedBooking, error: bookingError } = await (client as any)
+    .from("bookings")
+    .insert({
     customer_id: customerId,
     branch_id: input.branchId,
     area_id: input.areaId ?? null,
@@ -1357,7 +1369,9 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     status: "pending",
     checked_in_at: null,
     no_show_marked_at: null,
-  });
+  })
+    .select("id")
+    .single();
   if (bookingError) {
     return { ok: false, message: bookingError.message };
   }
@@ -1372,7 +1386,11 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     branch_id: input.branchId,
   });
 
-  return { ok: true, message: "Đã tạo booking thành công." };
+  return {
+    ok: true,
+    message: "Đã tạo booking thành công.",
+    bookingId: insertedBooking.id as string,
+  };
 }
 
 export async function assignBookingToTableInSupabase(input: {

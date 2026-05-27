@@ -51,6 +51,10 @@ import {
   type BookingDayListModalHandle,
 } from "@/components/booking-management/booking-day-list-modal";
 import { BookingOrderDetailModal } from "@/components/booking-management/booking-order-detail-modal";
+import {
+  BookingCreatedNextStepModal,
+  type BookingCreatedNextStepPayload,
+} from "@/components/booking-management/booking-created-next-step-modal";
 import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
 import { useBookingManagement } from "@/components/booking-management/use-booking-management";
 import { MergeGroupsPanel } from "@/components/merge-groups/merge-groups-panel";
@@ -114,7 +118,12 @@ import {
   resolveTableDropAtCell,
 } from "@/lib/floor-map-merge-layout";
 import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
-import { FLOOR_MAP_DATE_PARAM, parseFloorMapDateParam } from "@/lib/floor-map-routes";
+import {
+  buildFloorMapHref,
+  FLOOR_MAP_DATE_PARAM,
+  FLOOR_MAP_FOCUS_BOOKING_PARAM,
+  parseFloorMapDateParam,
+} from "@/lib/floor-map-routes";
 import { openPortalConfirmModal } from "@/lib/portal-confirm-modal";
 import {
   applySnapshotToTablesInArea,
@@ -596,7 +605,11 @@ export default function FloorMapPage() {
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [floorMapSelectedDate, setFloorMapSelectedDate] = useState(() => dayjs());
   const [createBookingModalOpened, setCreateBookingModalOpened] = useState(false);
+  const [registerCreatedNextStep, setRegisterCreatedNextStep] =
+    useState<BookingCreatedNextStepPayload | null>(null);
+  const [registerCreatedNextStepOpened, setRegisterCreatedNextStepOpened] = useState(false);
   const [waitlistModalOpened, setWaitlistModalOpened] = useState(false);
+  const consumedFloorFocusBookingRef = useRef<string | null>(null);
 
   useEffect(() => {
     const dateFromUrl = parseFloorMapDateParam(searchParams.get(FLOOR_MAP_DATE_PARAM));
@@ -613,6 +626,24 @@ export default function FloorMapPage() {
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const dayListModalRef = useRef<BookingDayListModalHandle | null>(null);
+  const focusBookingIdFromUrl = searchParams.get(FLOOR_MAP_FOCUS_BOOKING_PARAM);
+  useEffect(() => {
+    if (
+      !focusBookingIdFromUrl ||
+      consumedFloorFocusBookingRef.current === focusBookingIdFromUrl
+    ) {
+      return;
+    }
+    const booking = state.bookings.find((item) => item.id === focusBookingIdFromUrl);
+    if (!booking) {
+      return;
+    }
+    consumedFloorFocusBookingRef.current = focusBookingIdFromUrl;
+    const date = dayjs(booking.bookingAt);
+    setFloorMapSelectedDate(date);
+    dayListModalRef.current?.openDayListModalForBooking(booking);
+    router.replace(buildFloorMapHref(date));
+  }, [focusBookingIdFromUrl, router, state.bookings]);
   const panStateRef = useRef<PanState | null>(null);
   const placementTapRef = useRef<{
     pointerId: number;
@@ -2755,12 +2786,22 @@ export default function FloorMapPage() {
         });
         return;
       }
-      notifications.show({
-        color: result.ok ? "green" : "red",
-        message: result.message,
-      });
+      if (!result.ok) {
+        notifications.show({ color: "red", message: result.message });
+      } else if (!result.bookingId) {
+        notifications.show({ color: "green", message: result.message });
+      }
       if (result.ok) {
         closeRegistrationPanel();
+        if (result.bookingId) {
+          setRegisterCreatedNextStep({
+            bookingId: result.bookingId,
+            bookingAt: bookingAtIso,
+            customerName: formatVietnamesePersonName(customerName.trim()),
+            message: result.message,
+          });
+          setRegisterCreatedNextStepOpened(true);
+        }
       }
     };
 
@@ -5138,6 +5179,33 @@ export default function FloorMapPage() {
         onClose={() => setCreateBookingModalOpened(false)}
         onFocusExistingBooking={(booking) => {
           dayListModalRef.current?.openDayListModalForBooking(booking);
+        }}
+        onViewCreatedBookingInFloorMap={(payload) => {
+          const booking = state.bookings.find((item) => item.id === payload.bookingId);
+          if (booking) {
+            setFloorMapSelectedDate(dayjs(booking.bookingAt));
+            dayListModalRef.current?.openDayListModalForBooking(booking);
+            return;
+          }
+          const date = dayjs(payload.bookingAt);
+          setFloorMapSelectedDate(date);
+          router.replace(buildFloorMapHref(date, { focusBookingId: payload.bookingId }));
+        }}
+      />
+
+      <BookingCreatedNextStepModal
+        opened={registerCreatedNextStepOpened}
+        onClose={() => {
+          setRegisterCreatedNextStepOpened(false);
+          setRegisterCreatedNextStep(null);
+        }}
+        payload={registerCreatedNextStep}
+        onViewInFloorMap={(payload) => {
+          const booking = state.bookings.find((item) => item.id === payload.bookingId);
+          if (booking) {
+            setFloorMapSelectedDate(dayjs(booking.bookingAt));
+            dayListModalRef.current?.openDayListModalForBooking(booking);
+          }
         }}
       />
 

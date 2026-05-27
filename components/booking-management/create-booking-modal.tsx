@@ -11,6 +11,10 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  BookingCreatedNextStepModal,
+  type BookingCreatedNextStepPayload,
+} from "@/components/booking-management/booking-created-next-step-modal";
 import { MergeRecommendationCard } from "@/components/booking-management/merge-recommendation-card";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import {
@@ -42,6 +46,8 @@ export type CreateBookingModalProps = {
   onClose: () => void;
   /** When user chooses to view an existing duplicate booking from the confirm dialog. */
   onFocusExistingBooking?: (booking: Booking) => void;
+  /** When already on Sơ đồ — open day-list modal for the new booking instead of routing. */
+  onViewCreatedBookingInFloorMap?: (payload: BookingCreatedNextStepPayload) => void;
 };
 
 const emptyVoiceFields = (): VoiceBookingFormFields => ({
@@ -60,6 +66,7 @@ export function CreateBookingModal({
   opened,
   onClose,
   onFocusExistingBooking,
+  onViewCreatedBookingInFloorMap,
 }: CreateBookingModalProps) {
   const {
     state,
@@ -77,6 +84,10 @@ export function CreateBookingModal({
   const [voiceFields, setVoiceFields] = useState<VoiceBookingFormFields>(emptyVoiceFields);
   const [recommendationBusyKey, setRecommendationBusyKey] = useState<string | null>(null);
   const [voiceFieldPatch, setVoiceFieldPatch] = useState<VoiceBookingFieldPatch | null>(null);
+  const [createdNextStep, setCreatedNextStep] = useState<BookingCreatedNextStepPayload | null>(
+    null
+  );
+  const [createdNextStepOpened, setCreatedNextStepOpened] = useState(false);
 
   const resetCreateForm = useCallback(() => {
     setVoiceFields(emptyVoiceFields());
@@ -270,14 +281,27 @@ export function CreateBookingModal({
       );
       return;
     }
-    notifications.show({
-      color: result.ok ? "green" : "red",
-      message: result.message,
-    });
+    if (!result.ok) {
+      notifications.show({ color: "red", message: result.message });
+    } else if (!result.bookingId) {
+      notifications.show({ color: "green", message: result.message });
+    }
     if (result.ok) {
       const switchedFrom = branchId;
+      const createdName = formatVietnamesePersonName(customerName);
       resetCreateForm();
       onClose();
+      if (result.bookingId) {
+        setCreatedNextStep({
+          bookingId: result.bookingId,
+          bookingAt: dayjs(bookingAt).toISOString(),
+          customerName: createdName,
+          message: result.message,
+          guestCountSpecified:
+            typeof guestCount === "number" && Number.isFinite(guestCount) && guestCount >= 1,
+        });
+        setCreatedNextStepOpened(true);
+      }
       if (
         currentUser?.role === "manager" &&
         switchedFrom &&
@@ -358,6 +382,7 @@ export function CreateBookingModal({
   const createFormDisabled = isCreating;
 
   return (
+    <>
     <Modal
       opened={opened}
       onClose={closeModal}
@@ -509,5 +534,15 @@ export function CreateBookingModal({
         </Stack>
       </PortalSectionCard>
     </Modal>
+    <BookingCreatedNextStepModal
+      opened={createdNextStepOpened}
+      onClose={() => {
+        setCreatedNextStepOpened(false);
+        setCreatedNextStep(null);
+      }}
+      payload={createdNextStep}
+      onViewInFloorMap={onViewCreatedBookingInFloorMap}
+    />
+    </>
   );
 }
