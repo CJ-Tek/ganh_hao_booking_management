@@ -1,3 +1,4 @@
+import dayjs from "dayjs";
 import { NextResponse } from "next/server";
 
 import { isSupabaseStoreServerConfigured } from "@/lib/supabase-store-server";
@@ -31,6 +32,13 @@ const handlers: Record<string, StoreHandler> = {
   fetchFloorMapSlice: (payload) => {
     const p = payload as { branchIds?: string[] };
     return store.fetchFloorMapSliceInSupabase(p?.branchIds ?? []);
+  },
+  fetchFloorMapDayBookings: (payload) => {
+    const p = payload as { branchIds?: string[]; layoutDate?: string };
+    return store.fetchFloorMapDayBookingsInSupabase(
+      p?.branchIds ?? [],
+      p?.layoutDate ?? dayjs().format("YYYY-MM-DD")
+    );
   },
   updateBookingRuntimeSettings: (payload) =>
     store.updateBookingRuntimeSettingsInSupabase(payload as Parameters<typeof store.updateBookingRuntimeSettingsInSupabase>[0]),

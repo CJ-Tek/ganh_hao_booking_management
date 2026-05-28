@@ -1,11 +1,11 @@
 import dayjs from "dayjs";
-import type { AppStateSnapshot, Booking } from "@/lib/types";
+import type { AppStateSnapshot, Booking, Customer } from "@/lib/types";
 
-/** Floor-map / booking-table sync subset of app state. */
-export type FloorMapStateSlice = Pick<
-  AppStateSnapshot,
-  "areas" | "tables" | "bookings" | "customers" | "mergeGroups"
->;
+/** Floor-map structural sync subset of app state (bookings loaded per day on the floor map). */
+export type FloorMapStateSlice = Pick<AppStateSnapshot, "areas" | "tables" | "mergeGroups"> & {
+  bookings?: Booking[];
+  customers?: Customer[];
+};
 
 function sortBookings(bookings: Booking[]): Booking[] {
   return [...bookings].sort(
@@ -30,28 +30,34 @@ export function mergeFloorMapSliceIntoState(
     ...prev.tables.filter((table) => !inScope(table.branchId)),
     ...slice.tables,
   ];
-  const bookings = sortBookings([
-    ...prev.bookings.filter((booking) => !inScope(booking.branchId)),
-    ...slice.bookings,
-  ]);
   const mergeGroups = [
     ...prev.mergeGroups.filter((group) => !inScope(group.branchId)),
     ...slice.mergeGroups,
   ];
 
   const customerMap = new Map(prev.customers.map((customer) => [customer.id, customer]));
-  for (const customer of slice.customers) {
-    customerMap.set(customer.id, customer);
+  if (slice.customers) {
+    for (const customer of slice.customers) {
+      customerMap.set(customer.id, customer);
+    }
   }
 
-  return {
+  const next: AppStateSnapshot = {
     ...prev,
     areas,
     tables,
-    bookings,
     mergeGroups,
     customers: [...customerMap.values()],
   };
+
+  if (slice.bookings) {
+    next.bookings = sortBookings([
+      ...prev.bookings.filter((booking) => !inScope(booking.branchId)),
+      ...slice.bookings,
+    ]);
+  }
+
+  return next;
 }
 
 /** Tables whose changes should use a floor slice reload instead of full snapshot. */
@@ -67,7 +73,10 @@ export const FLOOR_SYNC_REALTIME_TABLES = new Set([
 
 export function reloadScopeForRealtimeTable(table: string | undefined): "floor" | "full" {
   if (!table) {
-    return "floor";
+    return "full";
+  }
+  if (table === "bookings" || table === "customers") {
+    return "full";
   }
   return FLOOR_SYNC_REALTIME_TABLES.has(table) ? "floor" : "full";
 }

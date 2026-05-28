@@ -3,8 +3,10 @@ import { callStore } from "./store-client";
 import type {
   AppStateSnapshot,
   AppUser,
+  Booking,
   BookingRuntimeSettings,
   BookingStatus,
+  Customer,
   Role,
   TableBlockState,
   TableMergeGroup,
@@ -50,12 +52,23 @@ export async function fetchFloorMapSlice(
     return {
       areas: [],
       tables: [],
-      bookings: [],
-      customers: [],
       mergeGroups: [],
     };
   }
   return callStore("fetchFloorMapSlice", { branchIds: [...branchIds] });
+}
+
+export async function fetchFloorMapDayBookings(
+  branchIds: readonly string[],
+  layoutDate: string
+): Promise<{ bookings: Booking[]; customers: Customer[] }> {
+  if (!isSupabaseEnabled()) {
+    return { bookings: [], customers: [] };
+  }
+  return callStore("fetchFloorMapDayBookings", {
+    branchIds: [...branchIds],
+    layoutDate,
+  });
 }
 
 export async function loginWithSupabase(

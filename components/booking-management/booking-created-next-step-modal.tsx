@@ -83,9 +83,7 @@ export function BookingCreatedNextStepModal({
       onViewInFloorMap(payload);
       return;
     }
-    router.push(
-      buildFloorMapHref(visitDate, { focusBookingId: payload.bookingId })
-    );
+    router.push(buildFloorMapHref(visitDate));
   };
 
   return (

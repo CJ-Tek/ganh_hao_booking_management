@@ -22,7 +22,7 @@ import {
   Textarea,
   Tooltip,
 } from "@mantine/core";
-import { DatePickerInput, TimeInput } from "@mantine/dates";
+import { DatePickerInput } from "@mantine/dates";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
@@ -137,7 +137,17 @@ import {
   resolveFloorLayoutForDate,
   resolvedLayoutToSnapshot,
 } from "@/lib/floor-layout-resolve";
-import { getSupabaseBrowserClient } from "@/lib/supabase";
+import {
+  filterBookingsForFloorLayoutDate,
+  floorDayBookingsSnapshotEqual,
+  floorMapDayBookingsCacheKey,
+  mergeFloorDayBookingsWithGlobal,
+  patchFloorDayBookingInSlice,
+  patchFloorDayBookingsFromRealtime,
+  pruneFloorMapDayCacheRecord,
+} from "@/lib/floor-map-day-bookings";
+import { normalizeRealtimePayload } from "@/lib/realtime-booking-row";
+import { getSupabaseBrowserClient, isSupabaseRealtimeConfigured } from "@/lib/supabase";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import {
   BOOKING_GUEST_TYPE_OPTIONS,
@@ -154,6 +164,7 @@ import {
   mergeGroupPrimaryGuestHasArrived,
   pickPrimaryBookingOnMergeGroup,
   pickPrimaryBookingOnTable,
+  tableHasActiveBookingOnFloorDay,
 } from "@/lib/booking-meta";
 import {
   formatTableGuestCapacityHint,
@@ -171,6 +182,7 @@ import {
 } from "@/lib/merge-group-utils";
 import {
   confirmWaitlistOfferInSupabase,
+  fetchFloorMapDayBookings,
   getTableBlockStateInSupabase,
 } from "@/lib/supabase-store";
 import {
@@ -266,7 +278,9 @@ function isTableBlockTarget(target: EventTarget | null) {
     return false;
   }
   return Boolean(
-    el.closest("[data-table-block]") || el.closest("[data-register-panel]")
+    el.closest("[data-table-block]") ||
+      el.closest("[data-table-status-menu]") ||
+      el.closest("[data-register-panel]")
   );
 }
 
@@ -542,6 +556,12 @@ export default function FloorMapPage() {
   const [dayLayoutByKey, setDayLayoutByKey] = useState<
     Record<string, AreaFloorLayoutByDate | null | undefined>
   >({});
+  const [loadedDayBookingsByKey, setLoadedDayBookingsByKey] = useState<
+    Record<string, Booking[] | undefined>
+  >({});
+  const [loadedDayCustomersByKey, setLoadedDayCustomersByKey] = useState<
+    Record<string, Customer[] | undefined>
+  >({});
   const [layoutTemplatesOpen, setLayoutTemplatesOpen] = useState(false);
   const [registerTable, setRegisterTable] = useState<DiningTable | null>(null);
   /** Giữ chỗ = future slot (show datetime); Vào bàn ngay = now (hide datetime) */
@@ -644,7 +664,6 @@ export default function FloorMapPage() {
     consumedFloorFocusBookingRef.current = focusBookingIdFromUrl;
     const date = dayjs(booking.bookingAt);
     setFloorMapSelectedDate(date);
-    dayListModalRef.current?.openDayListModalForBooking(booking);
     router.replace(buildFloorMapHref(date));
   }, [focusBookingIdFromUrl, router, state.bookings]);
   const panStateRef = useRef<PanState | null>(null);
@@ -682,6 +701,7 @@ export default function FloorMapPage() {
   const resyncEditLayoutAfterSaveRef = useRef(false);
   const prevAreaIdForLayoutRef = useRef<string | null>(null);
   const prevModeForLayoutRef = useRef<CanvasMode>("view");
+  const dayFetchGenerationRef = useRef(0);
 
   /** Stable order so the default/fallback area does not jump when snapshot polling refreshes. */
   const availableAreas = useMemo(
@@ -707,6 +727,9 @@ export default function FloorMapPage() {
   );
   const activeAreaBranchId = activeArea?.branchId ?? null;
   const selectedLayoutDate = formatMergeGroupDate(floorMapSelectedDate);
+  const floorDayCacheKey = floorMapDayBookingsCacheKey(filteredBranchIds, selectedLayoutDate);
+  const loadedDayBookings = loadedDayBookingsByKey[floorDayCacheKey];
+  const loadedDayCustomers = loadedDayCustomersByKey[floorDayCacheKey] ?? [];
   const dayLayoutCacheKey = areaId ? floorLayoutDayKey(areaId, selectedLayoutDate) : null;
   const cachedDayLayout =
     dayLayoutCacheKey !== null ? dayLayoutByKey[dayLayoutCacheKey] : undefined;
@@ -776,16 +799,195 @@ export default function FloorMapPage() {
       return;
     }
     let cancelled = false;
-    setDayLayoutByKey({ [dayLayoutCacheKey]: undefined });
+    setDayLayoutByKey((prev) => ({ ...prev, [dayLayoutCacheKey]: undefined }));
     void fetchAreaFloorLayoutForDate(areaId, selectedLayoutDate).then((row) => {
       if (!cancelled) {
-        setDayLayoutByKey({ [dayLayoutCacheKey]: row });
+        setDayLayoutByKey((prev) => ({ ...prev, [dayLayoutCacheKey]: row }));
       }
     });
     return () => {
       cancelled = true;
     };
   }, [areaId, dayLayoutCacheKey, fetchAreaFloorLayoutForDate, hasSupabase, selectedLayoutDate]);
+
+  useEffect(() => {
+    setLoadedDayBookingsByKey((prev) =>
+      pruneFloorMapDayCacheRecord(prev, filteredBranchIds, selectedLayoutDate)
+    );
+    setLoadedDayCustomersByKey((prev) =>
+      pruneFloorMapDayCacheRecord(prev, filteredBranchIds, selectedLayoutDate)
+    );
+  }, [filteredBranchIds, selectedLayoutDate]);
+
+  useEffect(() => {
+    if (!hasSupabase || filteredBranchIds.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    const generation = ++dayFetchGenerationRef.current;
+    setLoadedDayBookingsByKey((prev) => {
+      const pruned = pruneFloorMapDayCacheRecord(prev, filteredBranchIds, selectedLayoutDate);
+      if (pruned[floorDayCacheKey] !== undefined) {
+        return pruned;
+      }
+      return { ...pruned, [floorDayCacheKey]: undefined };
+    });
+    void fetchFloorMapDayBookings(filteredBranchIds, selectedLayoutDate)
+      .then((slice) => {
+        if (cancelled || generation !== dayFetchGenerationRef.current) {
+          return;
+        }
+        setLoadedDayBookingsByKey((prev) =>
+          pruneFloorMapDayCacheRecord(
+            { ...prev, [floorDayCacheKey]: slice.bookings },
+            filteredBranchIds,
+            selectedLayoutDate
+          )
+        );
+        setLoadedDayCustomersByKey((prev) =>
+          pruneFloorMapDayCacheRecord(
+            { ...prev, [floorDayCacheKey]: slice.customers },
+            filteredBranchIds,
+            selectedLayoutDate
+          )
+        );
+      })
+      .catch(() => {
+        if (!cancelled && generation === dayFetchGenerationRef.current) {
+          setLoadedDayBookingsByKey((prev) =>
+            pruneFloorMapDayCacheRecord(
+              { ...prev, [floorDayCacheKey]: [] },
+              filteredBranchIds,
+              selectedLayoutDate
+            )
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [filteredBranchIds, floorDayCacheKey, hasSupabase, selectedLayoutDate]);
+
+  useEffect(() => {
+    setLoadedDayBookingsByKey((prev) => {
+      const current = prev[floorDayCacheKey];
+      if (current === undefined) {
+        return prev;
+      }
+      const next = mergeFloorDayBookingsWithGlobal(
+        current,
+        state.bookings,
+        selectedLayoutDate,
+        filteredBranchIds
+      );
+      if (floorDayBookingsSnapshotEqual(current, next)) {
+        return prev;
+      }
+      return pruneFloorMapDayCacheRecord(
+        { ...prev, [floorDayCacheKey]: next },
+        filteredBranchIds,
+        selectedLayoutDate
+      );
+    });
+  }, [filteredBranchIds, floorDayCacheKey, selectedLayoutDate, state.bookings]);
+
+  const patchFloorDayBookingOptimistic = useCallback(
+    (bookingId: string, patch: Partial<Booking>) => {
+      setLoadedDayBookingsByKey((prev) => {
+        const current = prev[floorDayCacheKey];
+        if (current === undefined) {
+          return prev;
+        }
+        const next = patchFloorDayBookingInSlice(current, bookingId, patch);
+        if (!next) {
+          return prev;
+        }
+        return pruneFloorMapDayCacheRecord(
+          { ...prev, [floorDayCacheKey]: next },
+          filteredBranchIds,
+          selectedLayoutDate
+        );
+      });
+    },
+    [filteredBranchIds, floorDayCacheKey, selectedLayoutDate]
+  );
+
+  const hasRealtime = isSupabaseRealtimeConfigured();
+
+  useEffect(() => {
+    if (!hasSupabase || !hasRealtime || filteredBranchIds.length === 0) {
+      return;
+    }
+    let cancelled = false;
+    const realtime = getSupabaseBrowserClient();
+    if (!realtime) {
+      return;
+    }
+
+    const applyBookingChange = (payload: unknown) => {
+      if (cancelled || isFloorLayoutRealtimeReloadBlocked()) {
+        return;
+      }
+      const normalized = normalizeRealtimePayload(payload);
+      setLoadedDayBookingsByKey((prev) => {
+        const current = prev[floorDayCacheKey] ?? [];
+        const next = patchFloorDayBookingsFromRealtime(
+          current,
+          normalized,
+          selectedLayoutDate,
+          filteredBranchIds
+        );
+        if (!next) {
+          return prev;
+        }
+        return pruneFloorMapDayCacheRecord(
+          { ...prev, [floorDayCacheKey]: next },
+          filteredBranchIds,
+          selectedLayoutDate
+        );
+      });
+    };
+
+    const channelName = `floor-map-day-bookings:${floorDayCacheKey}`;
+    let channel = realtime.channel(channelName);
+    if (filteredBranchIds.length === 0) {
+      channel = channel.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bookings" },
+        applyBookingChange
+      );
+    } else {
+      for (const branchId of filteredBranchIds) {
+        channel = channel.on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "bookings",
+            filter: `branch_id=eq.${branchId}`,
+          },
+          applyBookingChange
+        );
+      }
+    }
+
+    const bookingChannel = channel.subscribe((status) => {
+      if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        console.warn(`[realtime] ${channelName} status=${status}`);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      void realtime.removeChannel(bookingChannel);
+    };
+  }, [
+    filteredBranchIds,
+    floorDayCacheKey,
+    hasRealtime,
+    hasSupabase,
+    selectedLayoutDate,
+  ]);
 
   const selectedAreaTableCount = useMemo(() => {
     if (!areaId) {
@@ -801,17 +1003,23 @@ export default function FloorMapPage() {
     return state.bookings.filter((b) => b.areaId === areaId).length;
   }, [areaId, state.bookings]);
 
-  const floorMapDayBookings = useMemo(
-    () =>
-      state.bookings.filter(
-        (booking) =>
-          filteredBranchIds.includes(booking.branchId) &&
-          dayjs(booking.bookingAt).isSame(floorMapSelectedDate, "day")
-      ),
-    [filteredBranchIds, floorMapSelectedDate, state.bookings]
-  );
+  const floorMapDayBookings = useMemo(() => {
+    if (loadedDayBookings === undefined) {
+      return filterBookingsForFloorLayoutDate(
+        state.bookings,
+        selectedLayoutDate,
+        filteredBranchIds
+      );
+    }
+    return mergeFloorDayBookingsWithGlobal(
+      loadedDayBookings,
+      state.bookings,
+      selectedLayoutDate,
+      filteredBranchIds
+    );
+  }, [filteredBranchIds, loadedDayBookings, selectedLayoutDate, state.bookings]);
 
-  const bookingsForFloorTableDisplay = isEmployee ? state.bookings : floorMapDayBookings;
+  const bookingsForFloorTableDisplay = floorMapDayBookings;
 
   const activeBookingForDetail = useMemo((): Booking | null => {
     if (detailMergeGroup) {
@@ -1213,7 +1421,24 @@ export default function FloorMapPage() {
         message: result.message,
       });
       if (result.ok && (detailTable || detailMergeGroup)) {
-        await reload({ scope: "floor" });
+        const daySlice = await fetchFloorMapDayBookings(
+          filteredBranchIds,
+          selectedLayoutDate
+        );
+        setLoadedDayBookingsByKey((prev) =>
+          pruneFloorMapDayCacheRecord(
+            { ...prev, [floorDayCacheKey]: daySlice.bookings },
+            filteredBranchIds,
+            selectedLayoutDate
+          )
+        );
+        setLoadedDayCustomersByKey((prev) =>
+          pruneFloorMapDayCacheRecord(
+            { ...prev, [floorDayCacheKey]: daySlice.customers },
+            filteredBranchIds,
+            selectedLayoutDate
+          )
+        );
         const blockState = await getTableBlockStateInSupabase({
           ...(detailMergeGroup
             ? { mergeGroupId: detailMergeGroup.id }
@@ -1276,58 +1501,74 @@ export default function FloorMapPage() {
   };
 
   const handleDetailCheckIn = async () => {
-    if (!activeBookingForDetail) {
+    const booking = activeBookingForDetail;
+    if (!booking) {
       return;
     }
-    if (activeBookingForDetail.status !== "confirmed") {
+    if (booking.status !== "confirmed") {
       return;
     }
     if (!hasSupabase) {
       notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
       return;
     }
-    setDetailBookingActionLoading(true);
-    try {
-      await checkInBooking(activeBookingForDetail.id);
-      notifications.show({ color: "green", message: "Đã check-in." });
-      closeDetailModal();
-    } catch (error) {
-      notifications.show({
-        color: "red",
-        message: error instanceof Error ? error.message : "Check-in thất bại.",
+    const checkedInAt = dayjs().toISOString();
+    const revertPatch = {
+      status: booking.status,
+      checkedInAt: booking.checkedInAt,
+    };
+    const checkInPromise = checkInBooking(booking.id, booking);
+    patchFloorDayBookingOptimistic(booking.id, {
+      status: "seated",
+      checkedInAt,
+    });
+    closeDetailModal();
+    void checkInPromise
+      .then(() => {
+        notifications.show({ color: "green", message: "Đã check-in." });
+      })
+      .catch((error: unknown) => {
+        patchFloorDayBookingOptimistic(booking.id, revertPatch);
+        notifications.show({
+          color: "red",
+          message: error instanceof Error ? error.message : "Check-in thất bại.",
+        });
       });
-    } finally {
-      setDetailBookingActionLoading(false);
-    }
   };
 
   const handleDetailComplete = async () => {
-    if (!activeBookingForDetail) {
+    const booking = activeBookingForDetail;
+    if (!booking) {
       return;
     }
-    if (
-      activeBookingForDetail.status !== "checked_in" &&
-      activeBookingForDetail.status !== "seated"
-    ) {
+    if (booking.status !== "checked_in" && booking.status !== "seated") {
       return;
     }
     if (!hasSupabase) {
       notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
       return;
     }
-    setDetailBookingActionLoading(true);
-    try {
-      await updateBookingStatus(activeBookingForDetail.id, "completed");
-      notifications.show({ color: "green", message: "Đã hoàn thành booking." });
-      closeDetailModal();
-    } catch (error) {
-      notifications.show({
-        color: "red",
-        message: error instanceof Error ? error.message : "Không hoàn thành được booking.",
+    const revertPatch = {
+      status: booking.status,
+      checkedInAt: booking.checkedInAt,
+    };
+    const completePromise = updateBookingStatus(booking.id, "completed", booking);
+    patchFloorDayBookingOptimistic(booking.id, {
+      status: "completed",
+      checkedInAt: undefined,
+    });
+    closeDetailModal();
+    void completePromise
+      .then(() => {
+        notifications.show({ color: "green", message: "Đã hoàn thành booking." });
+      })
+      .catch((error: unknown) => {
+        patchFloorDayBookingOptimistic(booking.id, revertPatch);
+        notifications.show({
+          color: "red",
+          message: error instanceof Error ? error.message : "Không hoàn thành được booking.",
+        });
       });
-    } finally {
-      setDetailBookingActionLoading(false);
-    }
   };
 
   const openChangeTableForActiveBooking = () => {
@@ -1337,28 +1578,42 @@ export default function FloorMapPage() {
     setChangeTableBooking(activeBookingForDetail);
   };
 
-  const handleSubmitChangeTable = async (target: { areaId: string; tableId: string }) => {
-    if (!changeTableBooking) {
+  const handleSubmitChangeTable = (target: { areaId: string; tableId: string }) => {
+    const booking = changeTableBooking;
+    if (!booking) {
       return;
     }
-    setDetailBookingActionLoading(true);
-    try {
-      const result = await changeBookingTable({
-        bookingId: changeTableBooking.id,
-        areaId: target.areaId,
-        tableId: target.tableId,
-      });
+    const editedAt = dayjs().toISOString();
+    const revertPatch = {
+      areaId: booking.areaId,
+      tableId: booking.tableId,
+      mergeGroupId: booking.mergeGroupId,
+      lastEditedAt: booking.lastEditedAt,
+    };
+    const optimisticPatch = {
+      areaId: target.areaId,
+      tableId: target.tableId,
+      mergeGroupId: null as string | null,
+      lastEditedAt: editedAt,
+    };
+    const changePromise = changeBookingTable({
+      bookingId: booking.id,
+      areaId: target.areaId,
+      tableId: target.tableId,
+      seedBooking: booking,
+    });
+    patchFloorDayBookingOptimistic(booking.id, optimisticPatch);
+    setChangeTableBooking(null);
+    closeDetailModal();
+    void changePromise.then((result) => {
       notifications.show({
         color: result.ok ? "green" : "red",
         message: result.message,
       });
-      if (result.ok) {
-        setChangeTableBooking(null);
-        closeDetailModal();
+      if (!result.ok) {
+        patchFloorDayBookingOptimistic(booking.id, revertPatch);
       }
-    } finally {
-      setDetailBookingActionLoading(false);
-    }
+    });
   };
 
   /** Keep a concrete area id in state so the location Select does not follow unstable `areas[0]` on each reload. */
@@ -1761,10 +2016,13 @@ export default function FloorMapPage() {
 
   const tablesForFloorView = isEditMode ? layoutTablesInArea : floorMapDisplayTables;
 
-  const customerById = useMemo(
-    () => new Map(state.customers.map((customer) => [customer.id, customer])),
-    [state.customers]
-  );
+  const customerById = useMemo(() => {
+    const map = new Map(state.customers.map((customer) => [customer.id, customer]));
+    for (const customer of loadedDayCustomers) {
+      map.set(customer.id, customer);
+    }
+    return map;
+  }, [loadedDayCustomers, state.customers]);
 
   const primaryBookingByTableId = useMemo(() => {
     const map = new Map<string, Booking | null>();
@@ -2432,6 +2690,63 @@ export default function FloorMapPage() {
         });
       }
     });
+  };
+
+  const handleTableBlockComplete = async (table: DiningTable) => {
+    const booking = pickPrimaryBookingOnTable(table.id, bookingsForFloorTableDisplay);
+    if (
+      !booking ||
+      (booking.status !== "checked_in" && booking.status !== "seated")
+    ) {
+      notifications.show({
+        color: "yellow",
+        message: "Chỉ hoàn thành khi khách đã vào bàn hoặc đã check-in.",
+      });
+      return;
+    }
+    if (!hasSupabase) {
+      notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
+      return;
+    }
+    if (isTableStatusBusy(table.id)) {
+      return;
+    }
+    await runTableStatusAction(table.id, async () => {
+      try {
+        await updateBookingStatus(booking.id, "completed");
+        notifications.show({ color: "green", message: "Đã hoàn thành booking." });
+        if (detailTable?.id === table.id) {
+          closeDetailModal();
+        }
+      } catch (error) {
+        notifications.show({
+          color: "red",
+          message: error instanceof Error ? error.message : "Không hoàn thành được booking.",
+        });
+      }
+    });
+  };
+
+  const handleTableBlockLock = async (table: DiningTable) => {
+    if (tableHasActiveBookingOnFloorDay(table.id, floorMapDayBookings)) {
+      notifications.show({
+        color: "yellow",
+        message: "Không thể khóa bàn khi còn booking trong ngày đang xem.",
+      });
+      return;
+    }
+    const persisted = state.tables.find((item) => item.id === table.id);
+    if (persisted?.status === "locked") {
+      return;
+    }
+    await handleStatusChange(table, "locked");
+  };
+
+  const handleTableBlockUnlock = async (table: DiningTable) => {
+    if (table.status !== "locked") {
+      return;
+    }
+    await handleStatusChange(table, "available");
   };
 
   const closeRegistrationPanel = useCallback(() => {
@@ -3888,6 +4203,7 @@ export default function FloorMapPage() {
                 setFloorMapSelectedDate(dayjs(value, "YYYY-MM-DD"));
               }}
               valueFormat="DD/MM/YYYY"
+              dropdownType={isCompact ? "modal" : "popover"}
               size={isCompact ? "xs" : "sm"}
               maw={isCompact ? undefined : 280}
               style={{ flex: "1 1 auto", minWidth: isCompact ? "100%" : 200 }}
@@ -4127,7 +4443,7 @@ export default function FloorMapPage() {
                 const x = CANVAS_PADDING + node.col * effectiveNodeSpacing;
                 const y = CANVAS_PADDING + node.row * effectiveNodeSpacing;
                 return tables.map((table, stackIndex) => {
-                  const stackKey = `${table.id}-${node.row}-${node.col}-${stackIndex}`;
+                  const stackKey = `${table.id}-${selectedLayoutDate}-${node.row}-${node.col}-${stackIndex}`;
                   const style = {
                     left: x + stackIndex * FLOOR_TABLE_STACK_OFFSET_PX,
                     top: y + stackIndex * FLOOR_TABLE_STACK_OFFSET_PX,
@@ -4151,6 +4467,20 @@ export default function FloorMapPage() {
                     const peekCustomer = displayBooking
                       ? customerById.get(displayBooking.customerId)
                       : undefined;
+                    const showStatusMenu =
+                      !isMergeMember &&
+                      (table.status === "available" ||
+                        table.status === "locked" ||
+                        table.status === "occupied");
+                    const canComplete =
+                      table.status === "occupied" &&
+                      displayBooking != null &&
+                      (displayBooking.status === "checked_in" ||
+                        displayBooking.status === "seated");
+                    const canLock =
+                      table.status === "available" &&
+                      !tableHasActiveBookingOnFloorDay(table.id, floorMapDayBookings);
+                    const showUnlock = table.status === "locked";
                     return (
                       <FloorTableBlockView
                         key={stackKey}
@@ -4162,9 +4492,15 @@ export default function FloorMapPage() {
                         isEmployee={isEmployee}
                         isBusy={isTableStatusBusy(table.id)}
                         isDragging={dragState?.tableId === table.id}
+                        showStatusMenu={showStatusMenu}
+                        canComplete={canComplete}
+                        canLock={canLock}
+                        showUnlock={showUnlock}
                         onOpenTable={() => handleViewOrRegisterForTable(table)}
                         onOpenDetail={() => openDetailForTable(table)}
-                        onStatusChange={(nextStatus) => void handleStatusChange(table, nextStatus)}
+                        onCompleteBooking={() => void handleTableBlockComplete(table)}
+                        onLockTable={() => void handleTableBlockLock(table)}
+                        onUnlockTable={() => void handleTableBlockUnlock(table)}
                         onStatusMenuOpen={() => {
                           panStateRef.current = null;
                           placementTapRef.current = null;
@@ -5236,14 +5572,8 @@ export default function FloorMapPage() {
         }}
         onViewCreatedBookingInFloorMap={(payload) => {
           const booking = state.bookings.find((item) => item.id === payload.bookingId);
-          if (booking) {
-            setFloorMapSelectedDate(dayjs(booking.bookingAt));
-            dayListModalRef.current?.openDayListModalForBooking(booking);
-            return;
-          }
-          const date = dayjs(payload.bookingAt);
+          const date = dayjs(booking?.bookingAt ?? payload.bookingAt);
           setFloorMapSelectedDate(date);
-          router.replace(buildFloorMapHref(date, { focusBookingId: payload.bookingId }));
         }}
       />
 
@@ -5256,10 +5586,8 @@ export default function FloorMapPage() {
         payload={registerCreatedNextStep}
         onViewInFloorMap={(payload) => {
           const booking = state.bookings.find((item) => item.id === payload.bookingId);
-          if (booking) {
-            setFloorMapSelectedDate(dayjs(booking.bookingAt));
-            dayListModalRef.current?.openDayListModalForBooking(booking);
-          }
+          const date = dayjs(booking?.bookingAt ?? payload.bookingAt);
+          setFloorMapSelectedDate(date);
         }}
       />
 

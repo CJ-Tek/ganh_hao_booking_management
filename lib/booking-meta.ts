@@ -384,6 +384,16 @@ function isActiveFloorBooking(booking: Booking): boolean {
   );
 }
 
+/** True when the table has any non-terminal booking on the floor-map selected day. */
+export function tableHasActiveBookingOnFloorDay(
+  tableId: string,
+  dayBookings: readonly Booking[]
+): boolean {
+  return dayBookings.some(
+    (booking) => booking.tableId === tableId && isActiveFloorBooking(booking)
+  );
+}
+
 /** Prefer in-table seated guest, else soonest confirmed, else any active booking on the table. */
 export function pickPrimaryBookingOnTable(
   tableId: string,
@@ -477,7 +487,50 @@ export function deriveMergeGroupStatusFromDayBookings(
   return hasSeated ? "occupied" : "hold";
 }
 
-/** Floor-map calendar preview: derive block color from bookings on the selected day. */
+/**
+ * Higher rank = further along the booking lifecycle (used when merging day cache + global state).
+ * Prevents stale global rows from undoing optimistic check-in / complete on the floor map.
+ */
+export function bookingStatusAdvancementRank(status: BookingStatus): number {
+  switch (status) {
+    case "completed":
+    case "cancelled":
+    case "no_show":
+      return 90;
+    case "seated":
+    case "checked_in":
+      return 70;
+    case "confirmed":
+      return 50;
+    case "pending":
+      return 30;
+    default:
+      return 0;
+  }
+}
+
+/** Pick the row that best reflects current ops when day slice and AppContext disagree. */
+export function pickBookingForFloorDayMerge(dayRow: Booking, globalRow: Booking): Booking {
+  const dayRank = bookingStatusAdvancementRank(dayRow.status);
+  const globalRank = bookingStatusAdvancementRank(globalRow.status);
+  if (globalRank > dayRank) {
+    return globalRow;
+  }
+  if (dayRank > globalRank) {
+    return dayRow;
+  }
+  const dayEdited = dayRow.lastEditedAt ? dayjs(dayRow.lastEditedAt).valueOf() : 0;
+  const globalEdited = globalRow.lastEditedAt ? dayjs(globalRow.lastEditedAt).valueOf() : 0;
+  if (globalEdited > dayEdited) {
+    return { ...dayRow, ...globalRow };
+  }
+  if (dayEdited > globalEdited) {
+    return { ...globalRow, ...dayRow };
+  }
+  return { ...dayRow, ...globalRow };
+}
+
+/** Floor-map calendar preview: derive block color from bookings on the selected day only. */
 export function deriveTableStatusFromDayBookings(
   table: Pick<DiningTable, "id" | "status">,
   dayBookings: readonly Booking[]
@@ -493,6 +546,7 @@ export function deriveTableStatusFromDayBookings(
       booking.status !== "no_show"
   );
   if (onTable.length === 0) {
+    // Do not use global `tables.status` (hold/occupied) — it reflects live ops, not the selected day.
     return "available";
   }
   const hasSeated = onTable.some(

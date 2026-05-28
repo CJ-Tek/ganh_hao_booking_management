@@ -3,7 +3,7 @@
 import { ActionIcon, Badge, Menu, Stack, Text } from "@mantine/core";
 import dayjs from "dayjs";
 import { MoreVertical } from "lucide-react";
-import { memo, type CSSProperties } from "react";
+import { memo, type CSSProperties, type MouseEvent } from "react";
 import { bookingRowBusyStyle } from "@/lib/busy-row-style";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import type { Booking, DiningTable, TableStatus } from "@/lib/types";
@@ -15,6 +15,11 @@ const TABLE_STATUS_SURFACE_CLASS: Record<TableStatus, string> = {
   occupied: classes.statusSurface_occupied,
   locked: classes.statusSurface_locked,
 };
+
+function stopMenuAction(event: MouseEvent) {
+  event.stopPropagation();
+  event.preventDefault();
+}
 
 function TableBlockBookingPeek(props: {
   displayBooking: Booking | null;
@@ -51,9 +56,16 @@ export type FloorTableBlockViewProps = {
   isEmployee: boolean;
   isBusy: boolean;
   isDragging: boolean;
+  /** Trống, Khóa, or Đã ngồi — not Giữ chỏ (reservation). */
+  showStatusMenu: boolean;
+  canComplete: boolean;
+  canLock: boolean;
+  showUnlock: boolean;
   onOpenTable: () => void;
   onOpenDetail: () => void;
-  onStatusChange: (status: TableStatus) => void;
+  onCompleteBooking: () => void;
+  onLockTable: () => void;
+  onUnlockTable: () => void;
   onStatusMenuOpen: () => void;
   onStatusMenuClose: () => void;
 };
@@ -68,12 +80,20 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
     isEmployee,
     isBusy,
     isDragging,
+    showStatusMenu,
+    canComplete,
+    canLock,
+    showUnlock,
     onOpenTable,
     onOpenDetail,
-    onStatusChange,
+    onCompleteBooking,
+    onLockTable,
+    onUnlockTable,
     onStatusMenuOpen,
     onStatusMenuClose,
   } = props;
+
+  const hasQuickActions = canComplete || canLock || showUnlock;
 
   return (
     <div
@@ -95,7 +115,17 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
           onOpenTable();
         }}
       >
-        {!isEmployee ? (
+        <Text fw={600} size="sm" lineClamp={1}>
+          {table.name}
+        </Text>
+        <Text size="xs">{table.seats} ghế</Text>
+        <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
+          {tableStatusLabel[table.status]}
+        </Badge>
+        <TableBlockBookingPeek displayBooking={displayBooking} customerName={customerName} />
+      </div>
+      {showStatusMenu && !isEmployee ? (
+        <div className={classes.tableBlockStatusMenuAnchor} data-table-status-menu="">
           <Menu
             withinPortal
             position="bottom-end"
@@ -110,37 +140,61 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
                 color="gray"
                 size="sm"
                 className={classes.tableBlockStatusMenuBtn}
-                aria-label="Đổi trạng thái"
-                data-table-status-menu=""
-                onClick={(event) => event.stopPropagation()}
+                aria-label="Thao tác bàn"
+                disabled={isBusy}
+                onClick={stopMenuAction}
               >
                 <MoreVertical size={14} />
               </ActionIcon>
             </Menu.Target>
             <Menu.Dropdown>
-              <Menu.Item onClick={onOpenDetail}>Lịch sử booking & hàng chờ</Menu.Item>
-              <Menu.Divider />
-              {(["available", "hold", "occupied", "locked"] as TableStatus[]).map((nextStatus) => (
+              <Menu.Item
+                disabled={isBusy}
+                onClick={(event) => {
+                  stopMenuAction(event);
+                  onOpenDetail();
+                }}
+              >
+                Lịch sử booking & hàng chờ
+              </Menu.Item>
+              {hasQuickActions ? <Menu.Divider /> : null}
+              {canComplete ? (
                 <Menu.Item
-                  key={nextStatus}
-                  disabled={table.status === nextStatus || isBusy}
-                  onClick={() => onStatusChange(nextStatus)}
+                  disabled={isBusy}
+                  onClick={(event) => {
+                    stopMenuAction(event);
+                    onCompleteBooking();
+                  }}
                 >
-                  {tableStatusLabel[nextStatus]}
+                  Hoàn thành
                 </Menu.Item>
-              ))}
+              ) : null}
+              {showUnlock ? (
+                <Menu.Item
+                  disabled={isBusy}
+                  onClick={(event) => {
+                    stopMenuAction(event);
+                    onUnlockTable();
+                  }}
+                >
+                  Mở khóa
+                </Menu.Item>
+              ) : null}
+              {canLock ? (
+                <Menu.Item
+                  disabled={isBusy}
+                  onClick={(event) => {
+                    stopMenuAction(event);
+                    onLockTable();
+                  }}
+                >
+                  Khóa
+                </Menu.Item>
+              ) : null}
             </Menu.Dropdown>
           </Menu>
-        ) : null}
-        <Text fw={600} size="sm" lineClamp={1}>
-          {table.name}
-        </Text>
-        <Text size="xs">{table.seats} ghế</Text>
-        <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
-          {tableStatusLabel[table.status]}
-        </Badge>
-        <TableBlockBookingPeek displayBooking={displayBooking} customerName={customerName} />
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -155,6 +209,10 @@ function propsAreEqual(prev: FloorTableBlockViewProps, next: FloorTableBlockView
     prev.isEmployee === next.isEmployee &&
     prev.isBusy === next.isBusy &&
     prev.isDragging === next.isDragging &&
+    prev.showStatusMenu === next.showStatusMenu &&
+    prev.canComplete === next.canComplete &&
+    prev.canLock === next.canLock &&
+    prev.showUnlock === next.showUnlock &&
     prev.displayBooking?.id === next.displayBooking?.id &&
     prev.displayBooking?.status === next.displayBooking?.status &&
     prev.displayBooking?.bookingAt === next.displayBooking?.bookingAt &&

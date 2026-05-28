@@ -32,9 +32,19 @@ import {
 } from "@/lib/employee-access";
 import { isFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
 import { mergeFloorMapSliceIntoState, reloadScopeForRealtimeTable } from "@/lib/floor-map-state-slice";
+import {
+  mapRealtimeBookingRow,
+  normalizeRealtimePayload,
+  type RealtimeBookingPayload,
+} from "@/lib/realtime-booking-row";
 import { notifyWaitlistChanged } from "@/lib/realtime-sync";
 import { resolveMergeGroupDateRange } from "@/lib/merge-group-utils";
-import { applyBookingPatchToSnapshot } from "@/lib/optimistic-booking-sync";
+import {
+  applyBookingPatchToSnapshot,
+  applyBookingRowToSnapshot,
+  applyCreateBookingToSnapshot,
+  removeBookingFromSnapshot,
+} from "@/lib/optimistic-booking-sync";
 import { clampFloorNodeSpacing } from "@/lib/floor-map-layout";
 import {
   addAreaInSupabase,
@@ -187,6 +197,7 @@ interface AppContextValue {
     areaId: string;
     tableId: string | null;
     mergeGroupId?: string | null;
+    seedBooking?: Booking;
   }) => Promise<ActionResult>;
   createTableMergeGroup: (input: {
     branchId: string;
@@ -214,8 +225,12 @@ interface AppContextValue {
     startDate: string;
     endDate: string;
   }) => Promise<ActionResult>;
-  updateBookingStatus: (bookingId: string, status: BookingStatus) => Promise<void>;
-  checkInBooking: (bookingId: string) => Promise<void>;
+  updateBookingStatus: (
+    bookingId: string,
+    status: BookingStatus,
+    seedBooking?: Booking
+  ) => Promise<void>;
+  checkInBooking: (bookingId: string, seedBooking?: Booking) => Promise<void>;
   deleteCustomers: (customerIds: string[]) => Promise<ActionResult>;
   upsertTable: (table: Omit<DiningTable, "id"> & { id?: string }) => Promise<void>;
   upsertTablesBatch: (tables: Array<Omit<DiningTable, "id"> & { id?: string }>) => Promise<void>;
@@ -397,6 +412,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
 
   const lastReloadAtRef = useRef<number>(0);
   const reloadInFlightRef = useRef(false);
+  const reloadPendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reloadPendingSourceRef = useRef<string | undefined>(undefined);
+  const failedPatchReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const run = async () => {
@@ -419,12 +437,21 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     const realtimeChannelName = `app-snapshot-sync:${currentUser?.id ?? "guest"}`;
     const floorEditSensitiveTables = new Set(["tables", "areas", "area_floor_layout_by_date"]);
 
-    const runReload = (sourceTable?: string) => {
+    const flushReload = () => {
+      reloadPendingTimerRef.current = null;
       if (cancelled) return;
       if (isFloorLayoutRealtimeReloadBlocked()) return;
-      if (reloadInFlightRef.current) return;
-      // Burst updates can emit multiple row changes; cap reload cadence to avoid thrash.
-      if (Date.now() - lastReloadAtRef.current < 400) return;
+      if (reloadInFlightRef.current) {
+        reloadPendingTimerRef.current = setTimeout(flushReload, 150);
+        return;
+      }
+      const elapsed = Date.now() - lastReloadAtRef.current;
+      if (elapsed < 400) {
+        reloadPendingTimerRef.current = setTimeout(flushReload, 400 - elapsed);
+        return;
+      }
+      const sourceTable = reloadPendingSourceRef.current;
+      reloadPendingSourceRef.current = undefined;
       reloadInFlightRef.current = true;
       lastReloadAtRef.current = Date.now();
       const scope = reloadScopeForRealtimeTable(sourceTable);
@@ -434,15 +461,38 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         })
         .finally(() => {
           reloadInFlightRef.current = false;
+          if (reloadPendingSourceRef.current !== undefined) {
+            flushReload();
+          }
         });
     };
 
-    type RealtimeRow = Record<string, unknown>;
-    type RealtimePayload = {
-      eventType?: "INSERT" | "UPDATE" | "DELETE";
-      new?: RealtimeRow;
-      old?: RealtimeRow;
+    const runReload = (sourceTable?: string) => {
+      if (cancelled) return;
+      if (isFloorLayoutRealtimeReloadBlocked()) return;
+      if (sourceTable !== undefined) {
+        reloadPendingSourceRef.current = sourceTable;
+      }
+      if (reloadPendingTimerRef.current) {
+        clearTimeout(reloadPendingTimerRef.current);
+      }
+      reloadPendingTimerRef.current = setTimeout(flushReload, 50);
     };
+
+    const FAILED_PATCH_RELOAD_MS = 2_500;
+    const scheduleFailedPatchReload = (sourceTable: string) => {
+      if (failedPatchReloadTimerRef.current) {
+        clearTimeout(failedPatchReloadTimerRef.current);
+      }
+      failedPatchReloadTimerRef.current = setTimeout(() => {
+        failedPatchReloadTimerRef.current = null;
+        if (!cancelled) {
+          runReload(sourceTable);
+        }
+      }, FAILED_PATCH_RELOAD_MS);
+    };
+
+    type RealtimeRow = Record<string, unknown>;
 
     const mapRealtimeRuntimeSettings = (row: RealtimeRow): BookingRuntimeSettings | null => {
       const standardTurnaroundMinutes = row.standard_turnaround_minutes;
@@ -494,109 +544,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         createdAt,
         isRead,
         branchId: typeof branchId === "string" ? branchId : undefined,
-      };
-    };
-
-    const bookingStatuses: BookingStatus[] = [
-      "pending",
-      "confirmed",
-      "seated",
-      "cancelled",
-      "no_show",
-      "checked_in",
-      "completed",
-    ];
-
-    const mapRealtimeBooking = (row: RealtimeRow): Booking | null => {
-      const id = row.id;
-      const customerId = row.customer_id;
-      const branchId = row.branch_id;
-      const areaId = row.area_id;
-      const tableId = row.table_id;
-      const mergeGroupId = row.merge_group_id;
-      const guestCount = row.guest_count;
-      const bookingAt = row.booking_at;
-      const startTimeRaw = row.start_time;
-      const endTimeRaw = row.end_time;
-      const startTime =
-        typeof startTimeRaw === "string" && startTimeRaw.trim().length > 0
-          ? startTimeRaw
-          : typeof bookingAt === "string"
-            ? bookingAt
-            : null;
-      const endTime =
-        typeof endTimeRaw === "string" && endTimeRaw.trim().length > 0
-          ? endTimeRaw
-          : typeof startTime === "string"
-            ? dayjs(startTime)
-                .add(90, "minute")
-                .toISOString()
-            : null;
-      const checkedInAt = row.checked_in_at;
-      const noShowMarkedAt = row.no_show_marked_at;
-      const note = row.note;
-      const createdByUserId = row.created_by_user_id;
-      const lastEditedAt = row.last_edited_at;
-      const lastEditedByUserId = row.last_edited_by_user_id;
-      const status = row.status;
-
-      if (
-        typeof id !== "string" ||
-        typeof customerId !== "string" ||
-        typeof branchId !== "string" ||
-        typeof guestCount !== "number" ||
-        typeof bookingAt !== "string" ||
-        startTime === null ||
-        endTime === null ||
-        typeof createdByUserId !== "string" ||
-        typeof status !== "string" ||
-        !bookingStatuses.includes(status as BookingStatus)
-      ) {
-        return null;
-      }
-      if (areaId !== null && typeof areaId !== "string") {
-        return null;
-      }
-      if (tableId !== null && typeof tableId !== "string") {
-        return null;
-      }
-      if (mergeGroupId !== null && mergeGroupId !== undefined && typeof mergeGroupId !== "string") {
-        return null;
-      }
-      if (checkedInAt !== null && typeof checkedInAt !== "string") {
-        return null;
-      }
-      if (noShowMarkedAt !== null && typeof noShowMarkedAt !== "string") {
-        return null;
-      }
-      if (note !== null && typeof note !== "string") {
-        return null;
-      }
-      if (lastEditedAt !== null && typeof lastEditedAt !== "string") {
-        return null;
-      }
-      if (lastEditedByUserId !== null && typeof lastEditedByUserId !== "string") {
-        return null;
-      }
-
-      return {
-        id,
-        customerId,
-        branchId,
-        areaId,
-        tableId,
-        mergeGroupId: (mergeGroupId as string | null | undefined) ?? null,
-        guestCount,
-        bookingAt,
-        startTime,
-        endTime,
-        checkedInAt: checkedInAt ?? undefined,
-        noShowMarkedAt: noShowMarkedAt ?? undefined,
-        note: note ?? undefined,
-        createdByUserId,
-        lastEditedAt: lastEditedAt ?? undefined,
-        lastEditedByUserId: lastEditedByUserId ?? undefined,
-        status: status as BookingStatus,
       };
     };
 
@@ -783,7 +730,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       };
     };
 
-    const applyRealtimePatch = (table: string, payload: RealtimePayload): boolean => {
+    const applyRealtimePatch = (table: string, payload: RealtimeBookingPayload): boolean => {
       if (table === "booking_runtime_settings") {
         if (payload.eventType === "DELETE" || !payload.new) {
           return false;
@@ -831,24 +778,19 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
           if (typeof id !== "string") {
             return false;
           }
-          setState((prev) => ({
-            ...prev,
-            bookings: prev.bookings.filter((item) => item.id !== id),
-          }));
+          setState((prev) => removeBookingFromSnapshot(prev, id) ?? prev);
           return true;
         }
         if (!payload.new) {
           return false;
         }
-        const mapped = mapRealtimeBooking(payload.new);
+        const mapped = mapRealtimeBookingRow(payload.new);
         if (!mapped) {
           return false;
         }
         setState((prev) => {
-          const next = [mapped, ...prev.bookings.filter((item) => item.id !== mapped.id)].sort(
-            (a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf()
-          );
-          return { ...prev, bookings: next };
+          const previous = prev.bookings.find((item) => item.id === mapped.id);
+          return applyBookingRowToSnapshot(prev, mapped, previous?.tableId);
         });
         return true;
       }
@@ -1038,7 +980,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       }
       if (table === "table_merge_members") {
         if (payload.eventType === "UPDATE") {
-          return false;
+          // Member order changes do not affect floor-map grid; avoid slow floor slice reload.
+          return true;
         }
         if (payload.eventType === "DELETE") {
           const groupId = payload.old?.group_id;
@@ -1102,6 +1045,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         "postgres_changes",
         filter ? { event: "*", schema: "public", table, filter } : { event: "*", schema: "public", table },
         (payload) => {
+          const normalized = normalizeRealtimePayload(payload);
           if (table === "booking_waitlist_entries") {
             notifyWaitlistChanged();
             return;
@@ -1112,7 +1056,11 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
           ) {
             return;
           }
-          if (applyRealtimePatch(table, payload as RealtimePayload)) {
+          if (applyRealtimePatch(table, normalized)) {
+            return;
+          }
+          if (table === "bookings" || table === "tables") {
+            scheduleFailedPatchReload(table);
             return;
           }
           runReload(table);
@@ -1153,24 +1101,31 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
                 );
               }
               if (
-                status === "SUBSCRIBED" ||
                 status === "CHANNEL_ERROR" ||
                 status === "TIMED_OUT" ||
                 status === "CLOSED"
               ) {
-                // Keep fallback poll active and ensure eventual consistency even after reconnect races.
-                runReload();
+                scheduleFailedPatchReload("bookings");
               }
             })
         : null;
 
     const fallbackInterval = setInterval(() => {
-      runReload();
+      runReload("bookings");
     }, 30_000);
 
     return () => {
       cancelled = true;
       clearInterval(fallbackInterval);
+      if (failedPatchReloadTimerRef.current) {
+        clearTimeout(failedPatchReloadTimerRef.current);
+        failedPatchReloadTimerRef.current = null;
+      }
+      if (reloadPendingTimerRef.current) {
+        clearTimeout(reloadPendingTimerRef.current);
+        reloadPendingTimerRef.current = null;
+      }
+      reloadPendingSourceRef.current = undefined;
       if (realtimeChannel && realtime) {
         void realtime.removeChannel(realtimeChannel);
       }
@@ -1315,29 +1270,19 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         createdByUserId: currentUser.id,
       });
 
-      if (!result.ok && tableBefore) {
-        setState((prev) => ({
-          ...prev,
-          tables: prev.tables.map((t) =>
-            t.id === tableBefore.id ? { ...t, status: tableBefore.status } : t
-          ),
-        }));
-      }
-
-      // Pull a fresh snapshot immediately so the new booking/customer appears without
-      // waiting for the 5s polling tick (still no browser refresh).
-      if (result.ok) {
-        if (!reloadInFlightRef.current) {
-          reloadInFlightRef.current = true;
-          lastReloadAtRef.current = Date.now();
-          try {
-            await reload({ scope: "floor" });
-          } finally {
-            reloadInFlightRef.current = false;
-          }
-        } else {
-          // If a poll reload is already in flight, skip; next tick/slice will include it.
+      if (!result.ok) {
+        if (tableBefore) {
+          setState((prev) => ({
+            ...prev,
+            tables: prev.tables.map((t) =>
+              t.id === tableBefore.id ? { ...t, status: tableBefore.status } : t
+            ),
+          }));
         }
+      } else if (result.bookingId) {
+        setState((prev) =>
+          applyCreateBookingToSnapshot(prev, input, result.bookingId!, currentUser.id)
+        );
       }
 
       return result;
@@ -1423,15 +1368,21 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase) {
       return { ok: false, message: "Chưa kết nối Supabase." };
     }
+    setState((prev) => {
+      const next = applyBookingPatchToSnapshot(prev, bookingId, {
+        guestCount: Math.max(1, Math.round(guestCount)),
+      });
+      return next ?? prev;
+    });
+
     const result = await updateBookingGuestCountInSupabase(bookingId, guestCount);
-    if (result.ok && !reloadInFlightRef.current) {
-      reloadInFlightRef.current = true;
-      lastReloadAtRef.current = Date.now();
-      try {
-        await reload({ scope: "floor" });
-      } finally {
-        reloadInFlightRef.current = false;
-      }
+    if (!result.ok) {
+      setState((prev) => {
+        const next = applyBookingPatchToSnapshot(prev, bookingId, {
+          guestCount: booking.guestCount,
+        });
+        return next ?? prev;
+      });
     }
     return result;
   };
@@ -1462,18 +1413,41 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
       return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
     }
+    const revertPatch: Partial<Booking> = {
+      bookingAt: booking.bookingAt,
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      guestCount: booking.guestCount,
+      areaId: booking.areaId,
+      tableId: booking.tableId,
+      mergeGroupId: booking.mergeGroupId,
+    };
+    const optimisticPatch: Partial<Booking> = {
+      bookingAt: input.bookingAt,
+      startTime: input.bookingAt,
+      guestCount:
+        typeof input.guestCount === "number" && Number.isFinite(input.guestCount)
+          ? Math.max(1, Math.round(input.guestCount))
+          : booking.guestCount,
+      areaId: input.areaId,
+      tableId: input.tableId,
+      mergeGroupId: input.mergeGroupId ?? null,
+    };
+
+    setState((prev) => {
+      const next = applyBookingPatchToSnapshot(prev, input.bookingId, optimisticPatch);
+      return next ?? prev;
+    });
+
     const result = await updateBookingOrderInSupabase({
       ...input,
       editedByUserId: currentUser.id,
     });
-    if (result.ok && !reloadInFlightRef.current) {
-      reloadInFlightRef.current = true;
-      lastReloadAtRef.current = Date.now();
-      try {
-        await reload({ scope: "floor" });
-      } finally {
-        reloadInFlightRef.current = false;
-      }
+    if (!result.ok) {
+      setState((prev) => {
+        const next = applyBookingPatchToSnapshot(prev, input.bookingId, revertPatch);
+        return next ?? prev;
+      });
     }
     return result;
   };
@@ -1483,6 +1457,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     areaId: string;
     tableId: string | null;
     mergeGroupId?: string | null;
+    seedBooking?: Booking;
   }) => {
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
@@ -1493,34 +1468,74 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!currentUser) {
       return { ok: false, message: "Chưa đăng nhập." };
     }
-    const booking = state.bookings.find((item) => item.id === input.bookingId);
+    const booking =
+      state.bookings.find((item) => item.id === input.bookingId) ?? input.seedBooking;
     if (!booking) {
       return { ok: false, message: "Không tìm thấy booking." };
     }
     if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
       return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
     }
+    const editedAt = dayjs().toISOString();
+    const revertPatch: Partial<Booking> = {
+      areaId: booking.areaId,
+      tableId: booking.tableId,
+      mergeGroupId: booking.mergeGroupId,
+      status: booking.status,
+      lastEditedAt: booking.lastEditedAt,
+    };
+    const optimisticPatch: Partial<Booking> = {
+      areaId: input.areaId,
+      tableId: input.tableId,
+      mergeGroupId: input.mergeGroupId ?? null,
+      status: booking.status,
+      lastEditedAt: editedAt,
+    };
+
+    setState((prev) => {
+      const seeded = seedBookingIntoSnapshot(prev, input.bookingId, input.seedBooking);
+      const next = applyBookingPatchToSnapshot(seeded, input.bookingId, optimisticPatch);
+      return next ?? seeded;
+    });
+
     const result = await changeBookingTableInSupabase({
-      ...input,
+      bookingId: input.bookingId,
+      areaId: input.areaId,
+      tableId: input.tableId,
+      mergeGroupId: input.mergeGroupId,
       editedByUserId: currentUser.id,
     });
-    if (result.ok && !reloadInFlightRef.current) {
-      reloadInFlightRef.current = true;
-      lastReloadAtRef.current = Date.now();
-      try {
-        await reload({ scope: "floor" });
-      } finally {
-        reloadInFlightRef.current = false;
-      }
+    if (!result.ok) {
+      setState((prev) => {
+        const seeded = seedBookingIntoSnapshot(prev, input.bookingId, input.seedBooking);
+        const next = applyBookingPatchToSnapshot(seeded, input.bookingId, revertPatch);
+        return next ?? seeded;
+      });
     }
     return result;
   };
 
-  const updateBookingStatus = async (bookingId: string, status: BookingStatus) => {
+  const seedBookingIntoSnapshot = (
+    prev: AppStateSnapshot,
+    bookingId: string,
+    seedBooking?: Booking
+  ): AppStateSnapshot => {
+    if (!seedBooking || prev.bookings.some((item) => item.id === bookingId)) {
+      return prev;
+    }
+    return applyBookingRowToSnapshot(prev, seedBooking);
+  };
+
+  const updateBookingStatus = async (
+    bookingId: string,
+    status: BookingStatus,
+    seedBooking?: Booking
+  ) => {
     if (!hasSupabase) {
       return;
     }
-    const booking = state.bookings.find((item) => item.id === bookingId);
+    const booking =
+      state.bookings.find((item) => item.id === bookingId) ?? seedBooking;
     if (!booking) {
       throw new Error("Không tìm thấy booking.");
     }
@@ -1551,29 +1566,32 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     };
 
     setState((prev) => {
-      const next = applyBookingPatchToSnapshot(prev, bookingId, optimisticPatch);
-      return next ?? prev;
+      const seeded = seedBookingIntoSnapshot(prev, bookingId, seedBooking);
+      const next = applyBookingPatchToSnapshot(seeded, bookingId, optimisticPatch);
+      return next ?? seeded;
     });
 
     try {
       await updateBookingStatusInSupabase(bookingId, status);
     } catch (error) {
       setState((prev) => {
-        const next = applyBookingPatchToSnapshot(prev, bookingId, revertPatch);
-        return next ?? prev;
+        const seeded = seedBookingIntoSnapshot(prev, bookingId, seedBooking);
+        const next = applyBookingPatchToSnapshot(seeded, bookingId, revertPatch);
+        return next ?? seeded;
       });
       throw error;
     }
   };
 
-  const checkInBooking = async (bookingId: string) => {
+  const checkInBooking = async (bookingId: string, seedBooking?: Booking) => {
     if (!hasSupabase) {
       return;
     }
     if (isEmployeeUser(currentUser)) {
       throw new Error(EMPLOYEE_MUTATION_BLOCKED);
     }
-    const booking = state.bookings.find((item) => item.id === bookingId);
+    const booking =
+      state.bookings.find((item) => item.id === bookingId) ?? seedBooking;
     if (!booking) {
       throw new Error("Không tìm thấy booking.");
     }
@@ -1585,21 +1603,24 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       status: booking.status,
       checkedInAt: booking.checkedInAt,
     };
+    const checkedInAt = dayjs().toISOString();
 
     setState((prev) => {
-      const next = applyBookingPatchToSnapshot(prev, bookingId, {
+      const seeded = seedBookingIntoSnapshot(prev, bookingId, seedBooking);
+      const next = applyBookingPatchToSnapshot(seeded, bookingId, {
         status: "seated",
-        checkedInAt: dayjs().toISOString(),
+        checkedInAt,
       });
-      return next ?? prev;
+      return next ?? seeded;
     });
 
     try {
       await checkInBookingInSupabase(bookingId);
     } catch (error) {
       setState((prev) => {
-        const next = applyBookingPatchToSnapshot(prev, bookingId, revertPatch);
-        return next ?? prev;
+        const seeded = seedBookingIntoSnapshot(prev, bookingId, seedBooking);
+        const next = applyBookingPatchToSnapshot(seeded, bookingId, revertPatch);
+        return next ?? seeded;
       });
       throw error;
     }

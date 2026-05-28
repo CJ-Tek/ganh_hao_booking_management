@@ -93,6 +93,8 @@
 .tableFloorAnchor {
   position: absolute;
   z-index: 4;
+  /* Stacking context for table block (z-index 3) vs ⋮ menu (z-index 5). */
+  isolation: isolate;
 }
 
 .tableFloorAnchorExpanded {
@@ -122,11 +124,16 @@
   padding-top: 8px;
 }
 
-.tableBlockStatusMenuBtn {
-  position: absolute !important;
+.tableBlockStatusMenuAnchor {
+  position: absolute;
   top: -2px;
   right: -2px;
-  z-index: 2;
+  z-index: 5;
+  pointer-events: auto;
+}
+
+.tableBlockStatusMenuBtn {
+  position: static !important;
 }
 
 .tableBlockRemove {

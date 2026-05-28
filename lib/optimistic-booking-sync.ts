@@ -1,5 +1,16 @@
 import dayjs from "dayjs";
-import type { AppStateSnapshot, Booking, BookingStatus, TableStatus } from "@/lib/types";
+import {
+  shouldAutoSeatOnCreate,
+  type BookingArrivalIntent,
+} from "@/lib/booking-meta";
+import type {
+  AppStateSnapshot,
+  Booking,
+  BookingRuntimeSettings,
+  BookingStatus,
+  Customer,
+  TableStatus,
+} from "@/lib/types";
 
 /** Bookings that tie a table (hold or occupied). Mirrors server `TABLE_RESERVATION_BOOKING_STATUSES`. */
 const TABLE_RESERVATION_BOOKING_STATUSES: BookingStatus[] = [
@@ -71,13 +82,144 @@ export function applyBookingPatchToSnapshot(
     return null;
   }
   const updated: Booking = { ...existing, ...patch };
+  return applyBookingRowToSnapshot(prev, updated, existing.tableId);
+}
+
+/** Upsert a full booking row from Realtime and sync affected table statuses. */
+export function applyBookingRowToSnapshot(
+  prev: AppStateSnapshot,
+  booking: Booking,
+  previousTableId?: string | null
+): AppStateSnapshot {
   const bookings = sortBookings([
-    updated,
-    ...prev.bookings.filter((item) => item.id !== bookingId),
+    booking,
+    ...prev.bookings.filter((item) => item.id !== booking.id),
   ]);
   const tables = syncTablesForBookingChange(prev, bookings, [
-    existing.tableId,
-    updated.tableId,
+    previousTableId,
+    booking.tableId,
   ]);
   return { ...prev, bookings, tables };
+}
+
+/** Remove a booking and sync table availability for its former table. */
+export function removeBookingFromSnapshot(
+  prev: AppStateSnapshot,
+  bookingId: string
+): AppStateSnapshot | null {
+  const removed = prev.bookings.find((item) => item.id === bookingId);
+  if (!removed) {
+    return null;
+  }
+  const bookings = prev.bookings.filter((item) => item.id !== bookingId);
+  const tables = syncTablesForBookingChange(prev, bookings, [removed.tableId]);
+  return { ...prev, bookings, tables };
+}
+
+export type OptimisticCreateBookingInput = {
+  customerName: string;
+  customerPhone?: string;
+  branchId: string;
+  areaId?: string | null;
+  tableId?: string | null;
+  mergeGroupId?: string | null;
+  guestCount?: number;
+  bookingAt: string;
+  note?: string;
+  arrivalIntent?: BookingArrivalIntent;
+};
+
+export function resolveOptimisticCustomerForCreate(
+  prev: AppStateSnapshot,
+  input: OptimisticCreateBookingInput,
+  bookingId: string
+): { customers: Customer[]; customerId: string } {
+  const phone = input.customerPhone?.trim() || null;
+  if (phone) {
+    const byPhone = prev.customers.find((item) => item.phone === phone);
+    if (byPhone) {
+      return { customers: prev.customers, customerId: byPhone.id };
+    }
+  }
+  const optimisticId = `optimistic-customer-${bookingId}`;
+  const customer: Customer = {
+    id: optimisticId,
+    fullName: input.customerName.trim(),
+    phone,
+    note: undefined,
+  };
+  return {
+    customers: [customer, ...prev.customers.filter((item) => item.id !== optimisticId)],
+    customerId: optimisticId,
+  };
+}
+
+export function buildOptimisticBookingFromCreate(
+  input: OptimisticCreateBookingInput,
+  bookingId: string,
+  createdByUserId: string,
+  customerId: string,
+  mergeFallbackTableId: string | null,
+  runtimeSettings: BookingRuntimeSettings
+): Booking {
+  const autoSeat = shouldAutoSeatOnCreate(input.bookingAt, input.arrivalIntent);
+  const guestCount =
+    typeof input.guestCount === "number" && Number.isFinite(input.guestCount)
+      ? Math.max(1, Math.round(input.guestCount))
+      : 1;
+  const startTime = input.bookingAt;
+  const endTime = dayjs(startTime)
+    .add(runtimeSettings.standardTurnaroundMinutes, "minute")
+    .toISOString();
+  const mergeGroupId = input.mergeGroupId ?? null;
+  return {
+    id: bookingId,
+    customerId,
+    branchId: input.branchId,
+    areaId: input.areaId ?? null,
+    tableId: mergeGroupId ? mergeFallbackTableId : (input.tableId ?? null),
+    mergeGroupId,
+    guestCount,
+    bookingAt: startTime,
+    startTime,
+    endTime,
+    checkedInAt: autoSeat ? dayjs().toISOString() : undefined,
+    status: autoSeat ? "seated" : "confirmed",
+    note: input.note,
+    createdByUserId,
+  };
+}
+
+/** Insert booking + customer into snapshot after create API succeeds (no store reload). */
+export function applyCreateBookingToSnapshot(
+  prev: AppStateSnapshot,
+  input: OptimisticCreateBookingInput,
+  bookingId: string,
+  createdByUserId: string
+): AppStateSnapshot {
+  const mergeFallbackTableId = input.mergeGroupId
+    ? (prev.mergeGroups.find((group) => group.id === input.mergeGroupId)?.tableIds[0] ?? null)
+    : null;
+  const { customers, customerId } = resolveOptimisticCustomerForCreate(prev, input, bookingId);
+  const booking = buildOptimisticBookingFromCreate(
+    input,
+    bookingId,
+    createdByUserId,
+    customerId,
+    mergeFallbackTableId,
+    prev.bookingRuntimeSettings
+  );
+  const withCustomer = { ...prev, customers };
+  let next = applyBookingRowToSnapshot(withCustomer, booking);
+  if (booking.mergeGroupId) {
+    const memberTableIds =
+      prev.mergeGroups.find((group) => group.id === booking.mergeGroupId)?.tableIds ?? [];
+    if (memberTableIds.length > 0) {
+      next = {
+        ...next,
+        tables: syncTablesForBookingChange(next, next.bookings, memberTableIds),
+      };
+    }
+  }
+  return next;
 }

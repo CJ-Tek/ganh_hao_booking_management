@@ -66,6 +66,7 @@ import {
   getTableEffectiveGuestCapacity,
   tableFitsGuestCount,
 } from "./table-capacity";
+import { layoutDateRangeIso } from "./floor-map-day-bookings";
 import type { FloorMapStateSlice } from "./floor-map-state-slice";
 import {
   AppStateSnapshot,
@@ -73,6 +74,7 @@ import {
   Booking,
   BookingRuntimeSettings,
   BookingStatus,
+  Customer,
   BookingWaitlistEntry,
   Role,
   TableBlockState,
@@ -907,8 +909,8 @@ export async function fetchSnapshot(options?: {
 }
 
 /**
- * Lighter than `fetchSnapshot`: bookings/tables/areas/merge groups (+ referenced customers)
- * for the given branches. Skips users, notifications, maintenance, and full customer table scan.
+ * Structural floor data (tables/areas/merge groups) for the given branches.
+ * Day-scoped bookings are loaded via `fetchFloorMapDayBookingsInSupabase`.
  */
 export async function fetchFloorMapSliceInSupabase(
   branchIds: readonly string[]
@@ -917,8 +919,6 @@ export async function fetchFloorMapSliceInSupabase(
     return {
       areas: [],
       tables: [],
-      bookings: [],
-      customers: [],
       mergeGroups: [],
     };
   }
@@ -926,7 +926,6 @@ export async function fetchFloorMapSliceInSupabase(
   const client = ensureClient();
   const scopedBranches = branchIds.filter((id) => id.length > 0);
 
-  let bookingsQuery = client.from("bookings").select("*");
   let tablesQuery = client.from("tables").select("*");
   let areasQuery = client.from("areas").select("*");
   let mergeGroupsQuery = client
@@ -936,70 +935,21 @@ export async function fetchFloorMapSliceInSupabase(
     .order("auto_number", { ascending: true });
 
   if (scopedBranches.length > 0) {
-    bookingsQuery = bookingsQuery.in("branch_id", scopedBranches);
     tablesQuery = tablesQuery.in("branch_id", scopedBranches);
     areasQuery = areasQuery.in("branch_id", scopedBranches);
     mergeGroupsQuery = mergeGroupsQuery.in("branch_id", scopedBranches);
   }
 
-  const [bookingsResult, tablesResult, areasResult, mergeGroupsResult] = await Promise.all([
-    bookingsQuery,
+  const [tablesResult, areasResult, mergeGroupsResult] = await Promise.all([
     tablesQuery,
     areasQuery,
     mergeGroupsQuery,
   ]);
 
-  const errors = [
-    bookingsResult.error,
-    tablesResult.error,
-    areasResult.error,
-    mergeGroupsResult.error,
-  ].filter(Boolean);
+  const errors = [tablesResult.error, areasResult.error, mergeGroupsResult.error].filter(Boolean);
 
   if (errors.length > 0) {
     throw new Error(errors[0]?.message ?? "Không thể tải dữ liệu sơ đồ.");
-  }
-
-  const bookings: FloorMapStateSlice["bookings"] = ((bookingsResult.data ?? []) as any[]).map(
-    (item) => ({
-      id: item.id,
-      customerId: item.customer_id,
-      branchId: item.branch_id,
-      areaId: item.area_id,
-      tableId: item.table_id,
-      mergeGroupId: item.merge_group_id ?? null,
-      guestCount: item.guest_count,
-      bookingAt: item.booking_at,
-      startTime: item.start_time ?? item.booking_at,
-      endTime:
-        item.end_time ??
-        dayjs(item.start_time ?? item.booking_at)
-          .add(DEFAULT_BOOKING_RUNTIME_SETTINGS.standardTurnaroundMinutes, "minute")
-          .toISOString(),
-      checkedInAt: item.checked_in_at ?? undefined,
-      noShowMarkedAt: item.no_show_marked_at ?? undefined,
-      note: item.note ?? undefined,
-      createdByUserId: item.created_by_user_id,
-      lastEditedAt: item.last_edited_at ?? undefined,
-      lastEditedByUserId: item.last_edited_by_user_id ?? undefined,
-      status: item.status as BookingStatus,
-    })
-  );
-
-  const customerIds = [...new Set(bookings.map((booking) => booking.customerId))];
-  let customers: FloorMapStateSlice["customers"] = [];
-  if (customerIds.length > 0) {
-    const customersResult = await client.from("customers").select("*").in("id", customerIds);
-    if (customersResult.error) {
-      throw new Error(customersResult.error.message);
-    }
-    customers =
-      customersResult.data?.map((item) => ({
-        id: item.id,
-        fullName: item.full_name,
-        phone: item.phone,
-        note: item.note ?? undefined,
-      })) ?? [];
   }
 
   const mergeGroupRows = (mergeGroupsResult.data ?? []) as Array<{
@@ -1041,13 +991,7 @@ export async function fetchFloorMapSliceInSupabase(
   const orphanTableIds = tablesRowList
     .filter((item) => {
       const st = item.status as TableStatus;
-      if (st === "locked") {
-        return false;
-      }
-      if (st !== "hold" && st !== "occupied") {
-        return false;
-      }
-      return pickPrimaryBookingOnTable(item.id, bookings) === null;
+      return st === "hold" || st === "occupied";
     })
     .map((item) => item.id);
 
@@ -1092,10 +1036,85 @@ export async function fetchFloorMapSliceInSupabase(
         positionX: item.position_x,
         positionY: item.position_y,
       })) ?? [],
-    bookings,
-    customers,
     mergeGroups,
   };
+}
+
+function mapBookingRowFromSupabase(item: Record<string, unknown>): Booking {
+  return {
+    id: item.id as string,
+    customerId: item.customer_id as string,
+    branchId: item.branch_id as string,
+    areaId: item.area_id as string | null,
+    tableId: item.table_id as string | null,
+    mergeGroupId: (item.merge_group_id as string | null | undefined) ?? null,
+    guestCount: item.guest_count as number,
+    bookingAt: item.booking_at as string,
+    startTime: (item.start_time as string | null) ?? (item.booking_at as string),
+    endTime:
+      (item.end_time as string | null) ??
+      dayjs((item.start_time as string | null) ?? (item.booking_at as string))
+        .add(DEFAULT_BOOKING_RUNTIME_SETTINGS.standardTurnaroundMinutes, "minute")
+        .toISOString(),
+    checkedInAt: (item.checked_in_at as string | null) ?? undefined,
+    noShowMarkedAt: (item.no_show_marked_at as string | null) ?? undefined,
+    note: (item.note as string | null) ?? undefined,
+    createdByUserId: item.created_by_user_id as string,
+    lastEditedAt: (item.last_edited_at as string | null) ?? undefined,
+    lastEditedByUserId: (item.last_edited_by_user_id as string | null) ?? undefined,
+    status: item.status as BookingStatus,
+  };
+}
+
+/** Bookings (+ referenced customers) for a single floor-map calendar day. */
+export async function fetchFloorMapDayBookingsInSupabase(
+  branchIds: readonly string[],
+  layoutDate: string
+): Promise<{ bookings: Booking[]; customers: Customer[] }> {
+  if (!isSupabaseStoreServerConfigured()) {
+    return { bookings: [], customers: [] };
+  }
+
+  const client = ensureClient();
+  const scopedBranches = branchIds.filter((id) => id.length > 0);
+  const { startIso, endIso } = layoutDateRangeIso(layoutDate);
+
+  let bookingsQuery = client
+    .from("bookings")
+    .select("*")
+    .gte("booking_at", startIso)
+    .lte("booking_at", endIso);
+
+  if (scopedBranches.length > 0) {
+    bookingsQuery = bookingsQuery.in("branch_id", scopedBranches);
+  }
+
+  const bookingsResult = await bookingsQuery;
+  if (bookingsResult.error) {
+    throw new Error(bookingsResult.error.message ?? "Không thể tải booking theo ngày.");
+  }
+
+  const bookings = ((bookingsResult.data ?? []) as Record<string, unknown>[]).map(
+    mapBookingRowFromSupabase
+  );
+
+  const customerIds = [...new Set(bookings.map((booking) => booking.customerId))];
+  let customers: Customer[] = [];
+  if (customerIds.length > 0) {
+    const customersResult = await client.from("customers").select("*").in("id", customerIds);
+    if (customersResult.error) {
+      throw new Error(customersResult.error.message);
+    }
+    customers =
+      customersResult.data?.map((item) => ({
+        id: item.id,
+        fullName: item.full_name,
+        phone: item.phone,
+        note: item.note ?? undefined,
+      })) ?? [];
+  }
+
+  return { bookings, customers };
 }
 
 export async function createBookingInSupabase(input: CreateBookingInput): Promise<Result> {
@@ -2267,21 +2286,40 @@ export async function changeBookingTableInSupabase(input: {
     return { ok: false, message: error.message };
   }
 
-  for (const tableId of refreshTableIds) {
-    const { data: tableRow } = await client
-      .from("tables")
-      .select("status")
-      .eq("id", tableId)
-      .maybeSingle();
-    if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+  const isSeated = status === "seated" || status === "checked_in";
+  await Promise.all(
+    [...refreshTableIds].map(async (tableId) => {
+      const { data: tableRow } = await client
+        .from("tables")
+        .select("status")
+        .eq("id", tableId)
+        .maybeSingle();
+      if ((tableRow?.status as TableStatus | undefined) === "locked") {
+        return;
+      }
+      if (isSeated && tableId === nextTableId) {
+        await client.from("tables").update({ status: "occupied" }).eq("id", tableId);
+        return;
+      }
       await refreshTableAvailabilityForBooking(client, tableId);
-    }
-  }
+    })
+  );
 
   const targetLabel = mergeGroupContext?.ok
     ? `cụm ${mergeGroupContext.mergedName}`
     : "bàn mới";
   return { ok: true, message: `Đã chuyển khách sang ${targetLabel}.` };
+}
+
+async function setTablesOccupiedUnlessLocked(
+  client: ReturnType<typeof ensureClient>,
+  tableIds: Iterable<string>
+): Promise<void> {
+  await Promise.all(
+    [...new Set(tableIds)].map((tableId) =>
+      client.from("tables").update({ status: "occupied" }).eq("id", tableId).neq("status", "locked")
+    )
+  );
 }
 
 export async function updateBookingStatusInSupabase(
@@ -2320,22 +2358,35 @@ export async function updateBookingStatusInSupabase(
     return;
   }
 
+  const tableId = booking.table_id as string;
+  const afterTable =
+    normalizedStatus === "cancelled" ||
+    normalizedStatus === "completed" ||
+    normalizedStatus === "no_show"
+      ? refreshTableAvailabilityForBooking(client, tableId)
+      : Promise.resolve();
+
   if (TERMINAL_CANCEL_STATUSES.includes(normalizedStatus)) {
-    await (client as any).rpc("promote_waitlist_for_booking_slot", {
-      p_table_id: booking.table_id,
-      p_branch_id: booking.branch_id,
-      p_slot_start_time: booking.start_time ?? dayjs().toISOString(),
-      p_slot_end_time:
-        booking.end_time ??
-        dayjs(booking.start_time ?? dayjs().toISOString())
-          .add(DEFAULT_BOOKING_RUNTIME_SETTINGS.standardTurnaroundMinutes, "minute")
-          .toISOString(),
-    });
+    const waitlist = (client as any)
+      .rpc("promote_waitlist_for_booking_slot", {
+        p_table_id: tableId,
+        p_branch_id: booking.branch_id,
+        p_slot_start_time: booking.start_time ?? dayjs().toISOString(),
+        p_slot_end_time:
+          booking.end_time ??
+          dayjs(booking.start_time ?? dayjs().toISOString())
+            .add(DEFAULT_BOOKING_RUNTIME_SETTINGS.standardTurnaroundMinutes, "minute")
+            .toISOString(),
+      })
+      .then(() => undefined)
+      .catch((waitlistErr: unknown) => {
+        console.warn("[updateBookingStatus] waitlist promotion failed:", waitlistErr);
+      });
+    await Promise.all([afterTable, waitlist]);
+    return;
   }
 
-  if (normalizedStatus === "cancelled" || normalizedStatus === "completed" || normalizedStatus === "no_show") {
-    await refreshTableAvailabilityForBooking(client, booking.table_id);
-  }
+  await afterTable;
 }
 
 export async function deleteCustomersInSupabase(customerIds: string[]): Promise<Result> {
@@ -2391,63 +2442,33 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
     throw new Error(bookingErr.message);
   }
 
-  const refreshTableIds = new Set<string>();
+  const occupiedTableIds = new Set<string>();
   if (tableId) {
-    refreshTableIds.add(tableId);
+    occupiedTableIds.add(tableId);
   }
   if (mergeGroupId) {
     for (const memberTableId of await listMergeGroupMemberTableIds(client, mergeGroupId)) {
-      refreshTableIds.add(memberTableId);
-    }
-  }
-  for (const refreshId of refreshTableIds) {
-    const { data: tableRow, error: tableReadErr } = await client
-      .from("tables")
-      .select("status")
-      .eq("id", refreshId)
-      .maybeSingle();
-    if (tableReadErr) {
-      throw new Error(tableReadErr.message);
-    }
-    if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-      await refreshTableAvailabilityForBooking(client, refreshId);
+      occupiedTableIds.add(memberTableId);
     }
   }
 
-  let targetLabel = "";
-  if (mergeGroupId) {
-    const { data: groupRow } = await (client as any)
-      .from("table_merge_groups")
-      .select("merged_name")
-      .eq("id", mergeGroupId)
-      .maybeSingle();
-    const mergedName =
-      typeof groupRow?.merged_name === "string" ? groupRow.merged_name.trim() : "";
-    targetLabel = mergedName.length > 0 ? `Cụm ${mergedName}` : "Cụm bàn gộp";
-  } else if (tableId) {
-    const { data: tableRow } = await client
-      .from("tables")
-      .select("name")
-      .eq("id", tableId)
-      .maybeSingle();
-    const tableName = typeof tableRow?.name === "string" ? tableRow.name.trim() : "";
-    targetLabel = tableName.length > 0 ? `Bàn ${tableName}` : "Bàn";
-  }
-  const checkInMessage =
-    targetLabel.length > 0
-      ? `Đã check-in thành công. ${targetLabel} chuyển sang trạng thái có khách.`
-      : "Đã check-in thành công. Bàn chuyển sang trạng thái có khách.";
-
-  const { error: notifErr } = await client.from("internal_notifications").insert({
-    title: "Check-in hoàn tất",
-    message: checkInMessage,
-    created_at: dayjs().toISOString(),
-    is_read: false,
-    branch_id: target.branch_id,
-  });
-  if (notifErr) {
-    throw new Error(notifErr.message);
-  }
+  await Promise.all([
+    setTablesOccupiedUnlessLocked(client, occupiedTableIds),
+    client
+      .from("internal_notifications")
+      .insert({
+        title: "Check-in hoàn tất",
+        message: "Đã check-in thành công. Bàn chuyển sang trạng thái có khách.",
+        created_at: dayjs().toISOString(),
+        is_read: false,
+        branch_id: target.branch_id,
+      })
+      .then(({ error: notifErr }) => {
+        if (notifErr) {
+          console.warn("[checkInBooking] notification insert failed:", notifErr.message);
+        }
+      }),
+  ]);
 }
 
 function mapWaitlistRowFromRecord(item: Record<string, unknown>): BookingWaitlistEntry {
