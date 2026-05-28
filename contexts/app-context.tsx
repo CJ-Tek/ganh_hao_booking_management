@@ -30,7 +30,9 @@ import {
   EMPLOYEE_MUTATION_BLOCKED,
   isEmployeeUser,
 } from "@/lib/employee-access";
+import { isFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
 import { mergeFloorMapSliceIntoState, reloadScopeForRealtimeTable } from "@/lib/floor-map-state-slice";
+import { notifyWaitlistChanged } from "@/lib/realtime-sync";
 import { resolveMergeGroupDateRange } from "@/lib/merge-group-utils";
 import { applyBookingPatchToSnapshot } from "@/lib/optimistic-booking-sync";
 import { clampFloorNodeSpacing } from "@/lib/floor-map-layout";
@@ -415,8 +417,11 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     let cancelled = false;
     const realtime = getSupabaseBrowserClient();
     const realtimeChannelName = `app-snapshot-sync:${currentUser?.id ?? "guest"}`;
+    const floorEditSensitiveTables = new Set(["tables", "areas", "area_floor_layout_by_date"]);
+
     const runReload = (sourceTable?: string) => {
       if (cancelled) return;
+      if (isFloorLayoutRealtimeReloadBlocked()) return;
       if (reloadInFlightRef.current) return;
       // Burst updates can emit multiple row changes; cap reload cadence to avoid thrash.
       if (Date.now() - lastReloadAtRef.current < 400) return;
@@ -1078,13 +1083,14 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       "booking_runtime_settings",
       "branches",
       "table_merge_members",
+      "customers",
     ] as const;
     const branchScopedRealtimeTables = [
       "areas",
       "tables",
-      "customers",
       "bookings",
       "table_merge_groups",
+      "booking_waitlist_entries",
     ] as const;
     const scopedBranchIds = filteredBranchIds;
     const bindTableChange = (
@@ -1096,6 +1102,16 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         "postgres_changes",
         filter ? { event: "*", schema: "public", table, filter } : { event: "*", schema: "public", table },
         (payload) => {
+          if (table === "booking_waitlist_entries") {
+            notifyWaitlistChanged();
+            return;
+          }
+          if (
+            isFloorLayoutRealtimeReloadBlocked() &&
+            floorEditSensitiveTables.has(table)
+          ) {
+            return;
+          }
           if (applyRealtimePatch(table, payload as RealtimePayload)) {
             return;
           }
@@ -1131,6 +1147,11 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
             return channel;
           })()
             .subscribe((status) => {
+              if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+                console.warn(
+                  `[realtime] ${realtimeChannelName} status=${status}`
+                );
+              }
               if (
                 status === "SUBSCRIBED" ||
                 status === "CHANNEL_ERROR" ||

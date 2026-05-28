@@ -4,7 +4,7 @@ import dayjs from "dayjs";
 import { Group, Loader, Stack, Text } from "@mantine/core";
 import { DatePickerInput } from "@mantine/dates";
 import { notifications } from "@mantine/notifications";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TableBlockWaitlistTable } from "@/components/floor-map/table-block-waitlist-table";
 import { BookingListFiltersToolbar } from "@/components/booking-management/booking-list-filters-toolbar";
 import {
@@ -16,6 +16,7 @@ import { WaitlistStatusFilterChips } from "@/components/booking-management/waitl
 import { PortalListSectionDesktop } from "@/components/portal-list/portal-list-section-desktop";
 import { PortalListSectionMobile } from "@/components/portal-list/portal-list-section-mobile";
 import { useAppContext } from "@/contexts/app-context";
+import { subscribeWaitlistChanged } from "@/lib/realtime-sync";
 import {
   confirmWaitlistOfferInSupabase,
   listBranchWaitlistEntriesInSupabase,
@@ -82,6 +83,30 @@ export function BranchWaitlistSection(props: {
   useEffect(() => {
     void loadEntries();
   }, [loadEntries]);
+
+  const loadEntriesRef = useRef(loadEntries);
+  loadEntriesRef.current = loadEntries;
+
+  useEffect(() => {
+    if (!hasSupabase || branchIds.length === 0) {
+      return;
+    }
+    let debounceId: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = subscribeWaitlistChanged(() => {
+      if (debounceId) {
+        clearTimeout(debounceId);
+      }
+      debounceId = setTimeout(() => {
+        void loadEntriesRef.current();
+      }, 300);
+    });
+    return () => {
+      unsubscribe();
+      if (debounceId) {
+        clearTimeout(debounceId);
+      }
+    };
+  }, [branchIds.length, hasSupabase]);
 
   const statusFilteredEntries = useMemo(
     () =>

@@ -117,7 +117,10 @@ import {
   resolveMergeGroupLayoutAtAnchor,
   resolveTableDropAtCell,
 } from "@/lib/floor-map-merge-layout";
-import { setFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
+import {
+  isFloorLayoutRealtimeReloadBlocked,
+  setFloorLayoutRealtimeReloadBlocked,
+} from "@/lib/floor-layout-sync";
 import {
   buildFloorMapHref,
   FLOOR_MAP_DATE_PARAM,
@@ -1587,6 +1590,9 @@ export default function FloorMapPage() {
         () => void syncLockInfo()
       )
       .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn(`[realtime] floor-layout-locks:${areaId} status=${status}`);
+        }
         if (
           status === "SUBSCRIBED" ||
           status === "CHANNEL_ERROR" ||
@@ -1604,6 +1610,54 @@ export default function FloorMapPage() {
       }
     };
   }, [areaId, hasSupabase, currentUser, getFloorLayoutEditLockInfo]);
+
+  useEffect(() => {
+    if (!areaId || !hasSupabase) {
+      return;
+    }
+    let cancelled = false;
+    const realtime = getSupabaseBrowserClient();
+    const layoutChannelName = `floor-layout-by-date:${areaId}`;
+    const syncDayLayout = () => {
+      if (cancelled || isFloorLayoutRealtimeReloadBlocked()) {
+        return;
+      }
+      void refreshDayLayout();
+    };
+    const fallbackId = setInterval(syncDayLayout, 30_000);
+    const layoutChannel = realtime
+      ?.channel(layoutChannelName)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "area_floor_layout_by_date",
+          filter: `area_id=eq.${areaId}`,
+        },
+        syncDayLayout
+      )
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn(`[realtime] ${layoutChannelName} status=${status}`);
+        }
+        if (
+          status === "SUBSCRIBED" ||
+          status === "CHANNEL_ERROR" ||
+          status === "TIMED_OUT" ||
+          status === "CLOSED"
+        ) {
+          syncDayLayout();
+        }
+      });
+    return () => {
+      cancelled = true;
+      clearInterval(fallbackId);
+      if (realtime && layoutChannel) {
+        void realtime.removeChannel(layoutChannel);
+      }
+    };
+  }, [areaId, hasSupabase, refreshDayLayout]);
 
   useEffect(() => {
     if (!areaId || mode !== "edit" || !hasSupabase) {
