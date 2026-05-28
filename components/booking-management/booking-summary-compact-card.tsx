@@ -1,6 +1,7 @@
 "use client";
 
 import { Badge, Card, Group, Stack, Text } from "@mantine/core";
+import { usePortalCompact } from "@/lib/use-portal-compact";
 import { Fragment, type CSSProperties, type ReactNode } from "react";
 
 export type BookingSummaryMetaSegment = {
@@ -47,7 +48,11 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
     leadingSlot,
   } = props;
 
-  const hasMetaRow = metaSegments.length > 0 || Boolean(createdBy);
+  const isCompact = usePortalCompact();
+  const hasMetaBlock =
+    metaSegments.length > 0 || Boolean(createdBy) || Boolean(note);
+  const creatorAlign = isCompact ? "flex-start" : "flex-end";
+  const creatorTextAlign = isCompact ? "left" : "right";
 
   return (
     <Card
@@ -93,13 +98,13 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
               {badge.label}
             </Badge>
           </Group>
-          {hasMetaRow ? (
-            <Group justify="space-between" wrap="wrap" gap="xs" align="flex-start">
+          {hasMetaBlock ? (
+            <Stack gap={4}>
               {metaSegments.length > 0 ? (
                 <Text
                   size="xs"
                   lh={1.45}
-                  style={{ flex: "1 1 12rem", minWidth: 0, wordBreak: "break-word" }}
+                  style={{ minWidth: 0, wordBreak: "break-word" }}
                 >
                   {metaSegments.map((segment, index) => (
                     <Fragment key={`${segment.text}-${index}`}>
@@ -118,20 +123,31 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
                     </Fragment>
                   ))}
                 </Text>
-              ) : (
-                <span style={{ flex: 1, minWidth: 0 }} />
-              )}
+              ) : null}
+              {note ? (
+                <Text size="xs" lh={1.35} style={{ wordBreak: "break-word" }}>
+                  <Text component="span" fw={700}>
+                    Ghi chú:{" "}
+                  </Text>
+                  <Text component="span" c="dimmed" fw={500}>
+                    {note}
+                  </Text>
+                </Text>
+              ) : null}
               {createdBy ? (
                 <Stack
                   gap={2}
-                  align="flex-end"
-                  style={{ flex: "1 1 10rem", minWidth: 0, maxWidth: "100%" }}
+                  align={creatorAlign}
+                  style={{
+                    alignSelf: isCompact ? "stretch" : "flex-end",
+                    maxWidth: "100%",
+                  }}
                 >
                   <Text
                     size="xs"
                     c="dimmed"
                     fw={500}
-                    ta="right"
+                    ta={creatorTextAlign}
                     lh={1.45}
                     style={{ wordBreak: "break-word" }}
                   >
@@ -144,7 +160,7 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
                     <Text
                       size="xs"
                       c="dimmed"
-                      ta="right"
+                      ta={creatorTextAlign}
                       lh={1.45}
                       style={{ wordBreak: "break-word" }}
                     >
@@ -159,17 +175,7 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
                   ) : null}
                 </Stack>
               ) : null}
-            </Group>
-          ) : null}
-          {note ? (
-            <Text size="xs" lh={1.35} style={{ wordBreak: "break-word" }}>
-              <Text component="span" fw={700}>
-                Ghi chú:{" "}
-              </Text>
-              <Text component="span" c="dimmed" fw={500}>
-                {note}
-              </Text>
-            </Text>
+            </Stack>
           ) : null}
         </Stack>
       </Group>

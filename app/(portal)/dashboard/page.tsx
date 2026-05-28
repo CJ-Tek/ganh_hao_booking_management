@@ -22,7 +22,13 @@ import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
-import { bookingAreaTableSortKey, displayCustomerPhone, stripUnknownGuestTag } from "@/lib/booking-meta";
+import {
+  bookingAreaTableSortKey,
+  displayCustomerPhone,
+  formatBookingAreaTable,
+  isGuestCountSpecified,
+  stripUnknownGuestTag,
+} from "@/lib/booking-meta";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
 

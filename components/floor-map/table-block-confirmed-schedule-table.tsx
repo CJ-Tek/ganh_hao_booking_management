@@ -1,7 +1,7 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Select, Text } from "@mantine/core";
+import { Badge, Select, Text } from "@mantine/core";
 import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { useCallback, useMemo, useState } from "react";
