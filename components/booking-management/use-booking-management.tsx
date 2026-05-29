@@ -11,7 +11,7 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { DateTimePicker } from "@mantine/dates";
+import { BookingDateTimeFields } from "@/components/booking-datetime-fields";
 import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { useCallback, useMemo, useState } from "react";
@@ -42,7 +42,6 @@ import {
   isSyntheticPhoneValue,
 } from "@/lib/booking-meta";
 import { bookingRowBusyStyle } from "@/lib/busy-row-style";
-import { getTableEffectiveGuestCapacity } from "@/lib/table-capacity";
 import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
@@ -88,8 +87,8 @@ export function useBookingManagement() {
   );
 
   const getCandidateTables = useCallback(
-    (booking: Booking, requiredSeats?: number) =>
-      getAssignableCandidateTables(booking, state.tables, state.bookings, requiredSeats),
+    (booking: Booking) =>
+      getAssignableCandidateTables(booking, state.tables, state.bookings),
     [state.bookings, state.tables]
   );
 
@@ -513,73 +512,23 @@ export function useBookingManagement() {
     if (!editAssignCandidate) {
       return [];
     }
-    const requiredSeats =
-      typeof editGuestCount === "number" && Number.isFinite(editGuestCount)
-        ? editGuestCount
-        : isGuestCountSpecified(editAssignCandidate)
-          ? editAssignCandidate.guestCount
-          : undefined;
-    const options = getCandidateTables(editAssignCandidate, requiredSeats)
+    const options = getCandidateTables(editAssignCandidate)
       .filter((table) => (editAreaId ? table.areaId === editAreaId : true))
       .map((table) => ({
         value: table.id,
-        label: `${table.name} · ${table.seats} ghế`,
+        label: table.name,
       }));
     if (editTableId && !options.some((item) => item.value === editTableId)) {
       const current = state.tables.find((table) => table.id === editTableId);
       if (current) {
         options.unshift({
           value: current.id,
-          label: `${current.name} · ${current.seats} ghế`,
+          label: current.name,
         });
       }
     }
     return options;
-  }, [
-    editAreaId,
-    editAssignCandidate,
-    editGuestCount,
-    editTableId,
-    getCandidateTables,
-    state.tables,
-  ]);
-
-  const editModalTableCapacityHint = useMemo(() => {
-    if (!editAssignCandidate) {
-      return null;
-    }
-    const requiredSeats =
-      typeof editGuestCount === "number" && Number.isFinite(editGuestCount)
-        ? editGuestCount
-        : isGuestCountSpecified(editAssignCandidate)
-          ? editAssignCandidate.guestCount
-          : undefined;
-    const candidateTables = getCandidateTables(editAssignCandidate, requiredSeats).filter((table) =>
-      editAreaId ? table.areaId === editAreaId : true
-    );
-    if (candidateTables.length > 0 || !requiredSeats || requiredSeats < 1) {
-      return null;
-    }
-    const branchTables = state.tables.filter(
-      (table) =>
-        table.branchId === editAssignCandidate.branchId && table.status !== "locked"
-    );
-    const tablesInScope = editAreaId
-      ? branchTables.filter((table) => table.areaId === editAreaId)
-      : branchTables;
-    if (tablesInScope.length === 0) {
-      return null;
-    }
-    const maxGuestsInScope = Math.max(
-      ...tablesInScope.map((table) => getTableEffectiveGuestCapacity(table.seats))
-    );
-    if (requiredSeats <= maxGuestsInScope) {
-      return null;
-    }
-    return editAreaId
-      ? `Trong khu vực đã chọn, không có bàn nào đủ chỗ cho ${requiredSeats} khách (tối đa ${maxGuestsInScope} khách/bàn).`
-      : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất: ${maxGuestsInScope} khách).`;
-  }, [editAreaId, editAssignCandidate, editGuestCount, getCandidateTables, state.tables]);
+  }, [editAreaId, editAssignCandidate, editTableId, getCandidateTables, state.tables]);
 
   const assignModalAreaOptions = useMemo(() => {
     if (!assignFormBooking) {
@@ -597,55 +546,13 @@ export function useBookingManagement() {
     if (!assignFormBooking) {
       return [];
     }
-    const requiredSeats =
-      typeof assignManualGuestCount === "number" && Number.isFinite(assignManualGuestCount)
-        ? assignManualGuestCount
-        : isGuestCountSpecified(assignFormBooking)
-          ? assignFormBooking.guestCount
-          : undefined;
-    return getCandidateTables(assignFormBooking, requiredSeats)
+    return getCandidateTables(assignFormBooking)
       .filter((table) => (assignAreaId ? table.areaId === assignAreaId : true))
       .map((table) => ({
         value: table.id,
-        label: `${table.name} · ${table.seats} ghế`,
+        label: table.name,
       }));
-  }, [assignAreaId, assignFormBooking, assignManualGuestCount, getCandidateTables]);
-
-  const assignModalTableCapacityHint = useMemo(() => {
-    if (!assignFormBooking) {
-      return null;
-    }
-    const requiredSeats =
-      typeof assignManualGuestCount === "number" && Number.isFinite(assignManualGuestCount)
-        ? assignManualGuestCount
-        : isGuestCountSpecified(assignFormBooking)
-          ? assignFormBooking.guestCount
-          : undefined;
-    const candidateTables = getCandidateTables(assignFormBooking, requiredSeats).filter((table) =>
-      assignAreaId ? table.areaId === assignAreaId : true
-    );
-    if (candidateTables.length > 0 || !requiredSeats || requiredSeats < 1) {
-      return null;
-    }
-    const branchTables = state.tables.filter(
-      (table) => table.branchId === assignFormBooking.branchId && table.status !== "locked"
-    );
-    const tablesInScope = assignAreaId
-      ? branchTables.filter((table) => table.areaId === assignAreaId)
-      : branchTables;
-    if (tablesInScope.length === 0) {
-      return null;
-    }
-    const maxGuestsInScope = Math.max(
-      ...tablesInScope.map((table) => getTableEffectiveGuestCapacity(table.seats))
-    );
-    if (requiredSeats <= maxGuestsInScope) {
-      return null;
-    }
-    return assignAreaId
-      ? `Trong khu vực đã chọn, không có bàn nào đủ chỗ cho ${requiredSeats} khách (tối đa ${maxGuestsInScope} khách/bàn).`
-      : `Không có bàn nào đủ chỗ cho ${requiredSeats} khách (bàn lớn nhất: ${maxGuestsInScope} khách).`;
-  }, [assignAreaId, assignFormBooking, assignManualGuestCount, getCandidateTables, state.tables]);
+  }, [assignAreaId, assignFormBooking, getCandidateTables]);
 
   const bookingManagementModals = (
     <>
@@ -666,14 +573,10 @@ export function useBookingManagement() {
                   "—"}
               </strong>
             </Text>
-            <DateTimePicker
+            <BookingDateTimeFields
               value={editBookingAt}
               onChange={setEditBookingAt}
-              label="Thời gian đến"
-              valueFormat="DD/MM/YYYY HH:mm"
-              size={isCompact ? "md" : "sm"}
-              popoverProps={portalModalOverlayPopoverProps}
-              timePickerProps={{ popoverProps: portalModalOverlayPopoverProps }}
+              disabled={isEditSaving}
             />
             {editTableConflictMessage ? (
               <Alert color="red" variant="light" title="Trùng khung giờ trên bàn">
@@ -729,11 +632,6 @@ export function useBookingManagement() {
                 comboboxProps={{ zIndex: portalModalOverlayPopoverProps.zIndex }}
               />
             </Group>
-            {editModalTableCapacityHint ? (
-              <Text size="xs" c="dimmed">
-                {editModalTableCapacityHint}
-              </Text>
-            ) : null}
             <Text size="xs" c="dimmed">
               Để trống khu vực và bàn nếu booking vẫn chờ xếp bàn.
             </Text>
@@ -823,11 +721,6 @@ export function useBookingManagement() {
                 comboboxProps={{ zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX }}
               />
             </Group>
-            {assignModalTableCapacityHint ? (
-              <Text size="xs" c="dimmed">
-                {assignModalTableCapacityHint}
-              </Text>
-            ) : null}
             <Group justify="flex-end">
               <Button variant="default" onClick={() => setAssignFormBooking(null)}>
                 Đóng

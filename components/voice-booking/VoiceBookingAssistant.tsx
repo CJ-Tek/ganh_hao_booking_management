@@ -13,8 +13,7 @@ import {
   TextInput,
   Textarea,
 } from "@mantine/core";
-import { DatePickerInput, DateTimePicker } from "@mantine/dates";
-import { useMediaQuery } from "@mantine/hooks";
+import { BookingDateTimeFields } from "@/components/booking-datetime-fields";
 import { notifications } from "@mantine/notifications";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
@@ -62,30 +61,6 @@ function normalizeVietnamPhone(raw: string): string {
 
 function isPlausibleVietnamPhone(normalized: string): boolean {
   return /^0[1-9]\d{8,9}$/.test(normalized);
-}
-
-function bookingAtDatePart(bookingAt: string | null): string | null {
-  if (!bookingAt) {
-    return null;
-  }
-  const parsed = dayjs(bookingAt);
-  return parsed.isValid() ? parsed.format("YYYY-MM-DD") : null;
-}
-
-function bookingAtTimePart(bookingAt: string | null): string {
-  if (!bookingAt) {
-    return dayjs().format("HH:mm");
-  }
-  const parsed = dayjs(bookingAt);
-  return parsed.isValid() ? parsed.format("HH:mm") : dayjs().format("HH:mm");
-}
-
-function combineBookingAtLocal(datePart: string | null, timePart: string): string | null {
-  if (!datePart) {
-    return null;
-  }
-  const time = /^\d{2}:\d{2}$/.test(timePart) ? timePart : dayjs().format("HH:mm");
-  return `${datePart}T${time}`;
 }
 
 type SpeechRecognitionResultLike = {
@@ -148,7 +123,6 @@ export type VoiceBookingMergeGroupLite = {
   id: string;
   mergedName: string;
   areaId: string;
-  totalCapacity: number;
 };
 
 export function VoiceBookingAssistant(props: {
@@ -178,10 +152,6 @@ export function VoiceBookingAssistant(props: {
   hideAreaTablePickers?: boolean;
   /** Sync default arrival datetime when parent opens modal (YYYY-MM-DDTHH:mm). */
   initialBookingAt?: string | null;
-  /** Cap guest count (per-table / merge-group registration on floor map). */
-  maxGuestCount?: number;
-  /** Override capacity hint under Số khách. */
-  guestCountDescription?: string;
   branch: { id: string; name: string } | null;
   areas: AreaLite[];
   tables: TableLite[];
@@ -219,13 +189,7 @@ export function VoiceBookingAssistant(props: {
     lockAreaId = null,
     hideAreaTablePickers = false,
     initialBookingAt,
-    maxGuestCount,
-    guestCountDescription,
   } = props;
-
-  const isMobileDatetime = useMediaQuery("(max-width: 48em)", false, {
-    getInitialValueInEffect: true,
-  });
 
   const [opened, setOpened] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -268,18 +232,6 @@ export function VoiceBookingAssistant(props: {
       setBookingAt(initialBookingAt);
     }
   }, [initialBookingAt]);
-
-  useEffect(() => {
-    if (typeof maxGuestCount !== "number" || maxGuestCount < 1) {
-      return;
-    }
-    setGuestCount((current) => {
-      if (current === null || current === undefined) {
-        return current;
-      }
-      return current > maxGuestCount ? maxGuestCount : current;
-    });
-  }, [maxGuestCount]);
 
   useEffect(() => {
     if (!fieldPatch) {
@@ -387,7 +339,7 @@ export function VoiceBookingAssistant(props: {
     const filtered = areaId ? tables.filter((t) => t.areaId === areaId) : tables;
     return filtered.map((t) => ({
       value: t.id,
-      label: `${t.name} · ${t.seats} ghế${
+      label: `${t.name}${
         t.status ? ` · ${tableStatusLabel[t.status as keyof typeof tableStatusLabel] ?? String(t.status)}` : ""
       }`,
     }));
@@ -399,7 +351,7 @@ export function VoiceBookingAssistant(props: {
       : mergeGroups;
     const options = filtered.map((group) => ({
       value: group.id,
-      label: `${group.mergedName} · ${group.totalCapacity} chỗ`,
+      label: group.mergedName,
     }));
     if (
       mergeGroupId &&
@@ -409,7 +361,7 @@ export function VoiceBookingAssistant(props: {
       if (current) {
         options.unshift({
           value: current.id,
-          label: `${current.mergedName} · ${current.totalCapacity} chỗ`,
+          label: current.mergedName,
         });
       }
     }
@@ -515,7 +467,6 @@ export function VoiceBookingAssistant(props: {
     const matchedAreaId = matchAreaId(areas, d.areaNameHint);
     const matchedTableId = matchTableId(tables, d.tableNameHint, {
       preferAreaId: matchedAreaId,
-      minSeats: typeof d.guestCount === "number" ? d.guestCount : null,
     });
 
     if (matchedAreaId) setAreaId(matchedAreaId);
@@ -756,95 +707,23 @@ export function VoiceBookingAssistant(props: {
             disabled={formDisabled}
           />
 
-          {(() => {
-            const showBookingAt =
-              !(showArrivalModeRadios && arrivalMode === "immediate");
-            const guestCountField = (
-              <GuestCountNumberInput
-                label="Số khách"
-                value={guestCount ?? undefined}
-                onChange={(value) => setGuestCount(value ?? null)}
-                placeholder="Tùy chọn"
-                disabled={formDisabled}
-                min={1}
-                max={
-                  typeof maxGuestCount === "number" && maxGuestCount > 0
-                    ? maxGuestCount
-                    : undefined
-                }
-                description={
-                  guestCountDescription ??
-                  (typeof maxGuestCount === "number" && maxGuestCount > 0
-                    ? `Tối đa ${maxGuestCount} khách`
-                    : undefined)
-                }
-              />
-            );
-            const bookingAtField = !showBookingAt ? null : isMobileDatetime ? (
-              <>
-                <DatePickerInput
-                  label="Ngày đến"
-                  value={bookingAtDatePart(bookingAt)}
-                  onChange={(value) => {
-                    const next = combineBookingAtLocal(
-                      value,
-                      bookingAtTimePart(bookingAt)
-                    );
-                    if (next) {
-                      setBookingAt(next);
-                    }
-                  }}
-                  valueFormat="DD/MM/YYYY"
-                  dropdownType="modal"
-                  clearable={false}
-                  disabled={formDisabled}
-                />
-                <TextInput
-                  label="Giờ đến"
-                  type="time"
-                  value={bookingAtTimePart(bookingAt)}
-                  onChange={(e) => {
-                    const next = combineBookingAtLocal(
-                      bookingAtDatePart(bookingAt) ?? dayjs().format("YYYY-MM-DD"),
-                      e.currentTarget.value
-                    );
-                    if (next) {
-                      setBookingAt(next);
-                    }
-                  }}
-                  disabled={formDisabled}
-                />
-              </>
-            ) : (
-              <DateTimePicker
-                label="Thời gian đến"
-                value={bookingAt ? dayjs(bookingAt).toDate() : null}
-                onChange={(d) =>
-                  setBookingAt(d ? dayjs(d).format("YYYY-MM-DDTHH:mm") : null)
-                }
-                valueFormat="DD/MM/YYYY HH:mm"
-                dropdownType={embedded ? "modal" : "popover"}
-                clearable={false}
+          <Group grow align="flex-start">
+            <GuestCountNumberInput
+              label="Số khách"
+              value={guestCount ?? undefined}
+              onChange={(value) => setGuestCount(value ?? null)}
+              placeholder="Tùy chọn"
+              disabled={formDisabled}
+              min={1}
+            />
+            {!(showArrivalModeRadios && arrivalMode === "immediate") ? (
+              <BookingDateTimeFields
+                value={bookingAt}
+                onChange={setBookingAt}
                 disabled={formDisabled}
               />
-            );
-
-            if (isMobileDatetime) {
-              return (
-                <Stack gap="sm">
-                  {guestCountField}
-                  {bookingAtField}
-                </Stack>
-              );
-            }
-
-            return (
-              <Group grow align="flex-start">
-                {guestCountField}
-                {bookingAtField}
-              </Group>
-            );
-          })()}
+            ) : null}
+          </Group>
 
           {hideAreaTablePickers ? null : (
             <Stack gap="sm">

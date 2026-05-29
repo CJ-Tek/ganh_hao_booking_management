@@ -25,7 +25,6 @@ const RequestSchema = z.object({
     z.object({
       id: z.string().min(1),
       name: z.string().min(1),
-      seats: z.number().int().positive(),
       areaId: z.string().min(1),
     })
   ),
@@ -101,7 +100,7 @@ export async function POST(req: Request) {
     const tableLines = input.tables
       .map((t) => {
         const areaName = input.areas.find((a) => a.id === t.areaId)?.name ?? "—";
-        return `- ${t.name} (khu: ${areaName}, sức chứa: ${t.seats})`;
+        return `- ${t.name} (khu: ${areaName})`;
       })
       .join("\n");
 

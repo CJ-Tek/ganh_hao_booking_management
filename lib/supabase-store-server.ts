@@ -60,12 +60,6 @@ import {
   validateMergeGroupDateRange,
   type TableMergeGroupRowLike,
 } from "./merge-group-utils";
-import {
-  formatTableGuestCapacityHint,
-  getMergeGroupEffectiveGuestCapacity,
-  getTableEffectiveGuestCapacity,
-  tableFitsGuestCount,
-} from "./table-capacity";
 import { layoutDateRangeIso } from "./floor-map-day-bookings";
 import type { FloorMapStateSlice } from "./floor-map-state-slice";
 import {
@@ -75,7 +69,6 @@ import {
   BookingRuntimeSettings,
   BookingStatus,
   Customer,
-  BookingWaitlistEntry,
   Role,
   TableBlockState,
   TableMergeGroup,
@@ -87,7 +80,7 @@ export type ActionResult = {
   message: string;
   code?: typeof DUPLICATE_BOOKING_CODE;
   duplicates?: BookingDuplicateInfo[];
-  /** Set when a booking row was created (not waitlist-only). */
+  /** Set when a booking row was created. */
   bookingId?: string;
 };
 
@@ -112,21 +105,32 @@ type CreateBookingInput = {
   arrivalIntent?: import("@/lib/booking-meta").BookingArrivalIntent;
 };
 
-type BookingCreateOrQueueResult =
-  | {
-      outcome: "confirmed";
-      message?: string | null;
-      booking_id: string;
-      start_time: string;
-      end_time: string;
-    }
-  | {
-      outcome: "waitlisted";
-      message?: string | null;
-      waitlist_id: string;
-      start_time: string;
-      end_time: string;
+type BookingCreateOrQueueResult = {
+  outcome: "confirmed";
+  message?: string | null;
+  booking_id: string;
+  start_time: string;
+  end_time: string;
+};
+
+function parseConfirmedBookingRpcOutcome(
+  outcome: unknown,
+  fallbackMessage: string
+): { ok: true; result: BookingCreateOrQueueResult } | { ok: false; message: string } {
+  const row = (Array.isArray(outcome) ? outcome[0] : outcome) as
+    | (Partial<BookingCreateOrQueueResult> & { outcome?: string })
+    | null;
+  if (!row || typeof row !== "object") {
+    return { ok: false, message: fallbackMessage };
+  }
+  if (row.outcome !== "confirmed" || typeof row.booking_id !== "string") {
+    return {
+      ok: false,
+      message: row.message ?? "Khung giờ đã kín, không thể xác nhận booking.",
     };
+  }
+  return { ok: true, result: row as BookingCreateOrQueueResult };
+}
 
 const ACTIVE_TABLE_SLOT_STATUSES: BookingStatus[] = ["confirmed", "seated", "checked_in"];
 const BOOKING_MAINTENANCE_INTERVAL_MS = 60_000;
@@ -166,8 +170,6 @@ async function maybeRunBookingMaintenance(force = false): Promise<void> {
     });
   await bookingMaintenanceInFlight;
 }
-const TERMINAL_CANCEL_STATUSES: BookingStatus[] = ["cancelled", "no_show"];
-
 /** Bookings that tie a table (show as hold or occupied, not trống). */
 const TABLE_RESERVATION_BOOKING_STATUSES: BookingStatus[] = [
   "pending",
@@ -200,10 +202,6 @@ function mapBookingRuntimeSettingsRow(data: Record<string, unknown>): BookingRun
       typeof data.no_show_grace_minutes === "number"
         ? data.no_show_grace_minutes
         : DEFAULT_BOOKING_RUNTIME_SETTINGS.noShowGraceMinutes,
-    waitlistOfferTtlMinutes:
-      typeof data.waitlist_offer_ttl_minutes === "number"
-        ? data.waitlist_offer_ttl_minutes
-        : DEFAULT_BOOKING_RUNTIME_SETTINGS.waitlistOfferTtlMinutes,
     groupPartyGuestThreshold:
       typeof data.group_party_guest_threshold === "number"
         ? data.group_party_guest_threshold
@@ -225,7 +223,7 @@ async function getBookingRuntimeSettings(
   const { data, error } = await (client as any)
     .from("booking_runtime_settings")
     .select(
-      "standard_turnaround_minutes, no_show_grace_minutes, waitlist_offer_ttl_minutes, group_party_guest_threshold, repeat_customer_min_completed, reception_arrival_grace_minutes"
+      "standard_turnaround_minutes, no_show_grace_minutes, group_party_guest_threshold, repeat_customer_min_completed, reception_arrival_grace_minutes"
     )
     .eq("id", true)
     .maybeSingle();
@@ -246,7 +244,6 @@ export async function updateBookingRuntimeSettingsInSupabase(
     .update({
       standard_turnaround_minutes: input.standardTurnaroundMinutes,
       no_show_grace_minutes: input.noShowGraceMinutes,
-      waitlist_offer_ttl_minutes: input.waitlistOfferTtlMinutes,
       group_party_guest_threshold: input.groupPartyGuestThreshold,
       repeat_customer_min_completed: input.repeatCustomerMinCompleted,
       reception_arrival_grace_minutes: input.receptionArrivalGraceMinutes,
@@ -448,9 +445,8 @@ type MergeGroupAssignContext =
       mergedName: string;
       areaId: string;
       branchId: string;
-      totalCapacity: number;
       memberTableIds: string[];
-      /** Largest seat table inside the group — used to satisfy NOT NULL on RPC p_table_id (still nullified in SQL). */
+      /** First member table — satisfies NOT NULL on RPC p_table_id (still nullified in SQL for merge bookings). */
       fallbackTableId: string;
     }
   | { ok: false; message: string };
@@ -467,9 +463,7 @@ async function assertMergeGroupBookingAllowed(
 ): Promise<MergeGroupAssignContext> {
   const { data: groupRow, error: groupErr } = await (client as any)
     .from("table_merge_groups")
-    .select(
-      "id, branch_id, area_id, status, merged_name, total_capacity, start_date, end_date, created_at"
-    )
+    .select("id, branch_id, area_id, status, merged_name, start_date, end_date, created_at")
     .eq("id", input.mergeGroupId)
     .maybeSingle();
   if (groupErr) {
@@ -497,45 +491,30 @@ async function assertMergeGroupBookingAllowed(
       };
     }
   }
-  const groupMaxGuests = getMergeGroupEffectiveGuestCapacity(groupRow.total_capacity);
-  if (input.guestCount > groupMaxGuests) {
-    return {
-      ok: false,
-      message: `Số khách vượt sức chứa cụm bàn gộp (${formatTableGuestCapacityHint(groupRow.total_capacity)}).`,
-    };
-  }
 
   const { data: members, error: membersErr } = await (client as any)
     .from("table_merge_members")
-    .select("table_id, tables(id, seats)")
+    .select("table_id, tables(id)")
     .eq("group_id", input.mergeGroupId);
   if (membersErr) {
     return { ok: false, message: membersErr.message };
   }
   const memberRows = (members ?? []) as Array<{
     table_id: string;
-    tables: { id: string; seats: number } | { id: string; seats: number }[] | null;
+    tables: { id: string } | { id: string }[] | null;
   }>;
   if (memberRows.length === 0) {
     return { ok: false, message: "Cụm bàn gộp không còn bàn thành viên." };
   }
-  const memberSeats = memberRows.map((row) => {
-    const join = Array.isArray(row.tables) ? row.tables[0] : row.tables;
-    return { id: row.table_id, seats: join?.seats ?? 0 };
-  });
-  const fallback = memberSeats.reduce(
-    (best, current) => (current.seats > best.seats ? current : best),
-    memberSeats[0]
-  );
+  const memberTableIds = memberRows.map((row) => row.table_id);
 
   return {
     ok: true,
     mergedName: groupRow.merged_name,
     areaId: groupRow.area_id,
     branchId: groupRow.branch_id,
-    totalCapacity: groupRow.total_capacity,
-    memberTableIds: memberSeats.map((row) => row.id),
-    fallbackTableId: fallback.id,
+    memberTableIds,
+    fallbackTableId: memberTableIds[0],
   };
 }
 
@@ -806,7 +785,6 @@ export async function fetchSnapshot(options?: {
     area_id: string;
     auto_number: number | null;
     merged_name: string;
-    total_capacity: number;
     status: string;
     created_at: string;
     released_at: string | null;
@@ -864,7 +842,6 @@ export async function fetchSnapshot(options?: {
         id: item.id,
         branchId: item.branch_id,
         name: item.name,
-        capacity: item.capacity,
         floorGridColumns:
           typeof item.floor_grid_columns === "number" ? item.floor_grid_columns : 12,
         floorGridRows: typeof item.floor_grid_rows === "number" ? item.floor_grid_rows : 8,
@@ -879,7 +856,6 @@ export async function fetchSnapshot(options?: {
         branchId: item.branch_id,
         areaId: item.area_id,
         name: item.name,
-        seats: item.seats,
         status: item.status as TableStatus,
         positionX: item.position_x,
         positionY: item.position_y,
@@ -958,7 +934,6 @@ export async function fetchFloorMapSliceInSupabase(
     area_id: string;
     auto_number: number | null;
     merged_name: string;
-    total_capacity: number;
     status: string;
     created_at: string;
     released_at: string | null;
@@ -1016,7 +991,6 @@ export async function fetchFloorMapSliceInSupabase(
         id: item.id,
         branchId: item.branch_id,
         name: item.name,
-        capacity: item.capacity,
         floorGridColumns:
           typeof item.floor_grid_columns === "number" ? item.floor_grid_columns : 12,
         floorGridRows: typeof item.floor_grid_rows === "number" ? item.floor_grid_rows : 8,
@@ -1031,7 +1005,6 @@ export async function fetchFloorMapSliceInSupabase(
         branchId: item.branch_id,
         areaId: item.area_id,
         name: item.name,
-        seats: item.seats,
         status: item.status as TableStatus,
         positionX: item.position_x,
         positionY: item.position_y,
@@ -1190,94 +1163,66 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     if (createError) {
       return { ok: false, message: createError.message };
     }
-    const outcome = Array.isArray(createData) ? createData[0] : createData;
-    if (!outcome || typeof outcome !== "object") {
-      return { ok: false, message: "Không nhận được phản hồi khi tạo booking cụm bàn gộp." };
+    const mergeParsed = parseConfirmedBookingRpcOutcome(
+      createData,
+      "Không nhận được phản hồi khi tạo booking cụm bàn gộp."
+    );
+    if (!mergeParsed.ok) {
+      return { ok: false, message: mergeParsed.message };
     }
+    const mergeOutcome = mergeParsed.result;
 
-    const mergeOutcome = outcome as BookingCreateOrQueueResult;
-    if (mergeOutcome.outcome === "waitlisted") {
-      const { error: waitlistNotifErr } = await client.from("internal_notifications").insert({
-        title: "Đã vào hàng chờ",
-        message: `Khung giờ ${dayjs(normalizedAt).format(
-          "HH:mm DD/MM/YYYY"
-        )} đã kín trên cụm ${groupCheck.mergedName}. Đã thêm ${input.customerName} vào hàng chờ.`,
-        created_at: dayjs().toISOString(),
-        is_read: false,
-        branch_id: input.branchId,
-      });
-      if (waitlistNotifErr) {
-        return { ok: false, message: waitlistNotifErr.message };
-      }
-      return {
-        ok: true,
-        message:
-          mergeOutcome.message ??
-          `Khung giờ đã kín. Khách đã được thêm vào hàng chờ cụm ${groupCheck.mergedName}.`,
-      };
-    }
-
-    if (mergeOutcome.outcome === "confirmed") {
-      try {
-        await seatBookingForImmediateArrival(client, {
-          bookingId: mergeOutcome.booking_id,
-          tableId: groupCheck.fallbackTableId,
-          bookingAtIso: normalizedAt,
-          arrivalIntent: input.arrivalIntent,
-        });
-        if (shouldRefreshTableHoldAfterCreate(normalizedAt, input.arrivalIntent)) {
-          const { data: tableRow } = await client
-            .from("tables")
-            .select("status")
-            .eq("id", groupCheck.fallbackTableId)
-            .maybeSingle();
-          if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-            await refreshTableAvailabilityForBooking(client, groupCheck.fallbackTableId);
-          }
-        }
-      } catch (seatErr) {
-        return {
-          ok: false,
-          message: seatErr instanceof Error ? seatErr.message : "Không check-in được booking.",
-        };
-      }
-
-      await client.from("internal_notifications").insert({
-        title: "Đặt bàn mới",
-        message: `Đã xác nhận booking cho ${input.customerName} trên cụm ${groupCheck.mergedName} lúc ${dayjs(
-          normalizedAt
-        ).format("HH:mm DD/MM/YYYY")}.`,
-        created_at: dayjs().toISOString(),
-        is_read: false,
-        branch_id: input.branchId,
-      });
-
-      return {
-        ok: true,
-        message: `Đã tạo booking trên cụm ${groupCheck.mergedName}.`,
+    try {
+      await seatBookingForImmediateArrival(client, {
         bookingId: mergeOutcome.booking_id,
+        tableId: groupCheck.fallbackTableId,
+        bookingAtIso: normalizedAt,
+        arrivalIntent: input.arrivalIntent,
+      });
+      if (shouldRefreshTableHoldAfterCreate(normalizedAt, input.arrivalIntent)) {
+        const { data: tableRow } = await client
+          .from("tables")
+          .select("status")
+          .eq("id", groupCheck.fallbackTableId)
+          .maybeSingle();
+        if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+          await refreshTableAvailabilityForBooking(client, groupCheck.fallbackTableId);
+        }
+      }
+    } catch (seatErr) {
+      return {
+        ok: false,
+        message: seatErr instanceof Error ? seatErr.message : "Không check-in được booking.",
       };
     }
 
-    return { ok: false, message: "Không nhận được kết quả khi tạo booking cụm bàn gộp." };
+    await client.from("internal_notifications").insert({
+      title: "Đặt bàn mới",
+      message: `Đã xác nhận booking cho ${input.customerName} trên cụm ${groupCheck.mergedName} lúc ${dayjs(
+        normalizedAt
+      ).format("HH:mm DD/MM/YYYY")}.`,
+      created_at: dayjs().toISOString(),
+      is_read: false,
+      branch_id: input.branchId,
+    });
+
+    return {
+      ok: true,
+      message: `Đã tạo booking trên cụm ${groupCheck.mergedName}.`,
+      bookingId: mergeOutcome.booking_id,
+    };
   }
 
   if (hasAssignedTable) {
     const { data: tableInfo, error: tableInfoError } = await client
       .from("tables")
-      .select("seats, branch_id")
+      .select("branch_id")
       .eq("id", input.tableId!)
       .maybeSingle();
     if (tableInfoError || !tableInfo) {
       return {
         ok: false,
         message: tableInfoError?.message ?? "Không tìm thấy bàn.",
-      };
-    }
-    if (!tableFitsGuestCount(tableInfo.seats, normalizedGuestCount)) {
-      return {
-        ok: false,
-        message: `Số khách không được vượt quá sức chứa bàn (${formatTableGuestCapacityHint(tableInfo.seats)}).`,
       };
     }
     if (tableInfo.branch_id !== input.branchId) {
@@ -1302,57 +1247,37 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
       return { ok: false, message: createError.message };
     }
 
-    const outcome = Array.isArray(createData) ? createData[0] : createData;
-    if (!outcome || typeof outcome !== "object") {
-      return { ok: false, message: "Không nhận được phản hồi từ hệ thống đặt bàn." };
+    const tableParsed = parseConfirmedBookingRpcOutcome(
+      createData,
+      "Không nhận được phản hồi từ hệ thống đặt bàn."
+    );
+    if (!tableParsed.ok) {
+      return { ok: false, message: tableParsed.message };
     }
+    const normalizedOutcome = tableParsed.result;
 
-    const normalizedOutcome = outcome as BookingCreateOrQueueResult;
-    if (normalizedOutcome.outcome === "waitlisted") {
-      const { error: waitlistNotifErr } = await client.from("internal_notifications").insert({
-        title: "Đã vào hàng chờ",
-        message: `Khung giờ ${dayjs(normalizedAt).format(
-          "HH:mm DD/MM/YYYY"
-        )} đã kín. Đã thêm ${input.customerName} vào hàng chờ.`,
-        created_at: dayjs().toISOString(),
-        is_read: false,
-        branch_id: input.branchId,
+    try {
+      await seatBookingForImmediateArrival(client, {
+        bookingId: normalizedOutcome.booking_id,
+        tableId: input.tableId!,
+        bookingAtIso: normalizedAt,
+        arrivalIntent: input.arrivalIntent,
       });
-      if (waitlistNotifErr) {
-        return { ok: false, message: waitlistNotifErr.message };
-      }
-      return {
-        ok: true,
-        message:
-          normalizedOutcome.message ??
-          "Khung giờ đã kín. Khách đã được thêm vào hàng chờ của bàn.",
-      };
-    }
-
-    if (normalizedOutcome.outcome === "confirmed") {
-      try {
-        await seatBookingForImmediateArrival(client, {
-          bookingId: normalizedOutcome.booking_id,
-          tableId: input.tableId!,
-          bookingAtIso: normalizedAt,
-          arrivalIntent: input.arrivalIntent,
-        });
-        if (shouldRefreshTableHoldAfterCreate(normalizedAt, input.arrivalIntent)) {
-          const { data: tableRow } = await client
-            .from("tables")
-            .select("status")
-            .eq("id", input.tableId!)
-            .maybeSingle();
-          if ((tableRow?.status as TableStatus | undefined) !== "locked") {
-            await refreshTableAvailabilityForBooking(client, input.tableId!);
-          }
+      if (shouldRefreshTableHoldAfterCreate(normalizedAt, input.arrivalIntent)) {
+        const { data: tableRow } = await client
+          .from("tables")
+          .select("status")
+          .eq("id", input.tableId!)
+          .maybeSingle();
+        if ((tableRow?.status as TableStatus | undefined) !== "locked") {
+          await refreshTableAvailabilityForBooking(client, input.tableId!);
         }
-      } catch (seatErr) {
-        return {
-          ok: false,
-          message: seatErr instanceof Error ? seatErr.message : "Không check-in được booking.",
-        };
       }
+    } catch (seatErr) {
+      return {
+        ok: false,
+        message: seatErr instanceof Error ? seatErr.message : "Không check-in được booking.",
+      };
     }
 
     await client.from("internal_notifications").insert({
@@ -1472,17 +1397,12 @@ export async function assignBookingToTableInSupabase(input: {
     if (assignErr) {
       return { ok: false, message: assignErr.message };
     }
-    const outcome = Array.isArray(assignData) ? assignData[0] : assignData;
-    if (!outcome || typeof outcome !== "object") {
-      return { ok: false, message: "Không nhận được phản hồi khi gán cụm bàn gộp." };
-    }
-    if ((outcome as BookingCreateOrQueueResult).outcome === "waitlisted") {
-      return {
-        ok: true,
-        message:
-          (outcome as BookingCreateOrQueueResult).message ??
-          `Khung giờ đã kín. Booking đã được đưa vào hàng chờ cụm ${groupCheck.mergedName}.`,
-      };
+    const mergeAssignParsed = parseConfirmedBookingRpcOutcome(
+      assignData,
+      "Không nhận được phản hồi khi gán cụm bàn gộp."
+    );
+    if (!mergeAssignParsed.ok) {
+      return { ok: false, message: mergeAssignParsed.message };
     }
 
     try {
@@ -1517,7 +1437,7 @@ export async function assignBookingToTableInSupabase(input: {
 
   const { data: table, error: tableErr } = await client
     .from("tables")
-    .select("id, branch_id, seats, status")
+    .select("id, branch_id, status")
     .eq("id", tableId)
     .maybeSingle();
   if (tableErr || !table) {
@@ -1525,12 +1445,6 @@ export async function assignBookingToTableInSupabase(input: {
   }
   if (table.branch_id !== booking.branch_id) {
     return { ok: false, message: "Bàn không thuộc cùng chi nhánh với booking." };
-  }
-  if (!tableFitsGuestCount(table.seats, nextGuestCount)) {
-    return {
-      ok: false,
-      message: `Số khách không được vượt quá sức chứa bàn (${formatTableGuestCapacityHint(table.seats)}).`,
-    };
   }
 
   const { data: assignData, error: assignErr } = await (client as any).rpc(
@@ -1548,15 +1462,12 @@ export async function assignBookingToTableInSupabase(input: {
     return { ok: false, message: assignErr.message };
   }
 
-  const outcome = Array.isArray(assignData) ? assignData[0] : assignData;
-  if (!outcome || typeof outcome !== "object") {
-    return { ok: false, message: "Không nhận được phản hồi khi gán bàn." };
-  }
-  if ((outcome as BookingCreateOrQueueResult).outcome === "waitlisted") {
-    return {
-      ok: true,
-      message: (outcome as BookingCreateOrQueueResult).message ?? "Đã chuyển booking sang hàng chờ.",
-    };
+  const assignParsed = parseConfirmedBookingRpcOutcome(
+    assignData,
+    "Không nhận được phản hồi khi gán bàn."
+  );
+  if (!assignParsed.ok) {
+    return { ok: false, message: assignParsed.message };
   }
 
   const guestCountWasProvided = typeof guestCount === "number" && Number.isFinite(guestCount);
@@ -1818,7 +1729,7 @@ export async function updateBookingOrderInSupabase(input: {
   if (nextTableId) {
     const { data: table, error: tableErr } = await client
       .from("tables")
-      .select("id, branch_id, area_id, seats, status, name")
+      .select("id, branch_id, area_id, status, name")
       .eq("id", nextTableId)
       .maybeSingle();
     if (tableErr || !table) {
@@ -1832,12 +1743,6 @@ export async function updateBookingOrderInSupabase(input: {
     }
     if ((table.status as TableStatus) === "locked") {
       return { ok: false, message: "Bàn đang khóa, không thể gán booking." };
-    }
-    if (!tableFitsGuestCount(table.seats, effectiveGuestCount)) {
-      return {
-        ok: false,
-        message: `Số khách không được vượt quá sức chứa bàn (${formatTableGuestCapacityHint(table.seats)}).`,
-      };
     }
 
     if (timeChanged || assignmentChanged) {
@@ -1895,9 +1800,12 @@ export async function updateBookingOrderInSupabase(input: {
     if (assignErr) {
       return { ok: false, message: assignErr.message };
     }
-    const outcome = Array.isArray(assignData) ? assignData[0] : assignData;
-    if (!outcome || typeof outcome !== "object") {
-      return { ok: false, message: "Không nhận được phản hồi khi gán cụm bàn gộp." };
+    const mergeOrderAssignParsed = parseConfirmedBookingRpcOutcome(
+      assignData,
+      "Không nhận được phản hồi khi gán cụm bàn gộp."
+    );
+    if (!mergeOrderAssignParsed.ok) {
+      return { ok: false, message: mergeOrderAssignParsed.message };
     }
 
     const clearedNote = guestCountSpecified
@@ -1967,13 +1875,12 @@ export async function updateBookingOrderInSupabase(input: {
       }
     }
 
-    if ((outcome as BookingCreateOrQueueResult).outcome === "waitlisted") {
-      return {
-        ok: true,
-        message:
-          (outcome as BookingCreateOrQueueResult).message ??
-          "Khung giờ đã kín, booking đã được đưa vào hàng chờ.",
-      };
+    const orderAssignParsed = parseConfirmedBookingRpcOutcome(
+      outcome,
+      "Không nhận được phản hồi khi gán bàn."
+    );
+    if (!orderAssignParsed.ok) {
+      return { ok: false, message: orderAssignParsed.message };
     }
     return { ok: true, message: "Đã cập nhật booking và gán bàn." };
   }
@@ -2204,7 +2111,7 @@ export async function changeBookingTableInSupabase(input: {
   if (nextTableId) {
     const { data: table, error: tableErr } = await client
       .from("tables")
-      .select("id, branch_id, area_id, seats, status, name")
+      .select("id, branch_id, area_id, status, name")
       .eq("id", nextTableId)
       .maybeSingle();
     if (tableErr || !table) {
@@ -2218,12 +2125,6 @@ export async function changeBookingTableInSupabase(input: {
     }
     if ((table.status as TableStatus) === "locked") {
       return { ok: false, message: "Bàn đang khóa, không thể đổi sang bàn này." };
-    }
-    if (!tableFitsGuestCount(table.seats, effectiveGuestCount)) {
-      return {
-        ok: false,
-        message: `Số khách không được vượt quá sức chứa bàn (${formatTableGuestCapacityHint(table.seats)}).`,
-      };
     }
 
     const tableConflicts = await findTableBookingSlotConflictsInSupabase(client, {
@@ -2366,26 +2267,6 @@ export async function updateBookingStatusInSupabase(
       ? refreshTableAvailabilityForBooking(client, tableId)
       : Promise.resolve();
 
-  if (TERMINAL_CANCEL_STATUSES.includes(normalizedStatus)) {
-    const waitlist = (client as any)
-      .rpc("promote_waitlist_for_booking_slot", {
-        p_table_id: tableId,
-        p_branch_id: booking.branch_id,
-        p_slot_start_time: booking.start_time ?? dayjs().toISOString(),
-        p_slot_end_time:
-          booking.end_time ??
-          dayjs(booking.start_time ?? dayjs().toISOString())
-            .add(DEFAULT_BOOKING_RUNTIME_SETTINGS.standardTurnaroundMinutes, "minute")
-            .toISOString(),
-      })
-      .then(() => undefined)
-      .catch((waitlistErr: unknown) => {
-        console.warn("[updateBookingStatus] waitlist promotion failed:", waitlistErr);
-      });
-    await Promise.all([afterTable, waitlist]);
-    return;
-  }
-
   await afterTable;
 }
 
@@ -2471,67 +2352,11 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
   ]);
 }
 
-function mapWaitlistRowFromRecord(item: Record<string, unknown>): BookingWaitlistEntry {
-  return {
-    id: item.id as string,
-    tableId: item.table_id as string,
-    branchId: item.branch_id as string,
-    areaId: (item.area_id as string | null) ?? null,
-    customerId: item.customer_id as string,
-    bookingId: (item.booking_id as string | null) ?? null,
-    desiredStartTime: item.desired_start_time as string,
-    desiredEndTime: item.desired_end_time as string,
-    partySize: item.party_size as number,
-    status: item.status as BookingWaitlistEntry["status"],
-    position: item.queue_position as number,
-    offeredAt: (item.offered_at as string | null) ?? null,
-    offerExpiresAt: (item.offer_expires_at as string | null) ?? null,
-    promotedBookingId: (item.promoted_booking_id as string | null) ?? null,
-    createdAt: item.created_at as string,
-    updatedAt: item.updated_at as string,
-  };
-}
-
-export async function listBranchWaitlistEntriesInSupabase(input: {
-  branchIds: string[];
-  /** Calendar day `YYYY-MM-DD`; omit to include all active queue rows for the branches. */
-  day?: string;
-}): Promise<BookingWaitlistEntry[]> {
-  const branchIds = [...new Set(input.branchIds.filter(Boolean))];
-  if (branchIds.length === 0) {
-    return [];
-  }
-
-  const client = ensureClient();
-  let query = (client as any)
-    .from("booking_waitlist_entries")
-    .select("*")
-    .in("branch_id", branchIds)
-    .in("status", ["waiting", "offered"])
-    .order("desired_start_time", { ascending: true })
-    .order("queue_position", { ascending: true });
-
-  if (input.day) {
-    const dayStart = dayjs(input.day).startOf("day").toISOString();
-    const dayEnd = dayjs(input.day).endOf("day").toISOString();
-    query = query.gte("desired_start_time", dayStart).lte("desired_start_time", dayEnd);
-  }
-
-  const { data, error } = await query;
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return ((data ?? []) as Record<string, unknown>[]).map(mapWaitlistRowFromRecord);
-}
-
 export async function getTableBlockStateInSupabase(input: {
   tableId?: string | null;
   mergeGroupId?: string | null;
   slotStartTime: string;
   slotEndTime?: string;
-  /** `all` = every active waitlist row for this table; `day` = same calendar day; `slot` = exact window. */
-  waitlistScope?: "slot" | "day" | "all";
 }): Promise<TableBlockState> {
   const hasTable = Boolean(input.tableId);
   const hasMergeGroup = Boolean(input.mergeGroupId);
@@ -2573,190 +2398,34 @@ export async function getTableBlockStateInSupabase(input: {
     status: item.status as BookingStatus,
   });
 
-  const waitlistScope = input.waitlistScope ?? "all";
-  const buildWaitlistQuery = (tableIds: string[]) => {
-    let query = (client as any)
-      .from("booking_waitlist_entries")
-      .select("*")
-      .in("table_id", tableIds)
-      .in("status", ["waiting", "offered"])
-      .order("queue_position", { ascending: true });
-    if (waitlistScope === "slot") {
-      query = query
-        .eq("desired_start_time", slotStartTime)
-        .eq("desired_end_time", slotEndTime);
-    } else if (waitlistScope === "day") {
-      const dayStart = dayjs(slotStartTime).startOf("day").toISOString();
-      const dayEnd = dayjs(slotStartTime).endOf("day").toISOString();
-      query = query
-        .gte("desired_start_time", dayStart)
-        .lte("desired_start_time", dayEnd);
-    }
-    return query;
-  };
+  let confirmedQuery = (client as any)
+    .from("bookings")
+    .select("*")
+    .gte("start_time", scheduleFrom)
+    .in("status", ["confirmed", "seated", "checked_in"])
+    .order("start_time", { ascending: true });
 
   if (hasMergeGroup) {
-    const memberTableIds = await listMergeGroupMemberTableIds(client, input.mergeGroupId!);
-    const confirmedQuery = (client as any)
-      .from("bookings")
-      .select("*")
-      .eq("merge_group_id", input.mergeGroupId)
-      .gte("start_time", scheduleFrom)
-      .in("status", ["confirmed", "seated", "checked_in"])
-      .order("start_time", { ascending: true });
-
-    const waitlistPromise =
-      memberTableIds.length > 0
-        ? buildWaitlistQuery(memberTableIds)
-        : Promise.resolve({ data: [], error: null });
-
-    const [confirmedResult, waitlistResult] = await Promise.all([
-      confirmedQuery,
-      waitlistPromise,
-    ]);
-    if (confirmedResult.error) {
-      throw new Error(confirmedResult.error.message);
-    }
-    if (waitlistResult.error) {
-      throw new Error(waitlistResult.error.message);
-    }
-
-    return {
-      tableId: null,
-      mergeGroupId: input.mergeGroupId ?? null,
-      slotStartTime,
-      slotEndTime,
-      confirmedSchedule:
-        (confirmedResult.data as any[] | null | undefined)?.map((item) =>
-          mapBookingRow(item as Record<string, unknown>)
-        ) ?? [],
-      waitlistQueue:
-        (waitlistResult.data as any[] | null | undefined)?.map((item) =>
-          mapWaitlistRowFromRecord(item as Record<string, unknown>)
-        ) ?? [],
-    };
+    confirmedQuery = confirmedQuery.eq("merge_group_id", input.mergeGroupId);
+  } else {
+    confirmedQuery = confirmedQuery.eq("table_id", input.tableId);
   }
 
-  const [confirmedResult, waitlistResult] = await Promise.all([
-    (client as any)
-      .from("bookings")
-      .select("*")
-      .eq("table_id", input.tableId)
-      .gte("start_time", scheduleFrom)
-      .in("status", ["confirmed", "seated", "checked_in"])
-      .order("start_time", { ascending: true }),
-    buildWaitlistQuery([input.tableId!]),
-  ]);
-
+  const confirmedResult = await confirmedQuery;
   if (confirmedResult.error) {
     throw new Error(confirmedResult.error.message);
   }
-  if (waitlistResult.error) {
-    throw new Error(waitlistResult.error.message);
-  }
 
   return {
-    tableId: input.tableId ?? null,
-    mergeGroupId: null,
+    tableId: hasTable ? (input.tableId ?? null) : null,
+    mergeGroupId: hasMergeGroup ? (input.mergeGroupId ?? null) : null,
     slotStartTime,
     slotEndTime,
     confirmedSchedule:
       (confirmedResult.data as any[] | null | undefined)?.map((item) =>
         mapBookingRow(item as Record<string, unknown>)
       ) ?? [],
-    waitlistQueue:
-      (waitlistResult.data as any[] | null | undefined)?.map((item) =>
-        mapWaitlistRowFromRecord(item as Record<string, unknown>)
-      ) ?? [],
   };
-}
-
-function parseWaitlistJsonRpcResult(
-  data: unknown,
-  fallbackMessage: string
-): Result & { bookingId?: string } {
-  const response = Array.isArray(data) ? data[0] : data;
-  if (!response || typeof response !== "object") {
-    return { ok: false, message: fallbackMessage };
-  }
-  const row = response as { ok?: boolean; message?: string; booking_id?: string };
-  return {
-    ok: Boolean(row.ok),
-    message: row.message ?? fallbackMessage,
-    ...(row.booking_id ? { bookingId: row.booking_id } : {}),
-  };
-}
-
-export async function confirmWaitlistOfferInSupabase(waitlistEntryId: string): Promise<Result> {
-  const client = ensureClient();
-  const { data, error } = await (client as any).rpc("confirm_waitlist_offer", {
-    p_waitlist_entry_id: waitlistEntryId,
-  });
-  if (error) {
-    return { ok: false, message: error.message };
-  }
-  return parseWaitlistJsonRpcResult(data, "Không thể xác nhận suất từ hàng chờ.");
-}
-
-export async function updateWaitlistEntryInSupabase(input: {
-  waitlistEntryId: string;
-  partySize: number;
-  desiredStartTime: string;
-  desiredEndTime: string;
-  areaId: string;
-  tableId: string;
-}): Promise<Result> {
-  const client = ensureClient();
-  const { data, error } = await (client as any).rpc("update_waitlist_entry", {
-    p_waitlist_entry_id: input.waitlistEntryId,
-    p_party_size: input.partySize,
-    p_desired_start_time: input.desiredStartTime,
-    p_desired_end_time: input.desiredEndTime,
-    p_area_id: input.areaId,
-    p_table_id: input.tableId,
-  });
-  if (error) {
-    return { ok: false, message: error.message };
-  }
-  return parseWaitlistJsonRpcResult(data, "Không thể cập nhật suất hàng chờ.");
-}
-
-export async function transferWaitlistEntryBranchInSupabase(input: {
-  waitlistEntryId: string;
-  branchId: string;
-  areaId: string;
-  tableId: string;
-  partySize?: number;
-}): Promise<Result> {
-  const client = ensureClient();
-  const { data, error } = await (client as any).rpc("transfer_waitlist_entry_branch", {
-    p_waitlist_entry_id: input.waitlistEntryId,
-    p_branch_id: input.branchId,
-    p_area_id: input.areaId,
-    p_table_id: input.tableId,
-    p_party_size: input.partySize ?? null,
-  });
-  if (error) {
-    return { ok: false, message: error.message };
-  }
-  return parseWaitlistJsonRpcResult(data, "Không thể chuyển suất hàng chờ sang chi nhánh khác.");
-}
-
-export async function promoteWaitlistEntryNowInSupabase(input: {
-  waitlistEntryId: string;
-  areaId?: string | null;
-  tableId?: string | null;
-}): Promise<Result & { bookingId?: string }> {
-  const client = ensureClient();
-  const { data, error } = await (client as any).rpc("promote_waitlist_entry_now", {
-    p_waitlist_entry_id: input.waitlistEntryId,
-    p_area_id: input.areaId ?? null,
-    p_table_id: input.tableId ?? null,
-  });
-  if (error) {
-    return { ok: false, message: error.message };
-  }
-  return parseWaitlistJsonRpcResult(data, "Không thể mời khách vào bàn.");
 }
 
 type MergeGroupCreateInput = {
@@ -3406,7 +3075,7 @@ export async function createTableMergeGroupInSupabase(
 
   const { data: tables, error: loadErr } = await client
     .from("tables")
-    .select("id, name, seats, status, branch_id, area_id")
+    .select("id, name, status, branch_id, area_id")
     .in("id", tableIds);
   if (loadErr) {
     return { ok: false, message: loadErr.message };
@@ -3435,7 +3104,6 @@ export async function createTableMergeGroupInSupabase(
     return { ok: false, message: lockCheck.message };
   }
 
-  const totalCapacity = tables.reduce((acc, table) => acc + Math.max(1, table.seats ?? 1), 0);
   const nextNumber = await pickNextMergeGroupNumberForArea(client, input.areaId);
   const groupName = `Bàn gộp ${nextNumber}`;
 
@@ -3446,7 +3114,6 @@ export async function createTableMergeGroupInSupabase(
       area_id: input.areaId,
       merged_name: groupName,
       auto_number: nextNumber,
-      total_capacity: totalCapacity,
       created_by_user_id: input.createdByUserId ?? null,
       status: "active",
       start_date: input.startDate,
@@ -3499,7 +3166,6 @@ export async function createTableMergeGroupInSupabase(
       area_id: input.areaId,
       auto_number: nextNumber,
       merged_name: groupName,
-      total_capacity: totalCapacity,
       status: "active",
       created_at: new Date().toISOString(),
       released_at: null,
@@ -3530,9 +3196,7 @@ export async function addTableToMergeGroupInSupabase(input: {
   const client = ensureClient();
   const { data: group, error: groupErr } = await (client as any)
     .from("table_merge_groups")
-    .select(
-      "id, branch_id, area_id, status, merged_name, total_capacity, start_date, end_date, created_at"
-    )
+    .select("id, branch_id, area_id, status, merged_name, start_date, end_date, created_at")
     .eq("id", input.groupId)
     .maybeSingle();
   if (groupErr || !group) {
@@ -3544,7 +3208,7 @@ export async function addTableToMergeGroupInSupabase(input: {
 
   const { data: table, error: tableErr } = await client
     .from("tables")
-    .select("id, name, seats, status, branch_id, area_id")
+    .select("id, name, status, branch_id, area_id")
     .eq("id", input.tableId)
     .maybeSingle();
   if (tableErr || !table) {
@@ -3588,17 +3252,6 @@ export async function addTableToMergeGroupInSupabase(input: {
     return { ok: false, message: insertErr.message };
   }
 
-  const { error: updateErr } = await (client as any)
-    .from("table_merge_groups")
-    .update({
-      total_capacity: (group.total_capacity ?? 0) + Math.max(1, table.seats ?? 1),
-      updated_at: dayjs().toISOString(),
-    })
-    .eq("id", group.id);
-  if (updateErr) {
-    return { ok: false, message: updateErr.message };
-  }
-
   const repackFloor = input.repackFloor !== false;
   if (repackFloor) {
     const allMemberIds = [
@@ -3631,9 +3284,7 @@ export async function removeTableFromMergeGroupInSupabase(input: {
   const client = ensureClient();
   const { data: group, error: groupErr } = await (client as any)
     .from("table_merge_groups")
-    .select(
-      "id, status, merged_name, total_capacity, area_id, start_date, end_date, created_at"
-    )
+    .select("id, status, merged_name, area_id, start_date, end_date, created_at")
     .eq("id", input.groupId)
     .maybeSingle();
   if (groupErr || !group) {
@@ -3645,14 +3296,14 @@ export async function removeTableFromMergeGroupInSupabase(input: {
 
   const { data: members, error: membersErr } = await (client as any)
     .from("table_merge_members")
-    .select("table_id, tables(id, name, seats)")
+    .select("table_id, tables(id, name)")
     .eq("group_id", group.id);
   if (membersErr) {
     return { ok: false, message: membersErr.message };
   }
   const memberRows = (members ?? []) as Array<{
     table_id: string;
-    tables: { id: string; name: string; seats: number } | { id: string; name: string; seats: number }[] | null;
+    tables: { id: string; name: string } | { id: string; name: string }[] | null;
   }>;
   const target = memberRows.find((row) => row.table_id === input.tableId);
   if (!target) {
@@ -3663,9 +3314,6 @@ export async function removeTableFromMergeGroupInSupabase(input: {
     return await releaseTableMergeGroupInSupabase({ groupId: group.id });
   }
 
-  const targetJoin = Array.isArray(target.tables) ? target.tables[0] : target.tables;
-  const removedSeats = targetJoin?.seats ?? 0;
-
   const { error: delErr } = await (client as any)
     .from("table_merge_members")
     .delete()
@@ -3675,22 +3323,12 @@ export async function removeTableFromMergeGroupInSupabase(input: {
     return { ok: false, message: delErr.message };
   }
 
-  const { error: updateErr } = await (client as any)
-    .from("table_merge_groups")
-    .update({
-      total_capacity: Math.max(0, (group.total_capacity ?? 0) - removedSeats),
-      updated_at: dayjs().toISOString(),
-    })
-    .eq("id", group.id);
-  if (updateErr) {
-    return { ok: false, message: updateErr.message };
-  }
-
   const remainingIds = memberRows
     .filter((row) => row.table_id !== input.tableId)
     .map((row) => row.table_id);
   const repackFloor = input.repackFloor !== false;
-  let message = `Đã tách bàn khỏi ${group.merged_name}.`;
+  const targetJoin = Array.isArray(target.tables) ? target.tables[0] : target.tables;
+  let message = `Đã tách bàn ${targetJoin?.name ?? "bàn"} khỏi ${group.merged_name}.`;
   if (repackFloor && remainingIds.length >= 2) {
     const groupDates = resolveMergeGroupDateRange(group);
     const packResult = await packMergeGroupTablesOnFloor(client, group.area_id, remainingIds, {
@@ -3864,21 +3502,14 @@ export async function releaseTableMergeGroupInSupabase(input: {
 
   const { data: memberRows, error: membersErr } = await (client as any)
     .from("table_merge_members")
-    .select("table_id, tables(id, seats)")
+    .select("table_id")
     .eq("group_id", group.id);
   if (membersErr) {
     return { ok: false, message: membersErr.message };
   }
-  const members = (memberRows ?? []) as Array<{
-    table_id: string;
-    tables: { id: string; seats: number } | { id: string; seats: number }[] | null;
-  }>;
-  const memberSeats = members.map((row) => {
-    const join = Array.isArray(row.tables) ? row.tables[0] : row.tables;
-    return { id: row.table_id, seats: join?.seats ?? 0 };
-  });
-  const largestMemberSeats = memberSeats.reduce((max, row) => Math.max(max, row.seats), 0);
-  const largestMemberGuestCapacity = getTableEffectiveGuestCapacity(largestMemberSeats);
+  const memberTableIds = ((memberRows ?? []) as Array<{ table_id: string }>).map(
+    (row) => row.table_id
+  );
 
   const { data: activeBookings, error: bookingsErr } = await (client as any)
     .from("bookings")
@@ -3895,34 +3526,17 @@ export async function releaseTableMergeGroupInSupabase(input: {
     start_time: string;
     end_time: string;
   }>;
-  const overflowBookings = activeRows.filter(
-    (row) => row.guest_count > largestMemberGuestCapacity
-  );
-  if (overflowBookings.length > 0) {
-    return {
-      ok: false,
-      message:
-        `Không thể giải tán ${group.merged_name}: vẫn còn ${overflowBookings.length} booking dùng sức chứa vượt 1 bàn lẻ. ` +
-        `Vui lòng đợi khách hoàn tất hoặc đổi sang hủy / no-show trước.`,
-    };
-  }
-
-  // For remaining bookings (guest_count <= largestMemberSeats), try fall back to a member table
-  // that can fit them without slot conflicts. Otherwise revert to pending.
   for (const booking of activeRows) {
-    const candidates = [...memberSeats]
-      .filter((row) => tableFitsGuestCount(row.seats, booking.guest_count))
-      .sort((a, b) => b.seats - a.seats);
     let assignedTableId: string | null = null;
-    for (const candidate of candidates) {
+    for (const candidateId of memberTableIds) {
       const conflicts = await findTableBookingSlotConflictsInSupabase(client, {
         bookingId: booking.id,
-        tableId: candidate.id,
+        tableId: candidateId,
         startTime: booking.start_time,
         endTime: booking.end_time,
       });
       if (conflicts.length === 0) {
-        assignedTableId = candidate.id;
+        assignedTableId = candidateId;
         break;
       }
     }
@@ -3971,7 +3585,7 @@ export async function listTableMergeGroupsInSupabase(branchId: string): Promise<
   const { data: groups, error: groupsErr } = await (client as any)
     .from("table_merge_groups")
     .select(
-      "id, branch_id, area_id, auto_number, merged_name, total_capacity, status, created_at, released_at, start_date, end_date"
+      "id, branch_id, area_id, auto_number, merged_name, status, created_at, released_at, start_date, end_date"
     )
     .eq("branch_id", branchId)
     .eq("status", "active")
@@ -4037,7 +3651,6 @@ export async function upsertTableInSupabase(input: {
   branchId: string;
   areaId: string;
   name: string;
-  seats: number;
   status: TableStatus;
   positionX: number;
   positionY: number;
@@ -4050,7 +3663,6 @@ export async function upsertTableInSupabase(input: {
         branch_id: input.branchId,
         area_id: input.areaId,
         name: input.name,
-        seats: input.seats,
         status: input.status,
         position_x: input.positionX,
         position_y: input.positionY,
@@ -4063,7 +3675,6 @@ export async function upsertTableInSupabase(input: {
     branch_id: input.branchId,
     area_id: input.areaId,
     name: input.name,
-    seats: input.seats,
     status: input.status,
     position_x: input.positionX,
     position_y: input.positionY,
@@ -4076,7 +3687,6 @@ export async function upsertTablesBatchInSupabase(
     branchId: string;
     areaId: string;
     name: string;
-    seats: number;
     status: TableStatus;
     positionX: number;
     positionY: number;
@@ -4097,7 +3707,6 @@ export async function upsertTablesBatchInSupabase(
         branch_id: item.branchId,
         area_id: item.areaId,
         name: item.name,
-        seats: item.seats,
         status: item.status,
         position_x: item.positionX,
         position_y: item.positionY,
@@ -4111,7 +3720,6 @@ export async function upsertTablesBatchInSupabase(
         branch_id: item.branchId,
         area_id: item.areaId,
         name: item.name,
-        seats: item.seats,
         status: item.status,
         position_x: item.positionX,
         position_y: item.positionY,
@@ -4153,16 +3761,11 @@ export async function updateTablePositionInSupabase(
     .eq("id", tableId);
 }
 
-export async function addAreaInSupabase(
-  branchId: string,
-  name: string,
-  capacity: number
-): Promise<void> {
+export async function addAreaInSupabase(branchId: string, name: string): Promise<void> {
   const client = ensureClient();
   await client.from("areas").insert({
     branch_id: branchId,
     name,
-    capacity,
     floor_grid_columns: 12,
     floor_grid_rows: 8,
     floor_node_spacing: FLOOR_DEFAULT_NODE_SPACING_PX,
@@ -4171,19 +3774,15 @@ export async function addAreaInSupabase(
 
 export async function updateAreaInSupabase(
   areaId: string,
-  input: { branchId?: string; name?: string; capacity?: number }
+  input: { branchId?: string; name?: string }
 ): Promise<Result> {
   const client = ensureClient();
   const patch: {
     name?: string;
-    capacity?: number;
     branch_id?: string;
   } = {};
   if (input.name !== undefined) {
     patch.name = input.name;
-  }
-  if (input.capacity !== undefined) {
-    patch.capacity = input.capacity;
   }
   if (input.branchId !== undefined) {
     patch.branch_id = input.branchId;
@@ -4291,7 +3890,6 @@ export async function updateAreaFloorLayoutInSupabase(
             branchId: "",
             areaId,
             name: "",
-            seats: 1,
             status: "available" as const,
             positionX: row.position_x,
             positionY: row.position_y,

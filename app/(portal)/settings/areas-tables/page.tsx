@@ -18,7 +18,6 @@ import { type DataTableSortStatus } from "mantine-datatable";
 import { Pencil, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
-import { EditableNumberInput } from "@/components/editable-number-input";
 import {
   PortalPageTitle,
   PortalSectionCard,
@@ -35,7 +34,6 @@ type AreaRow = {
   branchId: string;
   branchName: string;
   name: string;
-  capacity: number;
   tableCount: number;
   bookingCount: number;
 };
@@ -48,7 +46,6 @@ export default function AreasTablesSettingsPage() {
   const branchName =
     branchId ? state.branches.find((b) => b.id === branchId)?.name ?? "—" : "—";
   const [name, setName] = useState("");
-  const [capacity, setCapacity] = useState<number>(30);
   const [search, setSearch] = useState("");
   const [mobilePage, setMobilePage] = useState(1);
   const [mobilePageSize, setMobilePageSize] = useState(10);
@@ -57,7 +54,6 @@ export default function AreasTablesSettingsPage() {
   const [editingArea, setEditingArea] = useState<AreaRow | null>(null);
   const [editBranchId, setEditBranchId] = useState("");
   const [editName, setEditName] = useState("");
-  const [editCapacity, setEditCapacity] = useState(30);
   const [editSaving, setEditSaving] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<AreaRow | null>(null);
@@ -81,7 +77,6 @@ export default function AreasTablesSettingsPage() {
           branchId: area.branchId,
           branchName: state.branches.find((branch) => branch.id === area.branchId)?.name ?? "-",
           name: area.name,
-          capacity: area.capacity,
           tableCount: state.tables.filter((table) => table.areaId === area.id).length,
           bookingCount: state.bookings.filter((b) => b.areaId === area.id).length,
         })),
@@ -92,8 +87,6 @@ export default function AreasTablesSettingsPage() {
       let compare = 0;
       if (sortStatus.columnAccessor === "branchName") {
         compare = a.branchName.localeCompare(b.branchName, "vi");
-      } else if (sortStatus.columnAccessor === "capacity") {
-        compare = a.capacity - b.capacity;
       } else if (sortStatus.columnAccessor === "tableCount") {
         compare = a.tableCount - b.tableCount;
       } else if (sortStatus.columnAccessor === "bookingCount") {
@@ -142,9 +135,8 @@ export default function AreasTablesSettingsPage() {
     }
     setIsAddAreaSaving(true);
     try {
-      await addArea(branchId, name, capacity);
+      await addArea(branchId, name);
       setName("");
-      setCapacity(30);
       notifications.show({ color: "green", message: "Đã tạo khu vực mới." });
     } finally {
       setIsAddAreaSaving(false);
@@ -155,7 +147,6 @@ export default function AreasTablesSettingsPage() {
     setEditingArea(area);
     setEditBranchId(area.branchId);
     setEditName(area.name);
-    setEditCapacity(area.capacity);
     setEditOpen(true);
   };
 
@@ -169,7 +160,6 @@ export default function AreasTablesSettingsPage() {
       const result = await updateArea(editingArea.id, {
         branchId: editBranchId,
         name: editName.trim(),
-        capacity: editCapacity,
       });
       notifications.show({
         color: result.ok ? "green" : "red",
@@ -209,10 +199,10 @@ export default function AreasTablesSettingsPage() {
   return (
     <Stack>
       <PortalPageTitle order={isCompact ? 3 : 2}>
-        {isCompact ? "Khu vực & bàn" : "Cấu hình khu vực & sức chứa"}
+        {isCompact ? "Khu vực & bàn" : "Cấu hình khu vực"}
       </PortalPageTitle>
       <PortalStickyPanel>
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
+        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
           <Stack gap={4}>
             <Text size="xs" fw={600}>
               Chi nhánh
@@ -226,14 +216,6 @@ export default function AreasTablesSettingsPage() {
             placeholder="VD: Tầng 1"
             value={name}
             onChange={(event) => setName(event.currentTarget.value)}
-            disabled={isAddAreaSaving}
-            size={isCompact ? "md" : "sm"}
-          />
-          <EditableNumberInput
-            label="Sức chứa"
-            required
-            value={capacity}
-            onChange={(value) => setCapacity(value ?? 1)}
             disabled={isAddAreaSaving}
             size={isCompact ? "md" : "sm"}
           />
@@ -328,7 +310,6 @@ export default function AreasTablesSettingsPage() {
                       </Group>
                     </Group>
                     <Group gap="xs">
-                      <Badge variant="light">{area.capacity} chỗ</Badge>
                       <Badge variant="light">{area.tableCount} bàn</Badge>
                       <Badge variant="light">{area.bookingCount} đặt</Badge>
                     </Group>
@@ -379,7 +360,6 @@ export default function AreasTablesSettingsPage() {
                 sortable: true,
               },
               { accessor: "name", title: "Khu vực", sortable: true },
-              { accessor: "capacity", title: "Sức chứa", sortable: true },
               {
                 accessor: "tableCount",
                 title: "Số bàn",
@@ -420,45 +400,24 @@ export default function AreasTablesSettingsPage() {
         )}
       </PortalSectionCard>
 
-      <Modal
-        opened={editOpen}
-        onClose={() => {
-          if (!editSaving) {
-            setEditOpen(false);
-            setEditingArea(null);
-          }
-        }}
-        closeOnClickOutside={!editSaving}
-        closeOnEscape={!editSaving}
-        title="Sửa khu vực"
-        size="md"
-      >
+      <Modal opened={editOpen} onClose={() => setEditOpen(false)} title="Sửa khu vực" size="md">
         <Stack gap="sm">
           <Select
             label="Chi nhánh"
             value={editBranchId}
             onChange={(value) => setEditBranchId(value ?? "")}
             data={branchSelectData}
-            disabled={editSaving}
           />
           <TextInput
             label="Tên khu vực"
             value={editName}
             onChange={(event) => setEditName(event.currentTarget.value)}
-            disabled={editSaving}
-          />
-          <EditableNumberInput
-            label="Sức chứa"
-            required
-            value={editCapacity}
-            onChange={(value) => setEditCapacity(value ?? 1)}
-            disabled={editSaving}
           />
           <Group justify="flex-end" mt="md">
-            <Button variant="default" disabled={editSaving} onClick={() => setEditOpen(false)}>
+            <Button variant="default" onClick={() => setEditOpen(false)}>
               Hủy
             </Button>
-            <Button loading={editSaving} disabled={editSaving} onClick={() => void handleSaveEdit()}>
+            <Button loading={editSaving} onClick={() => void handleSaveEdit()}>
               Lưu
             </Button>
           </Group>
@@ -466,36 +425,21 @@ export default function AreasTablesSettingsPage() {
       </Modal>
 
       <Modal
-        opened={deleteTarget !== null}
-        onClose={() => {
-          if (!deleteLoading) {
-            setDeleteTarget(null);
-          }
-        }}
-        closeOnClickOutside={!deleteLoading}
-        closeOnEscape={!deleteLoading}
+        opened={deleteTarget != null}
+        onClose={() => setDeleteTarget(null)}
         title="Xóa khu vực"
         size="sm"
       >
         <Stack gap="md">
           <Text size="sm">
-            Xóa khu vực{" "}
-            <Text span fw={700}>
-              {deleteTarget?.name}
-            </Text>
-            ? Chỉ xóa được khi không còn bàn và không còn đặt bàn gắn khu vực này (hiện:{" "}
-            {deleteTarget?.tableCount ?? 0} bàn, {deleteTarget?.bookingCount ?? 0} đặt bàn).
+            Xóa khu vực <strong>{deleteTarget?.name}</strong>? Chỉ xóa được khi không còn bàn và
+            không còn đặt bàn.
           </Text>
           <Group justify="flex-end">
-            <Button variant="default" disabled={deleteLoading} onClick={() => setDeleteTarget(null)}>
+            <Button variant="default" onClick={() => setDeleteTarget(null)}>
               Hủy
             </Button>
-            <Button
-              color="red"
-              loading={deleteLoading}
-              disabled={deleteLoading}
-              onClick={() => void handleConfirmDelete()}
-            >
+            <Button color="red" loading={deleteLoading} onClick={() => void handleConfirmDelete()}>
               Xóa
             </Button>
           </Group>

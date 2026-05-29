@@ -12,7 +12,6 @@ export type TableMergeGroupRowLike = {
   area_id: string;
   auto_number: number | null;
   merged_name: string;
-  total_capacity: number | null;
   status: string;
   created_at: string;
   released_at: string | null;
@@ -61,7 +60,6 @@ export function mapTableMergeGroupFromRow(
     areaId: row.area_id,
     autoNumber: row.auto_number ?? 0,
     mergedName: row.merged_name,
-    totalCapacity: row.total_capacity ?? 0,
     tableIds,
     status: row.status === "released" ? "released" : "active",
     createdAt: row.created_at,

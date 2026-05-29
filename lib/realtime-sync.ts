@@ -1,20 +1,6 @@
-type WaitlistListener = () => void;
+type FloorMapDayBookingsListener = () => void;
 
-const waitlistListeners = new Set<WaitlistListener>();
-const floorMapDayBookingsListeners = new Set<WaitlistListener>();
-
-export function notifyWaitlistChanged() {
-  for (const listener of waitlistListeners) {
-    listener();
-  }
-}
-
-export function subscribeWaitlistChanged(listener: WaitlistListener): () => void {
-  waitlistListeners.add(listener);
-  return () => {
-    waitlistListeners.delete(listener);
-  };
-}
+const floorMapDayBookingsListeners = new Set<FloorMapDayBookingsListener>();
 
 /** Booking/table sync changed — floor map should refresh the selected day's slice. */
 export function notifyFloorMapDayBookingsChanged() {
@@ -23,7 +9,9 @@ export function notifyFloorMapDayBookingsChanged() {
   }
 }
 
-export function subscribeFloorMapDayBookingsChanged(listener: WaitlistListener): () => void {
+export function subscribeFloorMapDayBookingsChanged(
+  listener: FloorMapDayBookingsListener
+): () => void {
   floorMapDayBookingsListeners.add(listener);
   return () => {
     floorMapDayBookingsListeners.delete(listener);

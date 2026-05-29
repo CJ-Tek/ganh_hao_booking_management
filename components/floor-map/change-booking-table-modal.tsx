@@ -8,7 +8,6 @@ import {
   formatTableSlotConflictMessage,
   getAssignableCandidateTables,
 } from "@/lib/booking-meta";
-import { formatTableGuestCapacityHint } from "@/lib/table-capacity";
 import type { Area, Booking, DiningTable } from "@/lib/types";
 
 export type ChangeBookingTableModalProps = {
@@ -64,7 +63,7 @@ export function ChangeBookingTableModal(props: ChangeBookingTableModalProps) {
     if (!booking) {
       return [];
     }
-    return getAssignableCandidateTables(booking, tables, bookings, booking.guestCount).filter(
+    return getAssignableCandidateTables(booking, tables, bookings).filter(
       (table) => (areaId ? table.areaId === areaId : true) && table.id !== booking.tableId
     );
   }, [areaId, booking, bookings, tables]);
@@ -72,7 +71,7 @@ export function ChangeBookingTableModal(props: ChangeBookingTableModalProps) {
   const tableOptions = useMemo(() => {
     return candidateTables.map((table) => ({
       value: table.id,
-      label: `${table.name} · ${formatTableGuestCapacityHint(table.seats)}`,
+      label: table.name,
     }));
   }, [candidateTables]);
 
@@ -98,7 +97,6 @@ export function ChangeBookingTableModal(props: ChangeBookingTableModalProps) {
     });
   }, [booking, bookings, tableId, tables, customers]);
 
-  const selectedTable = tableId ? tables.find((table) => table.id === tableId) : undefined;
   const sameAsCurrent =
     booking != null &&
     areaId === booking.areaId &&
@@ -155,11 +153,6 @@ export function ChangeBookingTableModal(props: ChangeBookingTableModalProps) {
               comboboxProps={{ withinPortal: true }}
             />
           </Group>
-          {selectedTable ? (
-            <Text size="xs" c="dimmed">
-              Sức chứa bàn đích: {formatTableGuestCapacityHint(selectedTable.seats)}
-            </Text>
-          ) : null}
           {targetConflictMessage ? (
             <Alert color="red" variant="light" title="Không thể đổi sang bàn này">
               {targetConflictMessage}

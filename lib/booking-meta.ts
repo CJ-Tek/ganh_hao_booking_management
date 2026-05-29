@@ -3,10 +3,6 @@ import dayjs from "dayjs";
 import { DEFAULT_BOOKING_RUNTIME_SETTINGS } from "@/lib/booking-runtime-defaults";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import {
-  getMergeGroupEffectiveGuestCapacity,
-  getTableEffectiveGuestCapacity,
-} from "@/lib/table-capacity";
-import {
   type Booking,
   type BookingRuntimeSettings,
   type BookingStatus,
@@ -637,19 +633,16 @@ export type PendingTableAssignPickResult = {
   assignable: Booking[];
   skippedSelectionOverlap: Booking[];
   skippedTableConflict: Booking[];
-  skippedOverCapacity: Booking[];
 };
 
 /** Pick pending bookings that can share one table without overlapping each other or existing reservations. */
 export function pickNonOverlappingBookingsForTable(
   candidates: readonly Booking[],
   tableId: string,
-  allBookings: readonly Booking[],
-  options?: { maxSeats?: number }
+  allBookings: readonly Booking[]
 ): PendingTableAssignPickResult {
   const skippedSelectionOverlap: Booking[] = [];
   const skippedTableConflict: Booking[] = [];
-  const skippedOverCapacity: Booking[] = [];
   const assignable: Booking[] = [];
 
   const sorted = [...candidates].sort((left, right) => {
@@ -659,14 +652,6 @@ export function pickNonOverlappingBookingsForTable(
   });
 
   for (const booking of sorted) {
-    if (
-      options?.maxSeats !== undefined &&
-      options.maxSeats > 0 &&
-      booking.guestCount > options.maxSeats
-    ) {
-      skippedOverCapacity.push(booking);
-      continue;
-    }
     if (assignable.some((picked) => bookingsTimeSlotsOverlap(picked, booking))) {
       skippedSelectionOverlap.push(booking);
       continue;
@@ -679,20 +664,18 @@ export function pickNonOverlappingBookingsForTable(
     assignable.push(booking);
   }
 
-  return { assignable, skippedSelectionOverlap, skippedTableConflict, skippedOverCapacity };
+  return { assignable, skippedSelectionOverlap, skippedTableConflict };
 }
 
 /** Pick pending bookings that can share one merge group without overlapping. */
 export function pickNonOverlappingBookingsForMergeGroup(
   candidates: readonly Booking[],
-  group: Pick<TableMergeGroup, "id" | "tableIds" | "totalCapacity">,
+  group: Pick<TableMergeGroup, "id" | "tableIds">,
   allBookings: readonly Booking[]
 ): PendingTableAssignPickResult {
   const skippedSelectionOverlap: Booking[] = [];
   const skippedTableConflict: Booking[] = [];
-  const skippedOverCapacity: Booking[] = [];
   const assignable: Booking[] = [];
-  const maxSeats = getMergeGroupEffectiveGuestCapacity(group.totalCapacity);
 
   const sorted = [...candidates].sort((left, right) => {
     const leftStart = normalizeBookingSlotMs(left).startMs;
@@ -701,10 +684,6 @@ export function pickNonOverlappingBookingsForMergeGroup(
   });
 
   for (const booking of sorted) {
-    if (booking.guestCount > maxSeats) {
-      skippedOverCapacity.push(booking);
-      continue;
-    }
     if (assignable.some((picked) => bookingsTimeSlotsOverlap(picked, booking))) {
       skippedSelectionOverlap.push(booking);
       continue;
@@ -717,7 +696,7 @@ export function pickNonOverlappingBookingsForMergeGroup(
     assignable.push(booking);
   }
 
-  return { assignable, skippedSelectionOverlap, skippedTableConflict, skippedOverCapacity };
+  return { assignable, skippedSelectionOverlap, skippedTableConflict };
 }
 
 export function formatTableSlotConflictMessage(
@@ -739,26 +718,14 @@ export function formatTableSlotConflictMessage(
   return `Khung giờ mới trùng booking${tablePart}${guestPart}: ${slotLabel} · ${first.guestCount} khách.${suffix}`;
 }
 
-/** Tables that may receive this booking (branch + seats + slot conflicts). Mirrors bookings-page assign modal. */
+/** Tables that may receive this booking (branch, not locked, no slot conflicts). */
 export function getAssignableCandidateTables(
   booking: Booking,
   tables: readonly DiningTable[],
-  allBookings: readonly Booking[],
-  requiredSeats?: number
+  allBookings: readonly Booking[]
 ): DiningTable[] {
-  const seatsNeeded =
-    typeof requiredSeats === "number" && Number.isFinite(requiredSeats)
-      ? Math.max(1, Math.round(requiredSeats))
-      : undefined;
-
   return tables.filter((table) => {
     if (table.branchId !== booking.branchId || table.status === "locked") {
-      return false;
-    }
-    if (
-      seatsNeeded !== undefined &&
-      getTableEffectiveGuestCapacity(table.seats) < seatsNeeded
-    ) {
       return false;
     }
     return !hasAssignableSlotConflictAtTable(booking, table.id, allBookings);
@@ -801,327 +768,16 @@ export function hasAssignableSlotConflictAtMergeGroup(
   });
 }
 
-/** Active merge groups that can hold this booking (branch + capacity + slot conflicts). */
+/** Active merge groups assignable for this booking (branch + slot conflicts). */
 export function getAssignableMergeGroups(
   booking: Booking,
   mergeGroups: readonly TableMergeGroup[],
-  allBookings: readonly Booking[],
-  requiredSeats?: number
+  allBookings: readonly Booking[]
 ): TableMergeGroup[] {
-  const seatsNeeded =
-    typeof requiredSeats === "number" && Number.isFinite(requiredSeats)
-      ? Math.max(1, Math.round(requiredSeats))
-      : Math.max(1, booking.guestCount);
-
   return mergeGroups.filter((group) => {
     if (group.branchId !== booking.branchId || group.status !== "active") {
       return false;
     }
-    if (getMergeGroupEffectiveGuestCapacity(group.totalCapacity) < seatsNeeded) {
-      return false;
-    }
     return !hasAssignableSlotConflictAtMergeGroup(booking, group, allBookings);
   });
-}
-
-export type MergeRecommendation = {
-  /** Stable key — for existing groups: `group:${id}`. For new combinations: `combo:${tableId1,tableId2,...}`. */
-  key: string;
-  kind: "existing-group" | "new-combination";
-  /** Member table ids in their suggested order (sorted by adjacency / capacity). */
-  tableIds: string[];
-  /** Sum of member seats. */
-  totalCapacity: number;
-  /** When kind === 'existing-group'. */
-  existingGroup?: TableMergeGroup;
-};
-
-type GridPosition = Pick<DiningTable, "positionX" | "positionY">;
-
-function manhattanDistance(a: GridPosition, b: GridPosition): number {
-  return Math.abs(a.positionX - b.positionX) + Math.abs(a.positionY - b.positionY);
-}
-
-/**
- * Pairwise "spread" used to rank new combinations: sum of all pairwise Manhattan distances.
- * Lower is better (tables sit close to each other on the floor map).
- */
-function combinationSpread(tables: readonly DiningTable[]): number {
-  let total = 0;
-  for (let i = 0; i < tables.length; i += 1) {
-    for (let j = i + 1; j < tables.length; j += 1) {
-      total += manhattanDistance(tables[i], tables[j]);
-    }
-  }
-  return total;
-}
-
-const MAX_RECOMMENDATION_CANDIDATES = 5;
-const MAX_NEW_COMBINATION_TABLES = 4;
-const MAX_AREA_TABLES_FOR_FULL_SUBSET = 14;
-
-function isMergeGroupCandidateForRecommendation(
-  group: TableMergeGroup,
-  options: {
-    branchId: string;
-    areaId?: string | null;
-    candidateDayLabel: string | null;
-  }
-): boolean {
-  if (group.branchId !== options.branchId || group.status !== "active") {
-    return false;
-  }
-  if (options.areaId && group.areaId !== options.areaId) {
-    return false;
-  }
-  if (
-    options.candidateDayLabel &&
-    (options.candidateDayLabel < group.startDate ||
-      options.candidateDayLabel > group.endDate)
-  ) {
-    return false;
-  }
-  return true;
-}
-
-/**
- * Suggest ways to fit `targetSeats` guests when no single table works:
- * 1. Reuse existing active merge groups (already gộp) with enough capacity.
- * 2. Propose new combinations of 2..MAX_NEW_COMBINATION_TABLES available tables (no slot conflicts,
- *    excluding tables already in an active merge group on the booking day).
- *
- * Returns at most `MAX_RECOMMENDATION_CANDIDATES` ranked suggestions.
- * Ranking: existing groups first, then fewer tables, then least wasted seats, then tighter grid spread.
- */
-export function recommendMergeGroups(
-  booking: Booking,
-  options: {
-    areaTables: readonly DiningTable[];
-    mergeGroups: readonly TableMergeGroup[];
-    allBookings: readonly Booking[];
-    targetSeats: number;
-    /** Restrict to a specific area when set (typical for the floor-map). */
-    areaId?: string | null;
-  }
-): MergeRecommendation[] {
-  const targetSeats = Math.max(1, Math.round(options.targetSeats));
-  const branchId = booking.branchId;
-  const candidateDay = dayjs(booking.bookingAt);
-  const candidateDayLabel = candidateDay.isValid() ? candidateDay.format("YYYY-MM-DD") : null;
-  const allBookingsOnCandidateDay = candidateDayLabel
-    ? options.allBookings.filter((b) => {
-        const d = dayjs(b.bookingAt);
-        return d.isValid() && d.format("YYYY-MM-DD") === candidateDayLabel;
-      })
-    : options.allBookings;
-
-  const mergeGroupScope = { branchId, areaId: options.areaId, candidateDayLabel };
-
-  const tableIdsInActiveMergeGroups = new Set<string>();
-  for (const group of options.mergeGroups) {
-    if (!isMergeGroupCandidateForRecommendation(group, mergeGroupScope)) {
-      continue;
-    }
-    for (const tableId of group.tableIds) {
-      tableIdsInActiveMergeGroups.add(tableId);
-    }
-  }
-
-  const existingGroupSuggestions: MergeRecommendation[] = options.mergeGroups
-    .filter((group) => {
-      if (!isMergeGroupCandidateForRecommendation(group, mergeGroupScope)) {
-        return false;
-      }
-      if (getMergeGroupEffectiveGuestCapacity(group.totalCapacity) < targetSeats) {
-        return false;
-      }
-      return !hasAssignableSlotConflictAtMergeGroup(booking, group, allBookingsOnCandidateDay);
-    })
-    .map((group) => ({
-      key: `group:${group.id}`,
-      kind: "existing-group" as const,
-      tableIds: group.tableIds,
-      totalCapacity: group.totalCapacity,
-      existingGroup: group,
-    }));
-
-  const availableTables = options.areaTables.filter((table) => {
-    if (table.branchId !== branchId || table.status === "locked") {
-      return false;
-    }
-    if (options.areaId && table.areaId !== options.areaId) {
-      return false;
-    }
-    if (table.positionX < 0 || table.positionY < 0) {
-      return false;
-    }
-    if (tableIdsInActiveMergeGroups.has(table.id)) {
-      return false;
-    }
-    return !hasAssignableSlotConflictAtTable(booking, table.id, allBookingsOnCandidateDay);
-  });
-
-  const newCombinations = enumerateBestCombinations(availableTables, targetSeats);
-
-  const merged = [...existingGroupSuggestions, ...newCombinations];
-
-  merged.sort((a, b) => {
-    if (a.kind !== b.kind) {
-      return a.kind === "existing-group" ? -1 : 1;
-    }
-    if (a.tableIds.length !== b.tableIds.length) {
-      return a.tableIds.length - b.tableIds.length;
-    }
-    const wastedA = getMergeGroupEffectiveGuestCapacity(a.totalCapacity) - targetSeats;
-    const wastedB = getMergeGroupEffectiveGuestCapacity(b.totalCapacity) - targetSeats;
-    if (wastedA !== wastedB) {
-      return wastedA - wastedB;
-    }
-    return a.totalCapacity - b.totalCapacity;
-  });
-
-  return merged.slice(0, MAX_RECOMMENDATION_CANDIDATES);
-}
-
-function enumerateBestCombinations(
-  available: readonly DiningTable[],
-  targetSeats: number
-): MergeRecommendation[] {
-  if (available.length < 2) {
-    return [];
-  }
-
-  const tablesByArea = new Map<string, DiningTable[]>();
-  for (const table of available) {
-    const bucket = tablesByArea.get(table.areaId) ?? [];
-    bucket.push(table);
-    tablesByArea.set(table.areaId, bucket);
-  }
-
-  const out: MergeRecommendation[] = [];
-  for (const [, tables] of tablesByArea) {
-    if (tables.length < 2) {
-      continue;
-    }
-    if (tables.length <= MAX_AREA_TABLES_FOR_FULL_SUBSET) {
-      pushBoundedSubsets(out, tables, targetSeats);
-    } else {
-      pushGreedyCombinations(out, tables, targetSeats);
-    }
-  }
-
-  out.sort((a, b) => {
-    if (a.tableIds.length !== b.tableIds.length) {
-      return a.tableIds.length - b.tableIds.length;
-    }
-    const wastedA = getMergeGroupEffectiveGuestCapacity(a.totalCapacity) - targetSeats;
-    const wastedB = getMergeGroupEffectiveGuestCapacity(b.totalCapacity) - targetSeats;
-    return wastedA - wastedB;
-  });
-
-  return out.slice(0, MAX_RECOMMENDATION_CANDIDATES * 2);
-}
-
-function pushBoundedSubsets(
-  out: MergeRecommendation[],
-  tables: readonly DiningTable[],
-  targetSeats: number
-): void {
-  const candidates: { tables: DiningTable[]; total: number; spread: number }[] = [];
-  const n = tables.length;
-  const seen = new Set<string>();
-
-  const visit = (start: number, picked: DiningTable[]) => {
-    if (picked.length >= 2 && picked.length <= MAX_NEW_COMBINATION_TABLES) {
-      const total = picked.reduce((acc, t) => acc + t.seats, 0);
-      if (getMergeGroupEffectiveGuestCapacity(total) >= targetSeats) {
-        const sortedIds = picked
-          .map((t) => t.id)
-          .sort()
-          .join(",");
-        if (!seen.has(sortedIds)) {
-          seen.add(sortedIds);
-          candidates.push({
-            tables: picked.slice(),
-            total,
-            spread: combinationSpread(picked),
-          });
-        }
-        return;
-      }
-    }
-    if (picked.length >= MAX_NEW_COMBINATION_TABLES) {
-      return;
-    }
-    for (let i = start; i < n; i += 1) {
-      picked.push(tables[i]);
-      visit(i + 1, picked);
-      picked.pop();
-    }
-  };
-  visit(0, []);
-
-  candidates.sort((a, b) => {
-    if (a.tables.length !== b.tables.length) {
-      return a.tables.length - b.tables.length;
-    }
-    const wastedA = getMergeGroupEffectiveGuestCapacity(a.total) - targetSeats;
-    const wastedB = getMergeGroupEffectiveGuestCapacity(b.total) - targetSeats;
-    if (wastedA !== wastedB) {
-      return wastedA - wastedB;
-    }
-    return a.spread - b.spread;
-  });
-
-  for (const candidate of candidates.slice(0, MAX_RECOMMENDATION_CANDIDATES)) {
-    const sortedTables = [...candidate.tables].sort(
-      (left, right) =>
-        manhattanDistance(left, candidate.tables[0]) -
-        manhattanDistance(right, candidate.tables[0])
-    );
-    const ids = sortedTables.map((t) => t.id);
-    out.push({
-      key: `combo:${[...ids].sort().join(",")}`,
-      kind: "new-combination",
-      tableIds: ids,
-      totalCapacity: candidate.total,
-    });
-  }
-}
-
-function pushGreedyCombinations(
-  out: MergeRecommendation[],
-  tables: readonly DiningTable[],
-  targetSeats: number
-): void {
-  const sortedBySeatsDesc = [...tables].sort((a, b) => b.seats - a.seats);
-  for (const anchor of sortedBySeatsDesc.slice(0, MAX_RECOMMENDATION_CANDIDATES)) {
-    const picked: DiningTable[] = [anchor];
-    let total = anchor.seats;
-    if (getMergeGroupEffectiveGuestCapacity(total) >= targetSeats) {
-      continue;
-    }
-    const neighbors = [...tables]
-      .filter((t) => t.id !== anchor.id)
-      .sort((a, b) => manhattanDistance(a, anchor) - manhattanDistance(b, anchor));
-    for (const next of neighbors) {
-      picked.push(next);
-      total += next.seats;
-      if (
-        getMergeGroupEffectiveGuestCapacity(total) >= targetSeats ||
-        picked.length >= MAX_NEW_COMBINATION_TABLES
-      ) {
-        break;
-      }
-    }
-    if (getMergeGroupEffectiveGuestCapacity(total) >= targetSeats) {
-      const ids = picked.map((t) => t.id);
-      out.push({
-        key: `combo:${[...ids].sort().join(",")}`,
-        kind: "new-combination",
-        tableIds: ids,
-        totalCapacity: total,
-      });
-    }
-  }
 }

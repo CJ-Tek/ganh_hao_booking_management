@@ -140,9 +140,6 @@ export function MergeGroupsPanel({
         if (status.columnAccessor === "memberCount") {
           return group.tableIds.length;
         }
-        if (status.columnAccessor === "totalCapacity") {
-          return group.totalCapacity;
-        }
         if (status.columnAccessor === "activeBookings") {
           return activeBookingCountByGroup.get(group.id) ?? 0;
         }
@@ -248,7 +245,7 @@ export function MergeGroupsPanel({
                 Gộp lúc {formatNotificationTime(group.createdAt)}
               </Text>
               <Text size="sm">
-                {group.tableIds.length} bàn · {group.totalCapacity} chỗ ·{" "}
+                {group.tableIds.length} bàn ·{" "}
                 {activeBookingCountByGroup.get(group.id) ?? 0} booking đang giữ
               </Text>
               <Text size="xs" c="dimmed" lineClamp={3}>
@@ -304,12 +301,6 @@ export function MergeGroupsPanel({
               </Text>
             </Stack>
           ),
-        },
-        {
-          accessor: "totalCapacity",
-          title: "Tổng chỗ",
-          sortable: true,
-          render: (group) => `${group.totalCapacity} chỗ`,
         },
         {
           accessor: "startDate",

@@ -376,6 +376,7 @@ export const BookingCalendarPanel = forwardRef<
               setSelectedDate(date);
             }}
             valueFormat="DD/MM/YYYY"
+            dropdownType="modal"
             size={isCompact || isNarrowCalendar ? "xs" : "sm"}
             style={{ flex: "1 1 auto", minWidth: isNarrowCalendar ? "100%" : 200 }}
             maw={isNarrowCalendar ? undefined : 280}

@@ -155,42 +155,6 @@ export async function getTableBlockStateInSupabase(
   return callStore("getTableBlockState", input);
 }
 
-export async function confirmWaitlistOfferInSupabase(waitlistEntryId: string): Promise<Result> {
-  return callStore("confirmWaitlistOffer", waitlistEntryId);
-}
-
-export async function updateWaitlistEntryInSupabase(
-  input: Parameters<
-    typeof import("./supabase-store-server").updateWaitlistEntryInSupabase
-  >[0]
-): Promise<Result> {
-  return callStore("updateWaitlistEntry", input);
-}
-
-export async function transferWaitlistEntryBranchInSupabase(
-  input: Parameters<
-    typeof import("./supabase-store-server").transferWaitlistEntryBranchInSupabase
-  >[0]
-): Promise<Result> {
-  return callStore("transferWaitlistEntryBranch", input);
-}
-
-export async function promoteWaitlistEntryNowInSupabase(
-  input: Parameters<
-    typeof import("./supabase-store-server").promoteWaitlistEntryNowInSupabase
-  >[0]
-): Promise<Result & { bookingId?: string }> {
-  return callStore("promoteWaitlistEntryNow", input);
-}
-
-export async function listBranchWaitlistEntriesInSupabase(
-  input: Parameters<
-    typeof import("./supabase-store-server").listBranchWaitlistEntriesInSupabase
-  >[0]
-): Promise<import("./types").BookingWaitlistEntry[]> {
-  return callStore("listBranchWaitlistEntries", input);
-}
-
 export type CreateTableMergeGroupResult = Result & {
   groupId?: string;
   mergedName?: string;
@@ -279,17 +243,13 @@ export async function updateTablePositionInSupabase(
   await callStore("updateTablePosition", { tableId, x, y });
 }
 
-export async function addAreaInSupabase(
-  branchId: string,
-  name: string,
-  capacity: number
-): Promise<void> {
-  await callStore("addArea", { branchId, name, capacity });
+export async function addAreaInSupabase(branchId: string, name: string): Promise<void> {
+  await callStore("addArea", { branchId, name });
 }
 
 export async function updateAreaInSupabase(
   areaId: string,
-  input: { branchId?: string; name?: string; capacity?: number }
+  input: { branchId?: string; name?: string }
 ): Promise<Result> {
   return callStore("updateArea", { areaId, input });
 }

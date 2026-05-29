@@ -8,14 +8,11 @@ import {
   Group,
   Loader,
   Stack,
-  Tabs,
   Text,
   Tooltip,
 } from "@mantine/core";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { TableBlockConfirmedScheduleTable } from "@/components/floor-map/table-block-confirmed-schedule-table";
-import { WaitlistEntryDetailModal } from "@/components/booking-management/waitlist-entry-detail-modal";
-import { TableBlockWaitlistTable } from "@/components/floor-map/table-block-waitlist-table";
 import { canChangeBookingTable } from "@/components/booking-management/shared";
 import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
@@ -24,13 +21,10 @@ import { formatMergeGroupDateRange } from "@/lib/merge-group-utils";
 import {
   type Booking,
   type DiningTable,
-  type BookingWaitlistEntry,
   type TableBlockState,
   type TableMergeGroup,
   type TableStatus,
 } from "@/lib/types";
-
-type HistorySubTab = "schedule" | "waitlist";
 
 export type TableBlockDetailModalProps = {
   opened: boolean;
@@ -44,14 +38,12 @@ export type TableBlockDetailModalProps = {
   activeBookingCustomerName: string;
   isEmployee: boolean;
   bookingActionLoading: boolean;
-  waitlistConfirmLoadingId: string | null;
   onNewBooking: () => void;
   onAssignPending: () => void;
   onCheckIn: () => void;
   onComplete: () => void;
   onChangeTable: () => void;
   onCancelBooking: () => void;
-  onConfirmWaitlistOffer: (entry: BookingWaitlistEntry) => void | Promise<void>;
 };
 
 export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
@@ -67,37 +59,28 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     activeBookingCustomerName,
     isEmployee,
     bookingActionLoading,
-    waitlistConfirmLoadingId,
     onNewBooking,
     onAssignPending,
     onCheckIn,
     onComplete,
     onChangeTable,
     onCancelBooking,
-    onConfirmWaitlistOffer,
   } = props;
 
-  const [historySubTab, setHistorySubTab] = useState<HistorySubTab>("schedule");
-  const [waitlistDetailEntry, setWaitlistDetailEntry] = useState<BookingWaitlistEntry | null>(
-    null
-  );
-  const waitlistCount = blockState?.waitlistQueue.length ?? 0;
   const isMerge = Boolean(mergeGroup);
   const displayStatus = isMerge ? mergeStatus : (table?.status ?? "available");
   const isOccupied = displayStatus === "occupied";
 
   useEffect(() => {
-    if (opened) {
-      setHistorySubTab("schedule");
-    } else {
-      setWaitlistDetailEntry(null);
+    if (!opened) {
+      return;
     }
   }, [opened, table?.id, mergeGroup?.id]);
 
   const modalTitle = mergeGroup
-    ? `${mergeGroup.mergedName} · Lịch sử booking & hàng chờ`
+    ? `${mergeGroup.mergedName} · Lịch sử booking`
     : table
-      ? `Bàn ${table.name} · Lịch sử booking & hàng chờ`
+      ? `Bàn ${table.name} · Lịch sử booking`
       : "Thông tin bàn";
 
   const targetReady = Boolean(table || mergeGroup);
@@ -116,8 +99,8 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
           <Group justify="space-between" align="flex-start" wrap="wrap" gap="xs">
             <Text size="sm" c="dimmed">
               {mergeGroup
-                ? `Tổng ${mergeGroup.totalCapacity} chỗ · ${mergeGroup.tableIds.length} bàn · ${formatMergeGroupDateRange(mergeGroup.startDate, mergeGroup.endDate)} · ${tableStatusLabel[displayStatus]}`
-                : `${table!.seats} ghế · ${tableStatusLabel[displayStatus]}`}
+                ? `${mergeGroup.tableIds.length} bàn · ${formatMergeGroupDateRange(mergeGroup.startDate, mergeGroup.endDate)} · ${tableStatusLabel[displayStatus]}`
+                : tableStatusLabel[displayStatus]}
             </Text>
             {blockLoading ? (
               <Group gap={6}>
@@ -285,61 +268,14 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
 
           <Stack gap="xs">
             <Text fw={600} size="sm">
-              Lịch sử booking & hàng chờ
+              Lịch đặt bàn sắp tới
             </Text>
-            <Tabs
-              value={historySubTab}
-              onChange={(value) =>
-                setHistorySubTab(value === "waitlist" ? "waitlist" : "schedule")
-              }
-            >
-              <Tabs.List grow>
-                <Tabs.Tab value="schedule">Lịch đặt bàn sắp tới</Tabs.Tab>
-                <Tabs.Tab value="waitlist">Hàng chờ ({waitlistCount})</Tabs.Tab>
-              </Tabs.List>
-
-              <Tabs.Panel value="schedule" pt="sm">
-                <Stack gap="xs">
-                  <Text size="xs" c="dimmed">
-                    {isMerge
-                      ? "Các booking đã gán cụm gộp từ hôm nay trở đi (đã xác nhận / đang phục vụ)."
-                      : "Các booking đã gán bàn từ hôm nay trở đi (đã xác nhận / đang phục vụ)."}
-                  </Text>
-                  <TableBlockConfirmedScheduleTable
-                    records={blockState?.confirmedSchedule ?? []}
-                  />
-                </Stack>
-              </Tabs.Panel>
-
-              <Tabs.Panel value="waitlist" pt="sm">
-                <Stack gap="xs">
-                  <Text size="xs" c="dimmed">
-                    {isMerge
-                      ? "Khách xếp hàng khi khung giờ cụm gộp đã kín (gồm hàng chờ trên từng bàn thành viên)."
-                      : "Khách xếp hàng khi khung giờ đã kín (khác với booking đã xác nhận ở trên)."}
-                  </Text>
-                  <TableBlockWaitlistTable
-                    records={blockState?.waitlistQueue ?? []}
-                    isEmployee={isEmployee}
-                    actionLoadingId={waitlistConfirmLoadingId}
-                    onRowClick={setWaitlistDetailEntry}
-                    showLocationColumns={false}
-                  />
-                  <WaitlistEntryDetailModal
-                    entry={waitlistDetailEntry}
-                    opened={waitlistDetailEntry != null}
-                    onClose={() => setWaitlistDetailEntry(null)}
-                    isEmployee={isEmployee}
-                    actionLoadingId={waitlistConfirmLoadingId}
-                    showLocation={false}
-                    onConfirmOffer={async (entry) => {
-                      await onConfirmWaitlistOffer(entry);
-                      setWaitlistDetailEntry(null);
-                    }}
-                  />
-                </Stack>
-              </Tabs.Panel>
-            </Tabs>
+            <Text size="xs" c="dimmed">
+              {isMerge
+                ? "Các booking đã gán cụm gộp từ hôm nay trở đi (đã xác nhận / đang phục vụ)."
+                : "Các booking đã gán bàn từ hôm nay trở đi (đã xác nhận / đang phục vụ)."}
+            </Text>
+            <TableBlockConfirmedScheduleTable records={blockState?.confirmedSchedule ?? []} />
           </Stack>
         </Stack>
       ) : null}

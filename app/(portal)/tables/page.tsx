@@ -27,7 +27,6 @@ import { EditableNumberInput } from "@/components/editable-number-input";
 import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
-import { getAreaSeatBudget } from "@/lib/area-capacity";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { FLOOR_TABLE_PALETTE_SENTINEL } from "@/lib/floor-map-layout";
 import { bookingCardBusyProps, bookingRowBusyStyle } from "@/lib/busy-row-style";
@@ -35,7 +34,7 @@ import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type DiningTable, TableStatus } from "@/lib/types";
 
-type BatchSeatGroup = { count: number; seats: number };
+type BatchCountGroup = { count: number };
 
 function branchScopeKey(branchIds: string[]) {
   return [...branchIds].sort().join("|") || "none";
@@ -75,24 +74,20 @@ function TablesPageContent() {
   const [activeTab, setActiveTab] = useState<string | null>("single");
 
   const [singleName, setSingleName] = useState("");
-  const [singleSeats, setSingleSeats] = useState<number>(4);
-
   const [batchPrefix, setBatchPrefix] = useState("Bàn");
   const [batchStart, setBatchStart] = useState<number>(1);
-  const [batchGroups, setBatchGroups] = useState<BatchSeatGroup[]>([
-    { count: 4, seats: 2 },
-    { count: 3, seats: 4 },
-    { count: 2, seats: 5 },
+  const [batchGroups, setBatchGroups] = useState<BatchCountGroup[]>([
+    { count: 4 },
+    { count: 3 },
+    { count: 2 },
   ]);
 
   const [removeIds, setRemoveIds] = useState<string[]>([]);
-  const [removeBySeats, setRemoveBySeats] = useState<number>(2);
   const [removeCount, setRemoveCount] = useState<number>(24);
   const [removePrefix, setRemovePrefix] = useState("");
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [seatsFilter, setSeatsFilter] = useState<string>("all");
   const [selectedRows, setSelectedRows] = useState<DiningTable[]>([]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -115,21 +110,14 @@ function TablesPageContent() {
     [branchId, state.areas]
   );
 
-  const areaSeatBudget = useMemo(
-    () => (areaId ? getAreaSeatBudget(state.areas, state.tables, areaId) : null),
-    [areaId, state.areas, state.tables]
-  );
-
   const batchPlan = useMemo(() => {
     const groups = batchGroups
       .map((g) => ({
         count: Math.max(0, Math.floor(Number(g.count) || 0)),
-        seats: Math.max(1, Math.floor(Number(g.seats) || 1)),
       }))
       .filter((g) => g.count > 0);
     const tableCount = groups.reduce((s, g) => s + g.count, 0);
-    const seatTotal = groups.reduce((s, g) => s + g.count * g.seats, 0);
-    return { groups, tableCount, seatTotal };
+    return { groups, tableCount };
   }, [batchGroups]);
 
   const baseRecords = useMemo(
@@ -155,10 +143,9 @@ function TablesPageContent() {
         (branchNameById[row.branchId] ?? "").toLowerCase().includes(keyword) ||
         (areaNameById[row.areaId] ?? "").toLowerCase().includes(keyword);
       const hitStatus = statusFilter === "all" || row.status === statusFilter;
-      const hitSeats = seatsFilter === "all" || row.seats === Number(seatsFilter);
-      return hitKeyword && hitStatus && hitSeats;
+      return hitKeyword && hitStatus;
     });
-  }, [areaNameById, baseRecords, branchNameById, search, seatsFilter, statusFilter]);
+  }, [areaNameById, baseRecords, branchNameById, search, statusFilter]);
 
   const sortTableRecords = useCallback(
     (records: DiningTable[], sortStatus: DataTableSortStatus<DiningTable>) => {
@@ -168,9 +155,6 @@ function TablesPageContent() {
         }
         if (sortStatus.columnAccessor === "areaId") {
           return areaNameById[item.areaId] ?? "";
-        }
-        if (sortStatus.columnAccessor === "seats") {
-          return item.seats;
         }
         if (sortStatus.columnAccessor === "status") {
           return tableStatusLabel[item.status];
@@ -202,16 +186,6 @@ function TablesPageContent() {
     [currentPage, sortedRecords]
   );
 
-  const seatFilterOptions = useMemo(
-    () => [
-      { value: "all", label: "Tất cả số ghế" },
-      ...Array.from(new Set(baseRecords.map((item) => item.seats)))
-        .sort((a, b) => a - b)
-        .map((value) => ({ value: String(value), label: `${value} ghế` })),
-    ],
-    [baseRecords]
-  );
-
   const removeOptions = useMemo(
     () =>
       sortedRecords.map((row) => ({
@@ -226,27 +200,17 @@ function TablesPageContent() {
       notifications.show({ color: "red", message: "Vui lòng chọn phạm vi thao tác và nhập tên bàn." });
       return;
     }
-    const seats = Math.max(1, Number(singleSeats || 1));
-    if (areaSeatBudget && seats > areaSeatBudget.remaining) {
-      notifications.show({
-        color: "red",
-        message: `Vượt sức chứa khu: còn ${areaSeatBudget.remaining} chỗ (${areaSeatBudget.used}/${areaSeatBudget.capacity} đã dùng).`,
-      });
-      return;
-    }
     setIsAddingSingle(true);
     try {
       await upsertTable({
         branchId,
         areaId,
         name: singleName.trim(),
-        seats,
         status: "available",
         positionX: FLOOR_TABLE_PALETTE_SENTINEL,
         positionY: FLOOR_TABLE_PALETTE_SENTINEL,
       });
       setSingleName("");
-      setSingleSeats(4);
       notifications.show({ color: "green", message: "Đã thêm bàn mới." });
     } finally {
       setIsAddingSingle(false);
@@ -259,18 +223,11 @@ function TablesPageContent() {
       return;
     }
     const start = Math.max(1, Number(batchStart || 1));
-    const { groups, tableCount, seatTotal } = batchPlan;
+    const { groups, tableCount } = batchPlan;
     if (groups.length === 0) {
       notifications.show({
         color: "red",
         message: "Thêm ít nhất một nhóm với số bàn > 0.",
-      });
-      return;
-    }
-    if (areaSeatBudget && seatTotal > areaSeatBudget.remaining) {
-      notifications.show({
-        color: "red",
-        message: `Vượt sức chứa khu: cần ${seatTotal} ghế nhưng còn ${areaSeatBudget.remaining} (${areaSeatBudget.used}/${areaSeatBudget.capacity} đã dùng).`,
       });
       return;
     }
@@ -279,7 +236,6 @@ function TablesPageContent() {
       branchId: string;
       areaId: string;
       name: string;
-      seats: number;
       status: "available";
       positionX: number;
       positionY: number;
@@ -290,7 +246,6 @@ function TablesPageContent() {
           branchId,
           areaId,
           name: `${batchPrefix.trim()} ${nextNum}`,
-          seats: g.seats,
           status: "available",
           positionX: FLOOR_TABLE_PALETTE_SENTINEL,
           positionY: FLOOR_TABLE_PALETTE_SENTINEL,
@@ -310,7 +265,6 @@ function TablesPageContent() {
   const handlePickRemovalsByRule = () => {
     const prefix = removePrefix.trim().toLowerCase();
     const matches = sortedRecords
-      .filter((item) => item.seats === Math.max(1, Number(removeBySeats || 1)))
       .filter((item) => !prefix || item.name.toLowerCase().startsWith(prefix))
       .slice(0, Math.max(1, Number(removeCount || 1)))
       .map((item) => item.id);
@@ -405,7 +359,7 @@ function TablesPageContent() {
                     {row.name}
                   </Text>
                   <Text size="sm" c="dimmed">
-                    {areaNameById[row.areaId]} · {row.seats} ghế
+                    {areaNameById[row.areaId]}
                   </Text>
                 </div>
                 <Badge color={tableStatusColor[row.status]} variant="light" size="lg">
@@ -477,18 +431,8 @@ function TablesPageContent() {
             onChange={(event) => setSingleName(event.currentTarget.value)}
             size={isCompact ? "md" : "sm"}
           />
-          <EditableNumberInput
-            label="Số ghế"
-            required
-            max={areaSeatBudget && areaSeatBudget.remaining > 0 ? areaSeatBudget.remaining : undefined}
-            value={singleSeats}
-            onChange={(value) => setSingleSeats(value ?? 1)}
-            size={isCompact ? "md" : "sm"}
-          />
-          <div />
           <Button
             mt={{ base: 0, lg: 26 }}
-            disabled={Boolean(areaSeatBudget && areaSeatBudget.remaining <= 0) || isAddingSingle}
             loading={isAddingSingle}
             onClick={() => void handleAddSingleTable()}
           >
@@ -519,8 +463,7 @@ function TablesPageContent() {
               Nhóm bàn
             </Text>
             <Text size="xs" c="dimmed">
-              Mỗi dòng: số bàn và số ghế mỗi bàn (ví dụ 6 bàn × 2 ghế, rồi 4 bàn × 4 ghế). Tên bàn tăng dần
-              theo thứ tự nhóm.
+              Mỗi dòng: số bàn cần thêm. Tên bàn tăng dần theo thứ tự nhóm.
             </Text>
           </div>
           <Stack gap="xs">
@@ -536,20 +479,6 @@ function TablesPageContent() {
                     setBatchGroups((prev) =>
                       prev.map((g, i) =>
                         i === index ? { ...g, count: value ?? 0 } : g
-                      )
-                    )
-                  }
-                  style={{ flex: 1 }}
-                  size={isCompact ? "md" : "sm"}
-                />
-                <EditableNumberInput
-                  label={index === 0 ? "Ghế / bàn" : undefined}
-                  required
-                  value={row.seats}
-                  onChange={(value) =>
-                    setBatchGroups((prev) =>
-                      prev.map((g, i) =>
-                        i === index ? { ...g, seats: value ?? 1 } : g
                       )
                     )
                   }
@@ -575,19 +504,13 @@ function TablesPageContent() {
             variant="light"
             leftSection={<Plus size={18} />}
             size={isCompact ? "md" : "sm"}
-            onClick={() => setBatchGroups((prev) => [...prev, { count: 1, seats: 4 }])}
+            onClick={() => setBatchGroups((prev) => [...prev, { count: 1 }])}
           >
             Thêm nhóm
           </Button>
           {batchPlan.tableCount > 0 ? (
             <Text size="sm" c="dimmed">
-              Tổng dự kiến: {batchPlan.tableCount} bàn · {batchPlan.seatTotal} ghế
-              {areaSeatBudget && batchPlan.seatTotal > areaSeatBudget.remaining ? (
-                <Text span c="red" fw={600}>
-                  {" "}
-                  (vượt sức chứa còn lại)
-                </Text>
-              ) : null}
+              Tổng dự kiến: {batchPlan.tableCount} bàn.
             </Text>
           ) : (
             <Text size="sm" c="dimmed">
@@ -595,12 +518,7 @@ function TablesPageContent() {
             </Text>
           )}
           <Button
-            disabled={Boolean(
-              areaSeatBudget &&
-                (areaSeatBudget.remaining <= 0 ||
-                  batchPlan.tableCount === 0 ||
-                  batchPlan.seatTotal > areaSeatBudget.remaining)
-            ) || isBatchAdding}
+            disabled={batchPlan.tableCount === 0 || isBatchAdding}
             loading={isBatchAdding}
             size={isCompact ? "md" : "sm"}
             onClick={() => void handleBatchAdd()}
@@ -612,14 +530,7 @@ function TablesPageContent() {
 
       <Tabs.Panel value="batch-remove" pt="md">
         <Stack gap="sm">
-          <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="sm">
-            <EditableNumberInput
-              label="Số ghế cần xóa"
-              required
-              value={removeBySeats}
-              onChange={(value) => setRemoveBySeats(value ?? 1)}
-              size={isCompact ? "md" : "sm"}
-            />
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
             <EditableNumberInput
               label="Số lượng cần xóa"
               required
@@ -740,50 +651,6 @@ function TablesPageContent() {
                   </Text>
                 </Paper>
               </SimpleGrid>
-              {areaSeatBudget ? (
-                <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="xs">
-                  <Paper withBorder radius="sm" p="sm" bg="var(--mantine-color-default-hover)">
-                    <Text size="xs" c="dimmed" mb={4}>
-                      Sức chứa tối đa
-                    </Text>
-                    <Text fw={700} size="md">
-                      {areaSeatBudget.capacity}
-                      <Text span size="xs" c="dimmed" fw={400}>
-                        {" "}
-                        chỗ
-                      </Text>
-                    </Text>
-                  </Paper>
-                  <Paper withBorder radius="sm" p="sm" bg="var(--mantine-color-default-hover)">
-                    <Text size="xs" c="dimmed" mb={4}>
-                      Đã gán trên bàn
-                    </Text>
-                    <Text fw={700} size="md">
-                      {areaSeatBudget.used}
-                      <Text span size="xs" c="dimmed" fw={400}>
-                        {" "}
-                        ghế
-                      </Text>
-                    </Text>
-                  </Paper>
-                  <Paper withBorder radius="sm" p="sm" bg="var(--mantine-color-default-hover)">
-                    <Text size="xs" c="dimmed" mb={4}>
-                      Còn lại
-                    </Text>
-                    <Text fw={700} size="md" c={areaSeatBudget.remaining <= 0 ? "red" : undefined}>
-                      {areaSeatBudget.remaining}
-                      <Text span size="xs" c="dimmed" fw={400}>
-                        {" "}
-                        chỗ
-                      </Text>
-                    </Text>
-                  </Paper>
-                </SimpleGrid>
-              ) : (
-                <Text size="xs" c="dimmed">
-                  Chọn khu vực để xem sức chứa và ngân sách ghế.
-                </Text>
-              )}
             </Stack>
           </Collapse>
         </Stack>
@@ -834,16 +701,6 @@ function TablesPageContent() {
                 label: tableStatusLabel[status],
               })),
             ]}
-            size={isCompact ? "md" : "sm"}
-          />
-          <Select
-            label="Số ghế"
-            value={seatsFilter}
-            onChange={(value) => {
-              setSeatsFilter(value ?? "all");
-              setPage(1);
-            }}
-            data={seatFilterOptions}
             size={isCompact ? "md" : "sm"}
           />
         </SimpleGrid>
@@ -897,7 +754,6 @@ function TablesPageContent() {
                   sortable: true,
                   render: (row) => areaNameById[row.areaId],
                 },
-                { accessor: "seats", title: "Số ghế", sortable: true },
                 {
                   accessor: "status",
                   title: "Trạng thái",

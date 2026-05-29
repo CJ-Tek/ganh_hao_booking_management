@@ -29,7 +29,6 @@ export interface Area {
   id: string;
   branchId: string;
   name: string;
-  capacity: number;
   /** Floor map grid columns (persisted when using Supabase). */
   floorGridColumns?: number;
   /** Floor map grid rows (persisted when using Supabase). */
@@ -43,7 +42,6 @@ export interface DiningTable {
   branchId: string;
   areaId: string;
   name: string;
-  seats: number;
   status: TableStatus;
   positionX: number;
   positionY: number;
@@ -80,31 +78,9 @@ export interface Booking {
   status: BookingStatus;
 }
 
-export type WaitlistStatus = "waiting" | "offered" | "expired" | "cancelled" | "promoted";
-
-export interface BookingWaitlistEntry {
-  id: string;
-  tableId: string;
-  branchId: string;
-  areaId: string | null;
-  customerId: string;
-  bookingId?: string | null;
-  desiredStartTime: string;
-  desiredEndTime: string;
-  partySize: number;
-  status: WaitlistStatus;
-  position: number;
-  offeredAt?: string | null;
-  offerExpiresAt?: string | null;
-  promotedBookingId?: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface BookingRuntimeSettings {
   standardTurnaroundMinutes: number;
   noShowGraceMinutes: number;
-  waitlistOfferTtlMinutes: number;
   /** SL từ đây trở lên → nhãn Đoàn (khi ghi chú không nói rõ). */
   groupPartyGuestThreshold: number;
   /** Số booking completed tối thiểu → Khách quen. */
@@ -119,7 +95,6 @@ export interface TableBlockState {
   slotStartTime: string;
   slotEndTime: string;
   confirmedSchedule: Booking[];
-  waitlistQueue: BookingWaitlistEntry[];
 }
 
 export interface InternalNotification {
@@ -133,7 +108,7 @@ export interface InternalNotification {
 
 /**
  * Merged-tables group (Bàn gộp N): a logical container in `Sơ đồ` that bundles 2+ tables
- * so a booking can occupy the combined capacity. Numbered per area, reusable after release.
+ * so a booking can occupy the combined tables. Numbered per area, reusable after release.
  */
 export interface TableMergeGroup {
   id: string;
@@ -143,8 +118,6 @@ export interface TableMergeGroup {
   autoNumber: number;
   /** Always `Bàn gộp {autoNumber}` for active groups (server keeps this in sync). */
   mergedName: string;
-  /** Sum of member table seats at the time of the latest membership change. */
-  totalCapacity: number;
   /** Member table ids in `order_index` order. */
   tableIds: string[];
   status: "active" | "released";

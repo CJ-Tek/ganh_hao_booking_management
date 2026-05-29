@@ -1,10 +1,11 @@
 "use client";
 
-import { ActionIcon, Badge, Menu, Stack, Text } from "@mantine/core";
+import { ActionIcon, Badge, Group, Menu, Stack, Text } from "@mantine/core";
 import dayjs from "dayjs";
 import { MoreVertical } from "lucide-react";
 import { memo, type CSSProperties, type MouseEvent } from "react";
 import { bookingRowBusyStyle } from "@/lib/busy-row-style";
+import { isGuestCountSpecified } from "@/lib/booking-meta";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import type { Booking, DiningTable, TableStatus } from "@/lib/types";
 import classes from "@/app/(portal)/floor-map/page.module.css";
@@ -19,6 +20,18 @@ const TABLE_STATUS_SURFACE_CLASS: Record<TableStatus, string> = {
 function stopMenuAction(event: MouseEvent) {
   event.stopPropagation();
   event.preventDefault();
+}
+
+function TableBlockGuestBadge(props: { booking: Booking | null }) {
+  const { booking } = props;
+  if (!booking || !isGuestCountSpecified(booking)) {
+    return null;
+  }
+  return (
+    <Badge variant="filled" color="dark" size="xs" radius="sm" style={{ flexShrink: 0 }}>
+      {booking.guestCount} khách
+    </Badge>
+  );
 }
 
 function TableBlockBookingPeek(props: {
@@ -115,10 +128,12 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
           onOpenTable();
         }}
       >
-        <Text fw={600} size="sm" lineClamp={1}>
-          {table.name}
-        </Text>
-        <Text size="xs">{table.seats} ghế</Text>
+        <Group gap={6} wrap="nowrap" align="center" justify="space-between">
+          <Text fw={600} size="sm" lineClamp={1} style={{ minWidth: 0, flex: 1 }}>
+            {table.name}
+          </Text>
+          <TableBlockGuestBadge booking={displayBooking} />
+        </Group>
         <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
           {tableStatusLabel[table.status]}
         </Badge>
@@ -155,7 +170,7 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
                   onOpenDetail();
                 }}
               >
-                Lịch sử booking & hàng chờ
+                Lịch sử booking
               </Menu.Item>
               {hasQuickActions ? <Menu.Divider /> : null}
               {canComplete ? (
@@ -204,7 +219,6 @@ function propsAreEqual(prev: FloorTableBlockViewProps, next: FloorTableBlockView
     prev.table.id === next.table.id &&
     prev.table.status === next.table.status &&
     prev.table.name === next.table.name &&
-    prev.table.seats === next.table.seats &&
     prev.isMergeMember === next.isMergeMember &&
     prev.isEmployee === next.isEmployee &&
     prev.isBusy === next.isBusy &&
@@ -216,6 +230,8 @@ function propsAreEqual(prev: FloorTableBlockViewProps, next: FloorTableBlockView
     prev.displayBooking?.id === next.displayBooking?.id &&
     prev.displayBooking?.status === next.displayBooking?.status &&
     prev.displayBooking?.bookingAt === next.displayBooking?.bookingAt &&
+    prev.displayBooking?.guestCount === next.displayBooking?.guestCount &&
+    prev.displayBooking?.note === next.displayBooking?.note &&
     prev.displayBooking?.checkedInAt === next.displayBooking?.checkedInAt &&
     prev.customerName === next.customerName &&
     prev.style.left === next.style.left &&

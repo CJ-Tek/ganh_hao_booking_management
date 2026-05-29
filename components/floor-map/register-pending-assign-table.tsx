@@ -13,14 +13,12 @@ import {
   pickNonOverlappingBookingsForMergeGroup,
   pickNonOverlappingBookingsForTable,
 } from "@/lib/booking-meta";
-import { getMergeGroupEffectiveGuestCapacity } from "@/lib/table-capacity";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import { type Booking, type TableMergeGroup } from "@/lib/types";
 
 export function RegisterPendingAssignTable(props: {
   records: Booking[];
   tableId?: string;
-  tableSeats?: number;
   mergeGroup?: TableMergeGroup;
   selectedBookings: Booking[];
   onSelectedBookingsChange: (bookings: Booking[]) => void;
@@ -30,7 +28,6 @@ export function RegisterPendingAssignTable(props: {
   const {
     records,
     tableId,
-    tableSeats = 0,
     mergeGroup,
     selectedBookings,
     onSelectedBookingsChange,
@@ -61,22 +58,13 @@ export function RegisterPendingAssignTable(props: {
         assignable: [],
         skippedSelectionOverlap: [],
         skippedTableConflict: [],
-        skippedOverCapacity: [],
       };
     }
-    return pickNonOverlappingBookingsForTable(selectedBookings, tableId, state.bookings, {
-      maxSeats: tableSeats > 0 ? tableSeats : undefined,
-    });
-  }, [mergeGroup, selectedBookings, state.bookings, tableId, tableSeats]);
-
-  const capacityLabel = mergeGroup
-    ? getMergeGroupEffectiveGuestCapacity(mergeGroup.totalCapacity)
-    : tableSeats;
+    return pickNonOverlappingBookingsForTable(selectedBookings, tableId, state.bookings);
+  }, [mergeGroup, selectedBookings, state.bookings, tableId]);
 
   const skippedCount =
-    assignPlan.skippedSelectionOverlap.length +
-    assignPlan.skippedTableConflict.length +
-    assignPlan.skippedOverCapacity.length;
+    assignPlan.skippedSelectionOverlap.length + assignPlan.skippedTableConflict.length;
 
   const getRecordSearchValue = useCallback(
     (booking: Booking) => {
@@ -180,12 +168,6 @@ export function RegisterPendingAssignTable(props: {
                   <Text size="xs">
                     {assignPlan.skippedTableConflict.length} booking trùng khung giờ với booking
                     {mergeGroup ? " đã có trên cụm hoặc bàn thành viên" : " đã có trên bàn"}.
-                  </Text>
-                ) : null}
-                {assignPlan.skippedOverCapacity.length > 0 ? (
-                  <Text size="xs">
-                    {assignPlan.skippedOverCapacity.length} booking vượt sức chứa{" "}
-                    {mergeGroup ? "cụm" : "bàn"} (tối đa {capacityLabel} khách).
                   </Text>
                 ) : null}
               </Stack>

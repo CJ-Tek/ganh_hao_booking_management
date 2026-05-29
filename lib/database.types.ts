@@ -117,7 +117,6 @@ export type Database = {
       areas: {
         Row: {
           branch_id: string
-          capacity: number
           floor_grid_columns: number
           floor_grid_rows: number
           floor_node_spacing: number
@@ -126,7 +125,6 @@ export type Database = {
         }
         Insert: {
           branch_id: string
-          capacity?: number
           floor_grid_columns?: number
           floor_grid_rows?: number
           floor_node_spacing?: number
@@ -135,7 +133,6 @@ export type Database = {
         }
         Update: {
           branch_id?: string
-          capacity?: number
           floor_grid_columns?: number
           floor_grid_rows?: number
           floor_node_spacing?: number
@@ -161,7 +158,6 @@ export type Database = {
           repeat_customer_min_completed: number
           standard_turnaround_minutes: number
           updated_at: string
-          waitlist_offer_ttl_minutes: number
         }
         Insert: {
           group_party_guest_threshold?: number
@@ -171,7 +167,6 @@ export type Database = {
           repeat_customer_min_completed?: number
           standard_turnaround_minutes?: number
           updated_at?: string
-          waitlist_offer_ttl_minutes?: number
         }
         Update: {
           group_party_guest_threshold?: number
@@ -181,119 +176,8 @@ export type Database = {
           repeat_customer_min_completed?: number
           standard_turnaround_minutes?: number
           updated_at?: string
-          waitlist_offer_ttl_minutes?: number
         }
         Relationships: []
-      }
-      booking_waitlist_entries: {
-        Row: {
-          area_id: string | null
-          booking_id: string | null
-          branch_id: string
-          created_at: string
-          created_by_user_id: string
-          customer_id: string
-          desired_end_time: string
-          desired_start_time: string
-          id: string
-          offer_expires_at: string | null
-          offered_at: string | null
-          party_size: number
-          promoted_booking_id: string | null
-          queue_position: number
-          status: string
-          table_id: string
-          updated_at: string
-        }
-        Insert: {
-          area_id?: string | null
-          booking_id?: string | null
-          branch_id: string
-          created_at?: string
-          created_by_user_id: string
-          customer_id: string
-          desired_end_time: string
-          desired_start_time: string
-          id?: string
-          offer_expires_at?: string | null
-          offered_at?: string | null
-          party_size: number
-          promoted_booking_id?: string | null
-          queue_position: number
-          status?: string
-          table_id: string
-          updated_at?: string
-        }
-        Update: {
-          area_id?: string | null
-          booking_id?: string | null
-          branch_id?: string
-          created_at?: string
-          created_by_user_id?: string
-          customer_id?: string
-          desired_end_time?: string
-          desired_start_time?: string
-          id?: string
-          offer_expires_at?: string | null
-          offered_at?: string | null
-          party_size?: number
-          promoted_booking_id?: string | null
-          queue_position?: number
-          status?: string
-          table_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "booking_waitlist_entries_area_id_fkey"
-            columns: ["area_id"]
-            isOneToOne: false
-            referencedRelation: "areas"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_waitlist_entries_booking_id_fkey"
-            columns: ["booking_id"]
-            isOneToOne: false
-            referencedRelation: "bookings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_waitlist_entries_branch_id_fkey"
-            columns: ["branch_id"]
-            isOneToOne: false
-            referencedRelation: "branches"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_waitlist_entries_created_by_user_id_fkey"
-            columns: ["created_by_user_id"]
-            isOneToOne: false
-            referencedRelation: "app_users"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_waitlist_entries_customer_id_fkey"
-            columns: ["customer_id"]
-            isOneToOne: false
-            referencedRelation: "customers"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_waitlist_entries_promoted_booking_id_fkey"
-            columns: ["promoted_booking_id"]
-            isOneToOne: false
-            referencedRelation: "bookings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "booking_waitlist_entries_table_id_fkey"
-            columns: ["table_id"]
-            isOneToOne: false
-            referencedRelation: "tables"
-            referencedColumns: ["id"]
-          },
-        ]
       }
       bookings: {
         Row: {
@@ -633,7 +517,6 @@ export type Database = {
           released_at: string | null
           start_date: string
           status: string
-          total_capacity: number
           updated_at: string
         }
         Insert: {
@@ -648,7 +531,6 @@ export type Database = {
           released_at?: string | null
           start_date: string
           status?: string
-          total_capacity?: number
           updated_at?: string
         }
         Update: {
@@ -663,7 +545,6 @@ export type Database = {
           released_at?: string | null
           start_date?: string
           status?: string
-          total_capacity?: number
           updated_at?: string
         }
         Relationships: [
@@ -737,7 +618,6 @@ export type Database = {
           name: string
           position_x: number
           position_y: number
-          seats: number
           status: string
         }
         Insert: {
@@ -747,7 +627,6 @@ export type Database = {
           name: string
           position_x?: number
           position_y?: number
-          seats?: number
           status: string
         }
         Update: {
@@ -757,7 +636,6 @@ export type Database = {
           name?: string
           position_x?: number
           position_y?: number
-          seats?: number
           status?: string
         }
         Relationships: [
@@ -801,39 +679,6 @@ export type Database = {
           waitlist_id: string
         }[]
       }
-      confirm_waitlist_offer: {
-        Args: { p_waitlist_entry_id: string }
-        Returns: Json
-      }
-      promote_waitlist_entry_now: {
-        Args: {
-          p_waitlist_entry_id: string
-          p_area_id?: string | null
-          p_table_id?: string | null
-        }
-        Returns: Json
-      }
-      transfer_waitlist_entry_branch: {
-        Args: {
-          p_waitlist_entry_id: string
-          p_branch_id: string
-          p_area_id: string
-          p_table_id: string
-          p_party_size?: number | null
-        }
-        Returns: Json
-      }
-      update_waitlist_entry: {
-        Args: {
-          p_waitlist_entry_id: string
-          p_party_size: number
-          p_desired_start_time: string
-          p_desired_end_time: string
-          p_area_id: string
-          p_table_id: string
-        }
-        Returns: Json
-      }
       create_or_queue_booking: {
         Args: {
           p_area_id: string
@@ -856,13 +701,6 @@ export type Database = {
           waitlist_id: string
         }[]
       }
-      expire_waitlist_offers: {
-        Args: never
-        Returns: {
-          expired_offer_count: number
-          promoted_count: number
-        }[]
-      }
       find_booking_duplicates_by_phone_slot: {
         Args: { p_booking_at: string; p_branch_id: string; p_phone: string }
         Returns: {
@@ -874,15 +712,6 @@ export type Database = {
         }[]
       }
       normalize_vietnam_phone: { Args: { raw: string }; Returns: string }
-      promote_waitlist_for_booking_slot: {
-        Args: {
-          p_branch_id: string
-          p_slot_end_time: string
-          p_slot_start_time: string
-          p_table_id: string
-        }
-        Returns: number
-      }
       run_booking_maintenance: {
         Args: never
         Returns: {

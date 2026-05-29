@@ -1,9 +1,10 @@
 "use client";
 
-import { Badge, Stack, Text } from "@mantine/core";
+import { Badge, Group, Stack, Text } from "@mantine/core";
 import dayjs from "dayjs";
 import { memo, type CSSProperties } from "react";
 import { bookingRowBusyStyle } from "@/lib/busy-row-style";
+import { isGuestCountSpecified } from "@/lib/booking-meta";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import type { Booking, TableMergeGroup, TableStatus } from "@/lib/types";
 import classes from "@/app/(portal)/floor-map/page.module.css";
@@ -14,6 +15,18 @@ const TABLE_STATUS_SURFACE_CLASS: Record<TableStatus, string> = {
   occupied: classes.statusSurface_occupied,
   locked: classes.statusSurface_locked,
 };
+
+function MergeBlockGuestBadge(props: { booking: Booking | null }) {
+  const { booking } = props;
+  if (!booking || !isGuestCountSpecified(booking)) {
+    return null;
+  }
+  return (
+    <Badge variant="filled" color="dark" size="xs" radius="sm" style={{ flexShrink: 0 }}>
+      {booking.guestCount} khách
+    </Badge>
+  );
+}
 
 function MergeBlockBookingPeek(props: {
   displayBooking: Booking | null;
@@ -89,10 +102,13 @@ function FloorMergeGroupBlockViewInner(props: FloorMergeGroupBlockViewProps) {
           onOpen();
         }}
       >
-        <Text fw={600} size="sm" lineClamp={1}>
-          {group.mergedName}
-        </Text>
-        <Text size="xs">Tổng {group.totalCapacity} chỗ · {group.tableIds.length} bàn</Text>
+        <Group gap={6} wrap="nowrap" align="center" justify="space-between">
+          <Text fw={600} size="sm" lineClamp={1} style={{ minWidth: 0, flex: 1 }}>
+            {group.mergedName}
+          </Text>
+          <MergeBlockGuestBadge booking={displayBooking} />
+        </Group>
+        <Text size="xs">{group.tableIds.length} bàn</Text>
         <Badge color={tableStatusColor[status]} variant="light" size="xs">
           {tableStatusLabel[status]}
         </Badge>
@@ -109,7 +125,6 @@ function propsAreEqual(
   return (
     prev.group.id === next.group.id &&
     prev.group.mergedName === next.group.mergedName &&
-    prev.group.totalCapacity === next.group.totalCapacity &&
     prev.group.tableIds.length === next.group.tableIds.length &&
     prev.status === next.status &&
     prev.isBusy === next.isBusy &&
@@ -119,6 +134,8 @@ function propsAreEqual(
     prev.displayBooking?.startTime === next.displayBooking?.startTime &&
     prev.displayBooking?.endTime === next.displayBooking?.endTime &&
     prev.displayBooking?.bookingAt === next.displayBooking?.bookingAt &&
+    prev.displayBooking?.guestCount === next.displayBooking?.guestCount &&
+    prev.displayBooking?.note === next.displayBooking?.note &&
     prev.displayBooking?.checkedInAt === next.displayBooking?.checkedInAt &&
     prev.customerName === next.customerName &&
     prev.style.left === next.style.left &&

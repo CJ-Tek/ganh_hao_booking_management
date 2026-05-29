@@ -37,7 +37,6 @@ import {
   normalizeRealtimePayload,
   type RealtimeBookingPayload,
 } from "@/lib/realtime-booking-row";
-import { notifyWaitlistChanged } from "@/lib/realtime-sync";
 import { resolveMergeGroupDateRange } from "@/lib/merge-group-utils";
 import {
   applyBookingPatchToSnapshot,
@@ -238,10 +237,10 @@ interface AppContextValue {
   deleteTables: (tableIds: string[]) => Promise<void>;
   updateTableStatus: (tableId: string, status: TableStatus) => Promise<void>;
   updateTablePosition: (tableId: string, x: number, y: number) => Promise<void>;
-  addArea: (branchId: string, name: string, capacity: number) => Promise<void>;
+  addArea: (branchId: string, name: string) => Promise<void>;
   updateArea: (
     areaId: string,
-    input: { branchId?: string; name?: string; capacity?: number }
+    input: { branchId?: string; name?: string }
   ) => Promise<ActionResult>;
   deleteArea: (areaId: string) => Promise<ActionResult>;
   addUser: (payload: {
@@ -497,14 +496,12 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     const mapRealtimeRuntimeSettings = (row: RealtimeRow): BookingRuntimeSettings | null => {
       const standardTurnaroundMinutes = row.standard_turnaround_minutes;
       const noShowGraceMinutes = row.no_show_grace_minutes;
-      const waitlistOfferTtlMinutes = row.waitlist_offer_ttl_minutes;
       const groupPartyGuestThreshold = row.group_party_guest_threshold;
       const repeatCustomerMinCompleted = row.repeat_customer_min_completed;
       const receptionArrivalGraceMinutes = row.reception_arrival_grace_minutes;
       if (
         typeof standardTurnaroundMinutes !== "number" ||
         typeof noShowGraceMinutes !== "number" ||
-        typeof waitlistOfferTtlMinutes !== "number" ||
         typeof groupPartyGuestThreshold !== "number" ||
         typeof repeatCustomerMinCompleted !== "number" ||
         typeof receptionArrivalGraceMinutes !== "number"
@@ -514,7 +511,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return {
         standardTurnaroundMinutes,
         noShowGraceMinutes,
-        waitlistOfferTtlMinutes,
         groupPartyGuestThreshold,
         repeatCustomerMinCompleted,
         receptionArrivalGraceMinutes,
@@ -576,7 +572,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       const branchId = row.branch_id;
       const areaId = row.area_id;
       const name = row.name;
-      const seats = row.seats;
       const status = row.status;
       const positionX = row.position_x;
       const positionY = row.position_y;
@@ -585,7 +580,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         typeof branchId !== "string" ||
         typeof areaId !== "string" ||
         typeof name !== "string" ||
-        typeof seats !== "number" ||
         typeof status !== "string" ||
         !tableStatuses.includes(status as TableStatus) ||
         typeof positionX !== "number" ||
@@ -598,7 +592,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         branchId,
         areaId,
         name,
-        seats,
         status: status as TableStatus,
         positionX,
         positionY,
@@ -609,16 +602,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       const id = row.id;
       const branchId = row.branch_id;
       const name = row.name;
-      const capacity = row.capacity;
       const floorGridColumns = row.floor_grid_columns;
       const floorGridRows = row.floor_grid_rows;
       const floorNodeSpacing = row.floor_node_spacing;
-      if (
-        typeof id !== "string" ||
-        typeof branchId !== "string" ||
-        typeof name !== "string" ||
-        typeof capacity !== "number"
-      ) {
+      if (typeof id !== "string" || typeof branchId !== "string" || typeof name !== "string") {
         return null;
       }
       if (floorGridColumns !== undefined && floorGridColumns !== null && typeof floorGridColumns !== "number") {
@@ -634,7 +621,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         id,
         branchId,
         name,
-        capacity,
         floorGridColumns:
           typeof floorGridColumns === "number" ? floorGridColumns : undefined,
         floorGridRows: typeof floorGridRows === "number" ? floorGridRows : undefined,
@@ -693,7 +679,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       const areaId = row.area_id;
       const autoNumber = row.auto_number;
       const mergedName = row.merged_name;
-      const totalCapacity = row.total_capacity;
       const status = row.status;
       const createdAt = row.created_at;
       const releasedAt = row.released_at;
@@ -720,7 +705,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         areaId,
         autoNumber: typeof autoNumber === "number" ? autoNumber : 0,
         mergedName,
-        totalCapacity: typeof totalCapacity === "number" ? totalCapacity : 0,
         tableIds: [],
         status: status === "released" ? "released" : "active",
         startDate,
@@ -1033,7 +1017,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       "tables",
       "bookings",
       "table_merge_groups",
-      "booking_waitlist_entries",
     ] as const;
     const scopedBranchIds = filteredBranchIds;
     const bindTableChange = (
@@ -1046,10 +1029,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         filter ? { event: "*", schema: "public", table, filter } : { event: "*", schema: "public", table },
         (payload) => {
           const normalized = normalizeRealtimePayload(payload);
-          if (table === "booking_waitlist_entries") {
-            notifyWaitlistChanged();
-            return;
-          }
           if (
             isFloorLayoutRealtimeReloadBlocked() &&
             floorEditSensitiveTables.has(table)
@@ -1345,7 +1324,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }
 
     const result = await assignBookingToTableInSupabase(input);
-    if (!result.ok || /hàng chờ/i.test(result.message)) {
+    if (!result.ok) {
       setState((prev) => {
         const next = applyBookingPatchToSnapshot(prev, input.bookingId, revertPatch);
         return next ?? prev;
@@ -1746,19 +1725,19 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     await updateTablePositionInSupabase(tableId, x, y);
   };
 
-  const addArea = async (branchId: string, name: string, capacity: number) => {
+  const addArea = async (branchId: string, name: string) => {
     if (isEmployeeUser(currentUser)) {
       throw new Error(EMPLOYEE_MUTATION_BLOCKED);
     }
     if (!hasSupabase) {
       return;
     }
-    await addAreaInSupabase(branchId, name, capacity);
+    await addAreaInSupabase(branchId, name);
   };
 
   const updateArea = async (
     areaId: string,
-    input: { branchId?: string; name?: string; capacity?: number }
+    input: { branchId?: string; name?: string }
   ) => {
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
@@ -1771,7 +1750,6 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
             ? {
                 ...a,
                 ...(input.name !== undefined ? { name: input.name } : {}),
-                ...(input.capacity !== undefined ? { capacity: input.capacity } : {}),
                 ...(input.branchId !== undefined ? { branchId: input.branchId } : {}),
               }
             : a

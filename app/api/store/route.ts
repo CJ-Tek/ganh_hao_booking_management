@@ -70,24 +70,6 @@ const handlers: Record<string, StoreHandler> = {
     store.checkInBookingInSupabase(payload as string),
   getTableBlockState: (payload) =>
     store.getTableBlockStateInSupabase(payload as Parameters<typeof store.getTableBlockStateInSupabase>[0]),
-  confirmWaitlistOffer: (payload) =>
-    store.confirmWaitlistOfferInSupabase(payload as string),
-  updateWaitlistEntry: (payload) =>
-    store.updateWaitlistEntryInSupabase(
-      payload as Parameters<typeof store.updateWaitlistEntryInSupabase>[0]
-    ),
-  transferWaitlistEntryBranch: (payload) =>
-    store.transferWaitlistEntryBranchInSupabase(
-      payload as Parameters<typeof store.transferWaitlistEntryBranchInSupabase>[0]
-    ),
-  promoteWaitlistEntryNow: (payload) =>
-    store.promoteWaitlistEntryNowInSupabase(
-      payload as Parameters<typeof store.promoteWaitlistEntryNowInSupabase>[0]
-    ),
-  listBranchWaitlistEntries: (payload) =>
-    store.listBranchWaitlistEntriesInSupabase(
-      payload as Parameters<typeof store.listBranchWaitlistEntriesInSupabase>[0]
-    ),
   createTableMergeGroup: (payload) =>
     store.createTableMergeGroupInSupabase(payload as Parameters<typeof store.createTableMergeGroupInSupabase>[0]),
   addTableToMergeGroup: (payload) =>
@@ -122,13 +104,13 @@ const handlers: Record<string, StoreHandler> = {
     return store.updateTablePositionInSupabase(p.tableId, p.x, p.y);
   },
   addArea: (payload) => {
-    const p = payload as { branchId: string; name: string; capacity: number };
-    return store.addAreaInSupabase(p.branchId, p.name, p.capacity);
+    const p = payload as { branchId: string; name: string };
+    return store.addAreaInSupabase(p.branchId, p.name);
   },
   updateArea: (payload) => {
     const p = payload as {
       areaId: string;
-      input: { branchId?: string; name?: string; capacity?: number };
+      input: { branchId?: string; name?: string };
     };
     return store.updateAreaInSupabase(p.areaId, p.input);
   },
