@@ -1,13 +1,15 @@
+import {
+  PORTAL_MODAL_POPOVER_Z_INDEX,
+  PORTAL_MODAL_Z_INDEX,
+  portaledComboboxProps,
+} from "@/lib/portal-z-index";
 import { type Booking } from "@/lib/types";
 
 export const MANUAL_ASSIGN_MODAL_OPEN_DELAY_MS = 220;
-export const MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX = 600;
-export const MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX = 700;
+export const MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX = PORTAL_MODAL_Z_INDEX;
+export const MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX = PORTAL_MODAL_POPOVER_Z_INDEX;
 
-export const portalModalOverlayPopoverProps = {
-  zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX,
-  withinPortal: true,
-} as const;
+export const portalModalOverlayPopoverProps = portaledComboboxProps.comboboxProps;
 
 export function canEditBookingOrder(booking: Pick<Booking, "status">): boolean {
   return booking.status === "pending" || booking.status === "confirmed";

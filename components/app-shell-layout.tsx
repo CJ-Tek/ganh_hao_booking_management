@@ -24,6 +24,7 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useBusyId } from "@/lib/use-busy-id";
+import { MANAGER_DOCK_Z_INDEX } from "@/lib/portal-z-index";
 import {
   Bell,
   CalendarDays,
@@ -595,7 +596,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               left: 0,
               right: 0,
               bottom: 0,
-              zIndex: 200,
+              zIndex: MANAGER_DOCK_Z_INDEX,
               background: "var(--mantine-color-brand-filled)",
               borderTopColor: "rgba(255,255,255,0.25)",
             }}

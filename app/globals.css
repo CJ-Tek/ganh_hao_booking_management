@@ -37,6 +37,19 @@ body {
   min-height: 36px;
 }
 
+.mantine-Modal-body .mobile-sticky-action {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin-top: 4px;
+  padding-top: 10px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--mantine-color-body) 0%, transparent) 0%,
+    var(--mantine-color-body) 36%
+  );
+}
+
 @media (max-width: 48em) {
   body {
     font-size: 15px;

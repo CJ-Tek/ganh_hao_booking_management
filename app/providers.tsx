@@ -4,17 +4,30 @@ import "@mantine/core/styles.css";
 import "@mantine/dates/styles.css";
 import "@mantine/notifications/styles.css";
 import {
+  Autocomplete,
   Badge,
   Button,
+  Drawer,
+  Menu,
   Modal,
+  MultiSelect,
+  Popover,
+  Select,
   createTheme,
   MantineColorsTuple,
   MantineProvider,
 } from "@mantine/core";
-import { DatesProvider } from "@mantine/dates";
+import { DatePickerInput, DatesProvider } from "@mantine/dates";
 import { ModalsProvider } from "@mantine/modals";
 import { Notifications } from "@mantine/notifications";
 import { AppContextProvider } from "@/contexts/app-context";
+import {
+  PORTAL_MODAL_POPOVER_Z_INDEX,
+  PORTAL_MODAL_Z_INDEX,
+  portaledComboboxProps,
+  portaledOverlayProps,
+  portaledPopoverFieldProps,
+} from "@/lib/portal-z-index";
 import "mantine-datatable/styles.css";
 
 const brandPalette: MantineColorsTuple = [
@@ -43,7 +56,31 @@ const theme = createTheme({
       defaultProps: {
         centered: true,
         overlayProps: modalOverlayBlur,
+        zIndex: PORTAL_MODAL_Z_INDEX,
       },
+    }),
+    Drawer: Drawer.extend({
+      defaultProps: {
+        zIndex: PORTAL_MODAL_Z_INDEX,
+      },
+    }),
+    Select: Select.extend({
+      defaultProps: portaledComboboxProps,
+    }),
+    MultiSelect: MultiSelect.extend({
+      defaultProps: portaledComboboxProps,
+    }),
+    Autocomplete: Autocomplete.extend({
+      defaultProps: portaledComboboxProps,
+    }),
+    Menu: Menu.extend({
+      defaultProps: portaledOverlayProps,
+    }),
+    Popover: Popover.extend({
+      defaultProps: portaledOverlayProps,
+    }),
+    DatePickerInput: DatePickerInput.extend({
+      defaultProps: portaledPopoverFieldProps,
     }),
     Badge: Badge.extend({
       styles: {
@@ -103,9 +140,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <MantineProvider theme={theme} defaultColorScheme="light">
       <DatesProvider settings={{ locale: "vi" }}>
         <ModalsProvider
-          modalProps={{ centered: true, overlayProps: modalOverlayBlur }}
+          modalProps={{
+            centered: true,
+            overlayProps: modalOverlayBlur,
+            zIndex: PORTAL_MODAL_Z_INDEX,
+          }}
         >
-          <Notifications />
+          <Notifications zIndex={PORTAL_MODAL_POPOVER_Z_INDEX + 100} />
           <AppContextProvider>{children}</AppContextProvider>
         </ModalsProvider>
       </DatesProvider>

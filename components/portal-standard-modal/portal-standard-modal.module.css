@@ -1,7 +1,7 @@
 .modalContent {
   display: flex;
   flex-direction: column;
-  max-height: min(90dvh, 900px);
+  max-height: min(90dvh, calc(100dvh - env(safe-area-inset-bottom, 0px) - 76px));
   overflow: hidden;
 }
 
@@ -17,7 +17,23 @@
 .modalBody {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.modalBodyScroll {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
-  padding-top: 12px;
+  padding: 12px var(--mantine-spacing-md) var(--mantine-spacing-md);
+}
+
+.modalFooter {
+  flex-shrink: 0;
+  background: var(--mantine-color-body);
+  border-top: 1px solid var(--mantine-color-default-border);
+  padding: 12px var(--mantine-spacing-md);
 }
 

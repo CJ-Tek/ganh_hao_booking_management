@@ -2,7 +2,6 @@
 
 import dayjs from "dayjs";
 import {
-  Badge,
   Button,
   Group,
   Modal,
@@ -598,10 +597,6 @@ export function VoiceBookingAssistant(props: {
           ) : (
             <Group justify="space-between" align="flex-start">
               <Stack gap={4}>
-                <Group gap="xs">
-                  <Badge variant="light">Chi nhánh</Badge>
-                <Text fw={600}>{branch.name}</Text>
-                </Group>
                 <Text size="sm" c="dimmed">
                   Bấm <strong>Ghi âm</strong> (có thể nhiều lần) hoặc gõ nội dung → <strong>Phân tích</strong> điền các
                   trường có trong câu (không cần đủ thông tin) → kiểm tra lại → tạo booking.
@@ -668,14 +663,14 @@ export function VoiceBookingAssistant(props: {
                 onArrivalModeChange?.(value === "hold" ? "hold" : "immediate")
               }
             >
-              <Stack gap={6} mt={4}>
+              <Group gap="md" mt={4} wrap="wrap">
                 <Radio value="hold" label="Giữ chỗ" disabled={formDisabled} />
                 <Radio
                   value="immediate"
                   label="Ngồi ngay"
                   disabled={formDisabled || immediateModeDisabled}
                 />
-              </Stack>
+              </Group>
             </Radio.Group>
           ) : null}
 
@@ -697,17 +692,16 @@ export function VoiceBookingAssistant(props: {
             />
           </Group>
 
-          <Select
-            label="Loại khách"
-            placeholder="Chọn loại khách"
-            data={guestTypeOptions}
-            value={guestType}
-            onChange={setGuestType}
-            allowDeselect={false}
-            disabled={formDisabled}
-          />
-
           <Group grow align="flex-start">
+            <Select
+              label="Loại khách"
+              placeholder="Chọn loại khách"
+              data={guestTypeOptions}
+              value={guestType}
+              onChange={setGuestType}
+              allowDeselect={false}
+              disabled={formDisabled}
+            />
             <GuestCountNumberInput
               label="Số khách"
               value={guestCount ?? undefined}
@@ -716,14 +710,15 @@ export function VoiceBookingAssistant(props: {
               disabled={formDisabled}
               min={1}
             />
-            {!(showArrivalModeRadios && arrivalMode === "immediate") ? (
-              <BookingDateTimeFields
-                value={bookingAt}
-                onChange={setBookingAt}
-                disabled={formDisabled}
-              />
-            ) : null}
           </Group>
+
+          {!(showArrivalModeRadios && arrivalMode === "immediate") ? (
+            <BookingDateTimeFields
+              value={bookingAt}
+              onChange={setBookingAt}
+              disabled={formDisabled}
+            />
+          ) : null}
 
           {hideAreaTablePickers ? null : (
             <Stack gap="sm">

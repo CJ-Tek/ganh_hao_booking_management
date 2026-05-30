@@ -106,12 +106,14 @@ function FloorMergeGroupBlockViewInner(props: FloorMergeGroupBlockViewProps) {
           <Text fw={600} size="sm" lineClamp={1} style={{ minWidth: 0, flex: 1 }}>
             {group.mergedName}
           </Text>
-          <MergeBlockGuestBadge booking={displayBooking} />
         </Group>
         <Text size="xs">{group.tableIds.length} bàn</Text>
-        <Badge color={tableStatusColor[status]} variant="light" size="xs">
-          {tableStatusLabel[status]}
-        </Badge>
+        <Group gap={6} wrap="nowrap" align="center" justify="space-between" w="100%">
+          <Badge color={tableStatusColor[status]} variant="light" size="xs">
+            {tableStatusLabel[status]}
+          </Badge>
+          <MergeBlockGuestBadge booking={displayBooking} />
+        </Group>
         <MergeBlockBookingPeek displayBooking={displayBooking} customerName={customerName} />
       </button>
     </div>

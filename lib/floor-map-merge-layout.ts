@@ -252,6 +252,103 @@ function displaceTableToNearestEmpty(
   return true;
 }
 
+function memberReservedCellsFromStripLayout(
+  layout: Array<{ row: number; col: number }>,
+  memberCount: number
+): Set<string> {
+  return new Set(
+    layout.slice(0, memberCount).map((cell) => cellKey(cell.row, cell.col))
+  );
+}
+
+function evaluateMergePackAnchor(input: {
+  memberTableIds: string[];
+  memberSet: Set<string>;
+  initialSnapshot: Map<string, { row: number; col: number }>;
+  areaTables: Array<Pick<DiningTable, "id" | "positionX" | "positionY">>;
+  gridColumns: number;
+  gridRows: number;
+  slotCount: number;
+  anchorRow: number;
+  anchorCol: number;
+  prefRow: number;
+  prefCol: number;
+}): {
+  score: number;
+  positionUpdates: Map<string, { row: number; col: number }>;
+  gridRows: number;
+  displacementCount: number;
+  memberDisplacementCount: number;
+} | null {
+  const wrapped = layoutWrappedMergeCellsWithRowGrowth(
+    input.anchorRow,
+    input.anchorCol,
+    input.slotCount,
+    input.gridColumns,
+    input.gridRows
+  );
+  if (!wrapped) {
+    return null;
+  }
+
+  const memberPositions = new Map<string, { row: number; col: number }>();
+  input.memberTableIds.forEach((tableId, index) => {
+    const cell = wrapped.layout[index];
+    if (cell) {
+      memberPositions.set(tableId, cell);
+    }
+  });
+
+  const reservedCells = memberReservedCellsFromStripLayout(
+    wrapped.layout,
+    input.memberTableIds.length
+  );
+
+  const resolved = resolveMergeStripCollisions({
+    memberTableIds: input.memberTableIds,
+    memberPositions,
+    reservedCells,
+    areaTables: input.areaTables,
+    gridColumns: input.gridColumns,
+    gridRows: Math.max(input.gridRows, wrapped.gridRows),
+  });
+
+  if (!resolved.ok) {
+    return null;
+  }
+
+  const positionUpdates = new Map<string, { row: number; col: number }>();
+  let displacementCount = 0;
+  let memberDisplacementCount = 0;
+  for (const [tableId, pos] of resolved.positions) {
+    const before = input.initialSnapshot.get(tableId);
+    if (!before || before.row !== pos.row || before.col !== pos.col) {
+      positionUpdates.set(tableId, pos);
+      if (!input.memberSet.has(tableId)) {
+        displacementCount += 1;
+      } else {
+        memberDisplacementCount += 1;
+      }
+    }
+  }
+
+  const rowGrowth = resolved.gridRows - input.gridRows;
+  const score =
+    Math.abs(input.anchorRow - input.prefRow) * 10 +
+    Math.abs(input.anchorCol - input.prefCol) +
+    rowGrowth * 100 +
+    displacementCount * 64 +
+    memberDisplacementCount * 8;
+
+  return {
+    score,
+    positionUpdates,
+    gridRows: resolved.gridRows,
+    displacementCount,
+    memberDisplacementCount,
+  };
+}
+
 function resolveMergeStripCollisions(input: {
   memberTableIds: string[];
   memberPositions: Map<string, { row: number; col: number }>;
@@ -403,8 +500,9 @@ export type MergeGroupPackResult = {
 };
 
 /**
- * Pack merge members plus one trailing "+" plug cell. Rows wrap at the grid edge.
- * Non-member tables on the strip move to the nearest empty grid dot; rows grow when needed (up to 18).
+ * Pack merge members into one adjacent strip. Only member slots may displace nearby tables;
+ * the trailing "+" plug cell is virtual and must not push unrelated tables aside.
+ * Rows grow when needed (up to 18).
  */
 export function packMergeGroupTablePositions(input: {
   memberTableIds: string[];
@@ -459,12 +557,80 @@ export function packMergeGroupTablePositions(input: {
   };
   const candidates: Candidate[] = [];
 
+  const evaluateAnchor = (anchorRow: number, anchorCol: number) => {
+    const evaluated = evaluateMergePackAnchor({
+      memberTableIds: input.memberTableIds,
+      memberSet,
+      initialSnapshot,
+      areaTables: input.areaTables,
+      gridColumns: input.gridColumns,
+      gridRows: input.gridRows,
+      slotCount,
+      anchorRow,
+      anchorCol,
+      prefRow,
+      prefCol,
+    });
+    if (!evaluated) {
+      return;
+    }
+    candidates.push({
+      score: evaluated.score,
+      positionUpdates: evaluated.positionUpdates,
+      gridRows: evaluated.gridRows,
+    });
+  };
+
+  if (!input.preferredAnchor) {
+    const existingAnchor = findMergeStripAnchorForMemberCells(
+      input.memberTableIds,
+      initialSnapshot,
+      input.gridColumns,
+      input.gridRows
+    );
+    if (existingAnchor) {
+      const preserved = evaluateMergePackAnchor({
+        memberTableIds: input.memberTableIds,
+        memberSet,
+        initialSnapshot,
+        areaTables: input.areaTables,
+        gridColumns: input.gridColumns,
+        gridRows: input.gridRows,
+        slotCount,
+        anchorRow: existingAnchor.row,
+        anchorCol: existingAnchor.col,
+        prefRow,
+        prefCol,
+      });
+      if (
+        preserved &&
+        preserved.displacementCount === 0 &&
+        preserved.memberDisplacementCount === 0
+      ) {
+        return {
+          positionUpdates: preserved.positionUpdates,
+          gridRows: preserved.gridRows,
+        };
+      }
+    }
+  }
+
   const anchorRows: number[] = [];
   const anchorCols: number[] = [];
   if (input.preferredAnchor) {
     anchorRows.push(input.preferredAnchor.row);
     anchorCols.push(input.preferredAnchor.col);
   } else {
+    const existingAnchor = findMergeStripAnchorForMemberCells(
+      input.memberTableIds,
+      initialSnapshot,
+      input.gridColumns,
+      input.gridRows
+    );
+    if (existingAnchor) {
+      anchorRows.push(existingAnchor.row);
+      anchorCols.push(existingAnchor.col);
+    }
     for (let row = 0; row < input.gridRows; row++) {
       anchorRows.push(row);
     }
@@ -473,72 +639,15 @@ export function packMergeGroupTablePositions(input: {
     }
   }
 
+  const seenAnchors = new Set<string>();
   for (const row of anchorRows) {
     for (const col of anchorCols) {
-      const wrapped = layoutWrappedMergeCellsWithRowGrowth(
-        row,
-        col,
-        slotCount,
-        input.gridColumns,
-        input.gridRows
-      );
-      if (!wrapped) {
+      const key = cellKey(row, col);
+      if (seenAnchors.has(key)) {
         continue;
       }
-
-      const memberPositions = new Map<string, { row: number; col: number }>();
-      input.memberTableIds.forEach((tableId, index) => {
-        const cell = wrapped.layout[index];
-        if (cell) {
-          memberPositions.set(tableId, cell);
-        }
-      });
-
-      const reservedCells = new Set(
-        wrapped.layout.map((cell) => cellKey(cell.row, cell.col))
-      );
-
-      const resolved = resolveMergeStripCollisions({
-        memberTableIds: input.memberTableIds,
-        memberPositions,
-        reservedCells,
-        areaTables: input.areaTables,
-        gridColumns: input.gridColumns,
-        gridRows: Math.max(input.gridRows, wrapped.gridRows),
-      });
-
-      if (!resolved.ok) {
-        continue;
-      }
-
-      const positionUpdates = new Map<string, { row: number; col: number }>();
-      let displacementCount = 0;
-      let memberDisplacementCount = 0;
-      for (const [tableId, pos] of resolved.positions) {
-        const before = initialSnapshot.get(tableId);
-        if (!before || before.row !== pos.row || before.col !== pos.col) {
-          positionUpdates.set(tableId, pos);
-          if (!memberSet.has(tableId)) {
-            displacementCount += 1;
-          } else {
-            memberDisplacementCount += 1;
-          }
-        }
-      }
-
-      const rowGrowth = resolved.gridRows - input.gridRows;
-      const score =
-        Math.abs(row - prefRow) * 10 +
-        Math.abs(col - prefCol) +
-        rowGrowth * 100 +
-        displacementCount * 8 +
-        memberDisplacementCount * 4;
-
-      candidates.push({
-        score,
-        positionUpdates,
-        gridRows: resolved.gridRows,
-      });
+      seenAnchors.add(key);
+      evaluateAnchor(row, col);
     }
   }
 
@@ -767,8 +876,9 @@ export function resolveMergeGroupLayoutAtAnchor(input: {
       }
     });
 
-    const reservedCells = new Set(
-      wrapped.layout.map((cell) => cellKey(cell.row, cell.col))
+    const reservedCells = memberReservedCellsFromStripLayout(
+      wrapped.layout,
+      input.memberTableIds.length
     );
 
     const resolved = resolveMergeStripCollisions({

@@ -14,6 +14,9 @@ export const FLOOR_TABLE_BLOCK_WIDTH_PX = 152;
  */
 export const FLOOR_TABLE_BLOCK_HEIGHT_PX = 168;
 
+/** RGL row / grid-cell height (px). Cards are shorter than the bounds box and centered in the cell. */
+export const FLOOR_GRID_ROW_HEIGHT_PX = 112;
+
 /** Stagger when multiple tables share one grid node (px). */
 export const FLOOR_TABLE_STACK_OFFSET_PX = 12;
 

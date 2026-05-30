@@ -1,12 +1,11 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Button, Group, Modal, Stack, Text } from "@mantine/core";
+import { Button, Modal, Stack, Text } from "@mantine/core";
 import { useRouter } from "next/navigation";
 import { useAppContext } from "@/contexts/app-context";
 import { isGuestCountSpecified } from "@/lib/booking-meta";
 import { buildFloorMapHref } from "@/lib/floor-map-routes";
-import { usePortalCompact } from "@/lib/use-portal-compact";
 import { useMemo } from "react";
 
 export type BookingCreatedNextStepPayload = {
@@ -34,7 +33,6 @@ export function BookingCreatedNextStepModal({
 }: BookingCreatedNextStepModalProps) {
   const router = useRouter();
   const { state } = useAppContext();
-  const isCompact = usePortalCompact();
 
   const showFloorMapOption = useMemo(() => {
     if (!payload) {
@@ -118,14 +116,14 @@ export function BookingCreatedNextStepModal({
           )}
         </Text>
         {showFloorMapOption ? (
-          <Group gap="sm" grow={isCompact}>
-            <Button variant="filled" color="brand" onClick={goToBookingList}>
+          <Stack gap="sm">
+            <Button variant="filled" color="brand" fullWidth onClick={goToBookingList}>
               Danh sách booking
             </Button>
-            <Button variant="filled" color="brand" onClick={goToFloorMap}>
+            <Button variant="filled" color="brand" fullWidth onClick={goToFloorMap}>
               Sơ đồ
             </Button>
-          </Group>
+          </Stack>
         ) : (
           <Button variant="filled" color="brand" fullWidth onClick={goToBookingList}>
             Danh sách booking

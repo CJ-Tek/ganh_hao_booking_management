@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Accordion,
   ActionIcon,
   Alert,
   Badge,
@@ -28,6 +29,7 @@ import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  Calendar,
   ChevronDown,
   ChevronUp,
   Crosshair,
@@ -60,6 +62,7 @@ import { useBookingManagement } from "@/components/booking-management/use-bookin
 import { MergeGroupsPanel } from "@/components/merge-groups/merge-groups-panel";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import { FloorLayoutTemplatesModal } from "@/components/floor-map/floor-layout-templates-modal";
+import { FloorMapGrid } from "@/components/floor-map/floor-map-grid";
 import { FloorTableBlockView } from "@/components/floor-map/floor-table-block-view";
 import { RegisterPendingAssignTable } from "@/components/floor-map/register-pending-assign-table";
 import { TableBlockDetailModal } from "@/components/floor-map/table-block-detail-modal";
@@ -94,7 +97,8 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
+import { PortalSectionCard } from "@/components/portal-page";
+import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingRowBusyStyle } from "@/lib/busy-row-style";
@@ -108,8 +112,14 @@ import {
   FLOOR_TABLE_BLOCK_HEIGHT_PX,
   FLOOR_TABLE_BLOCK_WIDTH_PX,
   FLOOR_TABLE_PALETTE_SENTINEL,
-  FLOOR_TABLE_STACK_OFFSET_PX,
 } from "@/lib/floor-map-layout";
+import {
+  buildFloorMapRglGridConfig,
+  floorMapTablesToRglLayout,
+  gridCellCenterPx,
+  nearestGridCellFromWorldPx,
+} from "@/lib/floor-map-rgl";
+import type { EventCallback, Layout, LayoutItem } from "react-grid-layout";
 import {
   findMergeStripAnchorForMemberCells,
   packMergeGroupTablePositions,
@@ -192,6 +202,8 @@ import classes from "./page.module.css";
 const MERGE_GROUP_HEADER_BASE_HEIGHT_PX = 28;
 const MERGE_GROUP_HEADER_BOOKED_HEIGHT_PX = 54;
 const MERGE_GROUP_HEADER_TABLE_GAP_PX = 6;
+/** Matches `.mergeGroupContainer` dashed border width — header sits inside the frame. */
+const MERGE_GROUP_FRAME_BORDER_PX = 2;
 /** Calibrated offsets for merge-group dashed box (preview: top +44px, height −84px). */
 const MERGE_GROUP_BBOX_TOP_OFFSET_PX = 44;
 const MERGE_GROUP_BBOX_HEIGHT_ADJUST_PX = -84;
@@ -254,20 +266,12 @@ const LEGACY_CELL_HEIGHT = 70;
 const MIN_SCALE = 0.12;
 const MAX_SCALE = 2.5;
 const SCALE_STEP = 0.1;
-const CANVAS_PADDING = 64;
 const TOUCH_PINCH_FACTOR = 0.005;
 /** Inset the fitted region slightly inside the viewport so edges are not flush with the frame. */
 const FIT_VIEWPORT_MARGIN = 0.94;
 /** World-space padding around the union of table blocks when fitting (px). */
 const FIT_TABLE_BOUNDS_PADDING = 40;
 const TAP_PLACE_THRESHOLD_PX = 14;
-const PALETTE_DRAG_THRESHOLD_PX = 12;
-/** Lower threshold on touch — easier to start drag without looking like a tap. */
-const TOUCH_DRAG_THRESHOLD_PX = 6;
-
-function getPointerDragThresholdPx(pointerType: string) {
-  return pointerType === "touch" ? TOUCH_DRAG_THRESHOLD_PX : PALETTE_DRAG_THRESHOLD_PX;
-}
 
 function isTableBlockTarget(target: EventTarget | null) {
   const el = target as HTMLElement | null;
@@ -275,7 +279,8 @@ function isTableBlockTarget(target: EventTarget | null) {
     return false;
   }
   return Boolean(
-    el.closest("[data-table-block]") ||
+    el.closest(".react-grid-item") ||
+      el.closest("[data-table-block]") ||
       el.closest("[data-table-status-menu]") ||
       el.closest("[data-register-panel]")
   );
@@ -311,22 +316,15 @@ function isTableInGrid(table: DiningTable, gridColumns: number, gridRows: number
   );
 }
 
-/** Union of axis-aligned rects for rendered table blocks (same left/top math as the canvas). */
+/** Union of axis-aligned rects for rendered table blocks (aligned with react-grid-layout cells). */
 function getPlacedTableBounds(
   placedTables: DiningTable[],
   gridColumns: number,
   gridRows: number,
-  nodeSpacing: number
+  rglGridConfig: ReturnType<typeof buildFloorMapRglGridConfig>,
+  positionByTableId: Map<string, { row: number; col: number }>
 ): { minX: number; minY: number; maxX: number; maxY: number } | null {
-  const grouped = new Map<string, DiningTable[]>();
-  for (const table of placedTables) {
-    const { row, col } = getTableGridPosition(table, gridColumns, gridRows);
-    const key = `${row}-${col}`;
-    const list = grouped.get(key) ?? [];
-    list.push(table);
-    grouped.set(key, list);
-  }
-  if (grouped.size === 0) {
+  if (placedTables.length === 0) {
     return null;
   }
   const halfW = FLOOR_TABLE_BLOCK_WIDTH_PX / 2;
@@ -335,29 +333,18 @@ function getPlacedTableBounds(
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
-  for (const [, tablesAtNode] of grouped) {
-    const stackMax = tablesAtNode.length - 1;
-    const { row, col } = getTableGridPosition(tablesAtNode[0]!, gridColumns, gridRows);
-    const gx = CANVAS_PADDING + col * nodeSpacing;
-    const gy = CANVAS_PADDING + row * nodeSpacing;
-    for (let k = 0; k <= stackMax; k++) {
-      const cx = gx + k * FLOOR_TABLE_STACK_OFFSET_PX;
-      const cy = gy + k * FLOOR_TABLE_STACK_OFFSET_PX;
-      minX = Math.min(minX, cx - halfW);
-      maxX = Math.max(maxX, cx + halfW);
-      minY = Math.min(minY, cy - halfH);
-      maxY = Math.max(maxY, cy + halfH);
-    }
+  for (const table of placedTables) {
+    const pos =
+      positionByTableId.get(table.id) ??
+      getTableGridPosition(table, gridColumns, gridRows);
+    const center = gridCellCenterPx(pos.col, pos.row, rglGridConfig);
+    minX = Math.min(minX, center.x - halfW);
+    maxX = Math.max(maxX, center.x + halfW);
+    minY = Math.min(minY, center.y - halfH);
+    maxY = Math.max(maxY, center.y + halfH);
   }
   return { minX, minY, maxX, maxY };
 }
-
-type DragState = {
-  pointerId: number;
-  tableId: string;
-  row: number;
-  col: number;
-};
 
 type MergeGroupDragState = {
   pointerId: number;
@@ -526,14 +513,14 @@ export default function FloorMapPage() {
   const [nodeSpacing, setNodeSpacing] = useState(FLOOR_DEFAULT_NODE_SPACING_PX);
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 24, y: 24 });
-  const [dragState, setDragState] = useState<DragState | null>(null);
   const [mergeGroupDragState, setMergeGroupDragState] = useState<MergeGroupDragState | null>(
     null
   );
-  const [isSearchPanelOpen, setIsSearchPanelOpen] = useState(false);
-  const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
+  const [toolbarAccordionValue, setToolbarAccordionValue] = useState<string | null>(null);
+  const [filtersAccordionValue, setFiltersAccordionValue] = useState<string | null>(null);
   const [isPaletteOpen, setIsPaletteOpen] = useState(true);
-  const [isTopToolbarOpen, setIsTopToolbarOpen] = useState(true);
+  const [isDatePickerDockOpen, setIsDatePickerDockOpen] = useState(true);
+  const [isGridToolsDockOpen, setIsGridToolsDockOpen] = useState(false);
   const [pendingPlacementTableId, setPendingPlacementTableId] = useState<string | null>(null);
   const [isTrimmingGrid, setIsTrimmingGrid] = useState(false);
   const [layoutLockHolderName, setLayoutLockHolderName] = useState<string | null>(null);
@@ -664,18 +651,8 @@ export default function FloorMapPage() {
     originX: number;
     originY: number;
   } | null>(null);
-  const paletteGestureRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    tableId: string;
-  } | null>(null);
-  const tablePickGestureRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    tableId: string;
-  } | null>(null);
+  const paletteDragTableIdRef = useRef<string | null>(null);
+  const [paletteDroppingItem, setPaletteDroppingItem] = useState<LayoutItem | null>(null);
   const pinchRef = useRef<{
     distance: number;
     centerX: number;
@@ -1291,16 +1268,17 @@ export default function FloorMapPage() {
     if (!isEditMode) {
       setEditSelectedTableIds([]);
       setMergeGroupDragState(null);
-      setDragState(null);
     }
   }, [isEditMode]);
 
-  // Search/filter is view-only; clear when entering layout edit.
+  // Search/filter is view-only; grid tools are edit-only.
   useEffect(() => {
     if (isEditMode) {
       setSearch("");
       setStatusFilter("all");
-      setIsSearchPanelOpen(false);
+      setFiltersAccordionValue(null);
+    } else {
+      setIsGridToolsDockOpen(false);
     }
   }, [isEditMode]);
   useEffect(() => {
@@ -1975,6 +1953,16 @@ export default function FloorMapPage() {
   const effectiveGridRows = isEditMode && editLayout ? editLayout.gridRows : gridRows;
   const effectiveNodeSpacing = isEditMode && editLayout ? editLayout.nodeSpacing : nodeSpacing;
 
+  const rglGridConfig = useMemo(
+    () =>
+      buildFloorMapRglGridConfig(
+        effectiveGridColumns,
+        effectiveGridRows,
+        effectiveNodeSpacing
+      ),
+    [effectiveGridColumns, effectiveGridRows, effectiveNodeSpacing]
+  );
+
   const isLayoutDirty = useMemo(() => {
     if (!isEditMode || !editLayout || !areaId) {
       return false;
@@ -2076,31 +2064,13 @@ export default function FloorMapPage() {
   }, [effectiveGridColumns, effectiveGridRows, placedTables]);
 
   /**
-   * Effective row/col of each visible table on the canvas — accounts for in-progress table or merge-group drags.
+   * Effective row/col of each visible table on the canvas — accounts for in-progress merge-group drags.
    */
   const effectiveTablePositions = useMemo(() => {
     const result = new Map<string, { row: number; col: number }>();
     for (const table of placedTables) {
       const mapped = getTableGridPosition(table, effectiveGridColumns, effectiveGridRows);
       result.set(table.id, { row: mapped.row, col: mapped.col });
-    }
-    if (dragState && editLayout) {
-      const dropLayout = resolveTableDropAtCell({
-        tableId: dragState.tableId,
-        targetRow: dragState.row,
-        targetCol: dragState.col,
-        areaTables: buildAreaTablesForMergePack(tablesInArea, editLayout.positions),
-        gridColumns: effectiveGridColumns,
-        gridRows: effectiveGridRows,
-        protectedTableIds: allActiveMergedTableIds,
-      });
-      if (dropLayout.ok) {
-        for (const [tableId, pos] of dropLayout.positions) {
-          result.set(tableId, pos);
-        }
-      } else {
-        result.set(dragState.tableId, { row: dragState.row, col: dragState.col });
-      }
     }
     if (mergeGroupDragState && editLayout) {
       const group = effectiveMergeGroups.find(
@@ -2129,7 +2099,6 @@ export default function FloorMapPage() {
     }
     return result;
   }, [
-    dragState,
     editLayout,
     effectiveGridColumns,
     effectiveGridRows,
@@ -2137,23 +2106,35 @@ export default function FloorMapPage() {
     mergeGroupDragState,
     placedTables,
     tablesInArea,
-    allActiveMergedTableIds,
   ]);
 
-  const tableByNode = useMemo(() => {
-    const grouped = new Map<string, DiningTable[]>();
+  const rglLayoutItems = useMemo(() => {
+    const positions: Record<string, { x: number; y: number }> = {};
     for (const table of placedTables) {
       const pos = effectiveTablePositions.get(table.id);
       if (!pos) {
         continue;
       }
-      const key = `${pos.row}-${pos.col}`;
-      const current = grouped.get(key) ?? [];
-      current.push(table);
-      grouped.set(key, current);
+      positions[table.id] = { x: pos.col, y: pos.row };
     }
-    return grouped;
-  }, [effectiveTablePositions, placedTables]);
+    return floorMapTablesToRglLayout(
+      placedTables.map((table) => table.id),
+      positions,
+      {
+        isEditMode,
+        mergeMemberIds: allActiveMergedTableIds,
+        gridColumns: effectiveGridColumns,
+        gridRows: effectiveGridRows,
+      }
+    );
+  }, [
+    allActiveMergedTableIds,
+    effectiveGridColumns,
+    effectiveGridRows,
+    effectiveTablePositions,
+    isEditMode,
+    placedTables,
+  ]);
 
   /**
    * Geometry for each active merge-group bbox in the current area.
@@ -2198,10 +2179,10 @@ export default function FloorMapPage() {
       if (memberCount === 0) {
         continue;
       }
-      const tableXMin = CANVAS_PADDING + minCol * effectiveNodeSpacing - halfW;
-      const tableXMax = CANVAS_PADDING + maxCol * effectiveNodeSpacing + halfW;
-      const tableYMin = CANVAS_PADDING + minRow * effectiveNodeSpacing - halfH;
-      const tableYMax = CANVAS_PADDING + maxRow * effectiveNodeSpacing + halfH;
+      const tableXMin = gridCellCenterPx(minCol, minRow, rglGridConfig).x - halfW;
+      const tableXMax = gridCellCenterPx(maxCol, maxRow, rglGridConfig).x + halfW;
+      const tableYMin = gridCellCenterPx(minCol, minRow, rglGridConfig).y - halfH;
+      const tableYMax = gridCellCenterPx(maxCol, maxRow, rglGridConfig).y + halfH;
       const xMin = tableXMin - marginX;
       const xMax = tableXMax + marginX;
       const headerHeight =
@@ -2227,14 +2208,12 @@ export default function FloorMapPage() {
     }
     return rects;
   }, [
-    effectiveGridColumns,
-    effectiveGridRows,
-    effectiveNodeSpacing,
     effectiveTablePositions,
     effectiveMergeGroups,
     floorMapDayBookings,
     isEditMode,
     mergeGroupDragState,
+    rglGridConfig,
   ]);
 
   const commitMergeGroupDrop = (groupId: string, anchorRow: number, anchorCol: number) => {
@@ -2298,16 +2277,13 @@ export default function FloorMapPage() {
   const commitDrop = (tableId: string, row: number, col: number) => {
     const source = tableMap[tableId];
     if (!source || !editLayout) {
-      setDragState(null);
       return;
     }
     if (tableToMergeGroupId.has(tableId)) {
-      setDragState(null);
       return;
     }
     const current = getTableGridPosition(source, effectiveGridColumns, effectiveGridRows);
     if (current.row === row && current.col === col) {
-      setDragState(null);
       return;
     }
     setEditLayout((prev) => {
@@ -2327,16 +2303,15 @@ export default function FloorMapPage() {
         return prev;
       }
       const nextPositions = { ...prev.positions };
-      for (const [tableId, pos] of dropLayout.positions) {
-        nextPositions[tableId] = { x: pos.col, y: pos.row };
+      for (const [id, pos] of dropLayout.positions) {
+        nextPositions[id] = { x: pos.col, y: pos.row };
       }
       return { ...prev, positions: nextPositions };
     });
-    setDragState(null);
   };
 
   const commitPlacement = (tableId: string, row: number, col: number) => {
-    const source = state.tables.find((t) => t.id === tableId);
+    const source = tableMap[tableId];
     if (!source || !editLayout) {
       return;
     }
@@ -2387,9 +2362,8 @@ export default function FloorMapPage() {
   const exitEditModeToView = useCallback(() => {
     setMode("view");
     setPendingPlacementTableId(null);
-    setIsToolsPanelOpen(false);
-    setIsSearchPanelOpen(false);
-    setDragState(null);
+    setFiltersAccordionValue(null);
+    setIsGridToolsDockOpen(false);
     setMergeGroupDragState(null);
     if (areaId) {
       void releaseFloorLayoutEditLock(areaId);
@@ -3295,19 +3269,8 @@ export default function FloorMapPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, [closeRegistrationPanel]);
 
-  const gridNodes = useMemo(
-    () =>
-      Array.from({ length: effectiveGridRows * effectiveGridColumns }, (_, index) => ({
-        row: Math.floor(index / effectiveGridColumns),
-        col: index % effectiveGridColumns,
-      })),
-    [effectiveGridColumns, effectiveGridRows]
-  );
-
-  const canvasWidth =
-    CANVAS_PADDING * 2 + Math.max(0, effectiveGridColumns - 1) * effectiveNodeSpacing;
-  const canvasHeight =
-    CANVAS_PADDING * 2 + Math.max(0, effectiveGridRows - 1) * effectiveNodeSpacing;
+  const canvasWidth = rglGridConfig.width;
+  const canvasHeight = rglGridConfig.height;
 
   const fitCanvasToViewport = useCallback(() => {
     const viewport = viewportRef.current;
@@ -3329,7 +3292,8 @@ export default function FloorMapPage() {
       placedTables,
       effectiveGridColumns,
       effectiveGridRows,
-      effectiveNodeSpacing
+      rglGridConfig,
+      effectiveTablePositions
     );
     if (tableBounds) {
       const minX = tableBounds.minX - FIT_TABLE_BOUNDS_PADDING;
@@ -3359,8 +3323,9 @@ export default function FloorMapPage() {
     canvasWidth,
     effectiveGridColumns,
     effectiveGridRows,
-    effectiveNodeSpacing,
+    effectiveTablePositions,
     placedTables,
+    rglGridConfig,
   ]);
 
   useEffect(() => {
@@ -3487,9 +3452,8 @@ export default function FloorMapPage() {
         setAreaDeleteOpen(false);
         setMode("view");
         setPendingPlacementTableId(null);
-        setDragState(null);
-        setIsToolsPanelOpen(false);
-        setIsSearchPanelOpen(false);
+        setFiltersAccordionValue(null);
+        setIsGridToolsDockOpen(false);
         setActiveAreaId(null);
       }
     } finally {
@@ -3543,17 +3507,42 @@ export default function FloorMapPage() {
   };
 
   const nearestNode = (x: number, y: number) => {
-    const col = clamp(
-      Math.round((x - CANVAS_PADDING) / effectiveNodeSpacing),
-      0,
-      effectiveGridColumns - 1
-    );
-    const row = clamp(
-      Math.round((y - CANVAS_PADDING) / effectiveNodeSpacing),
-      0,
-      effectiveGridRows - 1
-    );
-    return { row, col };
+    const snapped = nearestGridCellFromWorldPx(x, y, rglGridConfig);
+    return { row: snapped.row, col: snapped.col };
+  };
+
+  const handleRglDragStop: EventCallback = (_layout, _oldItem, newItem) => {
+    if (!isEditMode || !newItem) {
+      return;
+    }
+    commitDrop(newItem.i, newItem.y, newItem.x);
+  };
+
+  const handleRglDrop = (_layout: Layout, item: LayoutItem | undefined) => {
+    const tableId = item?.i ?? paletteDragTableIdRef.current;
+    paletteDragTableIdRef.current = null;
+    setPaletteDroppingItem(null);
+    if (!isEditMode || !tableId || !item) {
+      return;
+    }
+    commitPlacement(tableId, item.y, item.x);
+  };
+
+  const handlePaletteTableClick = (table: DiningTable) => {
+    if (!isEditMode) {
+      return;
+    }
+    setPendingPlacementTableId((current) => {
+      if (current === table.id) {
+        notifications.show({ color: "blue", message: "Đã bỏ chọn đặt bàn." });
+        return null;
+      }
+      notifications.show({
+        color: "blue",
+        message: "Chạm vào ô trên sơ đồ để đặt bàn (hoặc kéo từ kho).",
+      });
+      return table.id;
+    });
   };
 
   const zoomAt = (nextScale: number, anchorX: number, anchorY: number) => {
@@ -3629,62 +3618,11 @@ export default function FloorMapPage() {
     };
   }, [areaId, mode]);
 
-  const beginCanvasTableDrag = (
-    pointerId: number,
-    table: DiningTable,
-    clientX: number,
-    clientY: number,
-    snapToPointer: boolean
-  ) => {
-    tablePickGestureRef.current = null;
-    paletteGestureRef.current = null;
-    let row: number;
-    let col: number;
-    if (snapToPointer) {
-      const world = toWorldCoordinate(clientX, clientY);
-      const snapped = nearestNode(world.x, world.y);
-      row = snapped.row;
-      col = snapped.col;
-    } else {
-      const base = getTableGridPosition(table, effectiveGridColumns, effectiveGridRows);
-      row = clamp(base.row, 0, effectiveGridRows - 1);
-      col = clamp(base.col, 0, effectiveGridColumns - 1);
-    }
-    setDragState({
-      pointerId,
-      tableId: table.id,
-      row,
-      col,
-    });
-  };
-
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!isEditMode && blockCanvasForOverlay) {
       return;
     }
-    const dragThreshold = getPointerDragThresholdPx(event.pointerType);
 
-    const tablePick = tablePickGestureRef.current;
-    if (tablePick && event.pointerId === tablePick.pointerId) {
-      const dist = Math.hypot(
-        event.clientX - tablePick.startX,
-        event.clientY - tablePick.startY
-      );
-      if (dist > dragThreshold) {
-        const pickedTable = layoutTablesInArea.find((t) => t.id === tablePick.tableId);
-        tablePickGestureRef.current = null;
-        if (pickedTable) {
-          beginCanvasTableDrag(
-            event.pointerId,
-            pickedTable,
-            event.clientX,
-            event.clientY,
-            true
-          );
-        }
-      }
-      return;
-    }
     const placementTap = placementTapRef.current;
     if (placementTap && event.pointerId === placementTap.pointerId) {
       const dist = Math.hypot(
@@ -3725,16 +3663,6 @@ export default function FloorMapPage() {
       return;
     }
 
-    if (dragState && event.pointerId === dragState.pointerId) {
-      const world = toWorldCoordinate(event.clientX, event.clientY);
-      const snapped = nearestNode(world.x, world.y);
-      if (snapped.row !== dragState.row || snapped.col !== dragState.col) {
-        setDragState((prev) =>
-          prev ? { ...prev, row: snapped.row, col: snapped.col } : prev
-        );
-      }
-      return;
-    }
     const panState = panStateRef.current;
     if (panState && event.pointerId === panState.pointerId) {
       setOffset({
@@ -3783,25 +3711,6 @@ export default function FloorMapPage() {
       return;
     }
 
-    if (isEditMode && dragState && event.pointerId === dragState.pointerId) {
-      void commitDrop(dragState.tableId, dragState.row, dragState.col);
-      return;
-    }
-    const tablePick = tablePickGestureRef.current;
-    if (tablePick && event.pointerId === tablePick.pointerId) {
-      tablePickGestureRef.current = null;
-      const dist = Math.hypot(
-        event.clientX - tablePick.startX,
-        event.clientY - tablePick.startY
-      );
-      if (dist <= getPointerDragThresholdPx(event.pointerType)) {
-        const pickedTable = layoutTablesInArea.find((t) => t.id === tablePick.tableId);
-        if (pickedTable) {
-          toggleEditMergeTableSelection(pickedTable.id, pickedTable.name);
-        }
-      }
-      return;
-    }
     if (panStateRef.current && event.pointerId === panStateRef.current.pointerId) {
       panStateRef.current = null;
     }
@@ -3847,9 +3756,6 @@ export default function FloorMapPage() {
   const handleViewportLostPointerCapture = () => {
     panStateRef.current = null;
     placementTapRef.current = null;
-    paletteGestureRef.current = null;
-    tablePickGestureRef.current = null;
-    setDragState(null);
     setMergeGroupDragState(null);
   };
 
@@ -3902,33 +3808,6 @@ export default function FloorMapPage() {
       anchorRow: clamp(anchor.row, 0, effectiveGridRows - 1),
       anchorCol: clamp(anchor.col, 0, effectiveGridColumns - 1),
     });
-    setDragState(null);
-  };
-
-  const startTableDrag = (
-    event: React.PointerEvent<HTMLDivElement>,
-    table: DiningTable
-  ) => {
-    if (!isEditMode) {
-      return;
-    }
-    if (tableToMergeGroupId.has(table.id)) {
-      return;
-    }
-    if ((event.target as HTMLElement).closest("[data-table-remove]")) {
-      return;
-    }
-    if (event.button !== 0) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    const viewport = viewportRef.current;
-    if (!viewport) {
-      return;
-    }
-    viewport.setPointerCapture(event.pointerId);
-    beginCanvasTableDrag(event.pointerId, table, event.clientX, event.clientY, false);
   };
 
   const toggleEditMergeTableSelection = (tableId: string, tableName: string) => {
@@ -3944,100 +3823,6 @@ export default function FloorMapPage() {
     );
   };
 
-  const handlePalettePointerDown = (
-    event: React.PointerEvent<HTMLDivElement>,
-    table: DiningTable
-  ) => {
-    if (!isEditMode || event.button !== 0) {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    paletteGestureRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      tableId: table.id,
-    };
-  };
-
-  const handlePalettePointerMove = (
-    event: React.PointerEvent<HTMLDivElement>,
-    table: DiningTable
-  ) => {
-    const gesture = paletteGestureRef.current;
-    if (
-      !gesture ||
-      gesture.tableId !== table.id ||
-      gesture.pointerId !== event.pointerId
-    ) {
-      return;
-    }
-    const dist = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
-    if (dist <= getPointerDragThresholdPx(event.pointerType)) {
-      return;
-    }
-    const viewport = viewportRef.current;
-    if (!viewport) {
-      return;
-    }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    viewport.setPointerCapture(event.pointerId);
-    beginCanvasTableDrag(event.pointerId, table, event.clientX, event.clientY, true);
-  };
-
-  const handlePalettePointerUp = (
-    event: React.PointerEvent<HTMLDivElement>,
-    table: DiningTable
-  ) => {
-    const gesture = paletteGestureRef.current;
-    if (
-      !gesture ||
-      gesture.tableId !== table.id ||
-      gesture.pointerId !== event.pointerId
-    ) {
-      return;
-    }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    paletteGestureRef.current = null;
-    const dist = Math.hypot(event.clientX - gesture.startX, event.clientY - gesture.startY);
-    if (dist <= getPointerDragThresholdPx(event.pointerType)) {
-      setPendingPlacementTableId((current) => {
-        if (current === table.id) {
-          notifications.show({ color: "blue", message: "Đã bỏ chọn đặt bàn." });
-          return null;
-        }
-        notifications.show({
-          color: "blue",
-          message: "Chạm vào ô trên sơ đồ để đặt bàn (hoặc kéo từ kho như trước).",
-        });
-        return table.id;
-      });
-    }
-  };
-
-  const handlePalettePointerCancel = (
-    event: React.PointerEvent<HTMLDivElement>,
-    table: DiningTable
-  ) => {
-    const gesture = paletteGestureRef.current;
-    if (
-      gesture &&
-      gesture.tableId === table.id &&
-      gesture.pointerId === event.pointerId
-    ) {
-      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      }
-      paletteGestureRef.current = null;
-    }
-  };
-
   return (
     <Stack
       className={classes.pageRoot}
@@ -4047,39 +3832,99 @@ export default function FloorMapPage() {
           : undefined
       }
     >
-      <Group justify="space-between" align="end" wrap="wrap">
-        <div style={{ minWidth: 0 }}>
-          <PortalPageTitle order={isCompact ? 3 : 2}>Sơ đồ nhà hàng</PortalPageTitle>
-          <Text c="dimmed" size={isCompact ? "xs" : "sm"}>
-            {isEmployee
-              ? "Chạm bàn Đã ngồi để mở chi tiết, rồi bấm Hoàn thành khi khách ra về. Kéo nền để xem sơ đồ, cuộn/chụm để zoom."
-              : isEditMode
-                ? `Chỉnh sơ đồ cho ngày ${floorMapSelectedDate.format("DD/MM/YYYY")}, rồi bấm Lưu sơ đồ — chỉ áp dụng cho ngày này. Cuộn/chụm để zoom.`
-                : "Chạm bàn để đổi trạng thái. Kéo nền để xem sơ đồ, cuộn/chụm để zoom."}
-          </Text>
-        </div>
-        <Group gap="sm" align="flex-end" wrap="wrap">
+      <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
+        <Group
+          gap={isCompact ? 8 : 4}
+          align="flex-end"
+          wrap="nowrap"
+          className={classes.pageAreaSelectRow}
+        >
           {!isEmployee ? (
-            <DatePickerInput
-              label="Ngày xem sơ đồ"
-              value={floorMapSelectedDate.format("YYYY-MM-DD")}
+            <SegmentedControl
+              value={mode}
+              color="brand"
               onChange={(value) => {
-                if (!value) {
+                const nextMode = value as CanvasMode;
+                if (nextMode === "edit") {
+                  if (editBlockedByOther) {
+                    notifications.show({
+                      color: "yellow",
+                      message: `${layoutLockHolderName ?? "Người khác"} đang chỉnh sửa sơ đồ. Chỉ xem được.`,
+                    });
+                    return;
+                  }
+                  if (!areaId) {
+                    return;
+                  }
+                  void (async () => {
+                    const acquired = await acquireFloorLayoutEditLock(areaId);
+                    if (!acquired.ok) {
+                      notifications.show({
+                        color: "yellow",
+                        message: `${acquired.holderFullName} đang chỉnh sửa sơ đồ. Thử lại sau.`,
+                      });
+                      return;
+                    }
+                    setMode("edit");
+                    setPendingPlacementTableId(null);
+                  })();
                   return;
                 }
-                setFloorMapSelectedDate(dayjs(value, "YYYY-MM-DD"));
+                if (mode === "edit" && isLayoutDirty) {
+                  confirmDiscardLayoutEdits();
+                  return;
+                }
+                exitEditModeToView();
               }}
-              valueFormat="DD/MM/YYYY"
-              dropdownType="modal"
-              size={isCompact ? "xs" : "sm"}
-              maw={isCompact ? undefined : 280}
-              style={{ flex: "1 1 auto", minWidth: isCompact ? "100%" : 200 }}
+              data={[
+                { label: "View", value: "view" },
+                {
+                  label: "Edit",
+                  value: "edit",
+                  disabled: editBlockedByOther,
+                },
+              ]}
+              className={classes.pageModeControl}
+              size={isCompact ? "sm" : "md"}
             />
           ) : null}
-          {isEditMode && isLayoutDirty ? (
-            <Badge color="orange" variant="light">
-              Chưa lưu
-            </Badge>
+          <Select
+            value={areaId}
+            onChange={setActiveAreaId}
+            data={availableAreas.map((area) => ({
+              value: area.id,
+              label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
+            }))}
+            searchable
+            disabled={isEditMode}
+            className={classes.pageAreaSelect}
+            comboboxProps={{ withinPortal: true }}
+            size={isCompact ? "xs" : "sm"}
+          />
+          {!isEmployee && !isBranchManager ? (
+            <Group gap={isCompact ? 8 : 4} className={classes.toolbarAreaActions} wrap="nowrap">
+              <ActionIcon
+                variant="transparent"
+                size={isCompact ? "input-md" : "lg"}
+                className={classes.toolbarAreaActionBtn}
+                aria-label="Sửa khu vực"
+                disabled={!areaId || !hasSupabase}
+                onClick={openAreaMetadataEdit}
+              >
+                <Pencil size={16} />
+              </ActionIcon>
+              <ActionIcon
+                variant="transparent"
+                color="red"
+                size={isCompact ? "input-md" : "lg"}
+                className={classes.toolbarAreaActionBtn}
+                aria-label="Xóa khu vực"
+                disabled={!areaId || !hasSupabase}
+                onClick={() => setAreaDeleteOpen(true)}
+              >
+                <Trash2 size={16} />
+              </ActionIcon>
+            </Group>
           ) : null}
         </Group>
       </Group>
@@ -4095,6 +3940,145 @@ export default function FloorMapPage() {
           Chưa kết nối Supabase — kích thước lưới chỉ lưu trên máy bạn (mock). Kết nối database để đồng bộ sơ đồ cho mọi người.
         </Alert>
       ) : null}
+
+      {!isEditMode ? (
+        <Accordion
+          value={filtersAccordionValue}
+          onChange={setFiltersAccordionValue}
+          classNames={{ root: classes.toolbarPanelAccordion }}
+          variant="contained"
+          radius="md"
+          chevronPosition="right"
+        >
+          <Accordion.Item value="search">
+            <Accordion.Control icon={<Search size={16} />}>Tìm bàn & lọc</Accordion.Control>
+            <Accordion.Panel>
+              <Stack gap="sm">
+                <TextInputWithVoice
+                  label="Tìm bàn"
+                  placeholder="Tên bàn, khách, SĐT, giờ đặt, giờ check-in…"
+                  value={search}
+                  onChange={(event) => setSearch(event.currentTarget.value)}
+                  size="sm"
+                />
+                <Select
+                  label="Lọc trạng thái"
+                  value={statusFilter}
+                  onChange={(value) => setStatusFilter(value ?? "all")}
+                  data={[
+                    { value: "all", label: "Tất cả trạng thái" },
+                    ...(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
+                      (status) => ({
+                        value: status,
+                        label: tableStatusLabel[status],
+                      })
+                    ),
+                  ]}
+                />
+              </Stack>
+            </Accordion.Panel>
+          </Accordion.Item>
+        </Accordion>
+      ) : null}
+
+      <Accordion
+        value={toolbarAccordionValue}
+        onChange={setToolbarAccordionValue}
+        classNames={{ root: classes.toolbarAccordion }}
+        variant="contained"
+        radius="md"
+        chevronPosition="right"
+      >
+        <Accordion.Item value="toolbar">
+          <Accordion.Control>Thanh công cụ sơ đồ</Accordion.Control>
+          <Accordion.Panel>
+            <div className={classes.canvasTopToolbar}>
+                {!isEmployee ? (
+                    <div className={classes.toolbarAreaSecondary}>
+                      <Group
+                        gap={isCompact ? 8 : 4}
+                        wrap="wrap"
+                        className={classes.toolbarAreaPrimaryBtns}
+                      >
+                        {!isEditMode ? (
+                          <>
+                            <Button
+                              color="brand"
+                              size={isCompact ? "sm" : "compact-sm"}
+                              className={classes.toolbarDayListBtn}
+                              onClick={() => setCreateBookingModalOpened(true)}
+                            >
+                              Tạo booking
+                            </Button>
+                            <Button
+                              size={isCompact ? "sm" : "compact-sm"}
+                              variant="filled"
+                              className={classes.toolbarDayListBtn}
+                              onClick={() => dayListModalRef.current?.openDayListModal()}
+                            >
+                              Danh sách booking
+                            </Button>
+                            <Button
+                              size={isCompact ? "sm" : "compact-sm"}
+                              variant="light"
+                              className={classes.toolbarDayListBtn}
+                              onClick={() => setMergeModalOpen(true)}
+                              disabled={!activeAreaBranchId}
+                            >
+                              Gộp bàn
+                            </Button>
+                            <Button
+                              size={isCompact ? "sm" : "compact-sm"}
+                              variant="default"
+                              className={classes.toolbarDayListBtn}
+                              onClick={() => setMergeGroupsListModalOpen(true)}
+                              disabled={!activeAreaBranchId}
+                            >
+                              Danh sách bàn gộp
+                            </Button>
+                          </>
+                        ) : null}
+                        {isEditMode ? (
+                          <>
+                            <Button
+                              size="sm"
+                              leftSection={<Save size={16} />}
+                              loading={isSavingLayout}
+                              disabled={!editLayout || !isLayoutDirty}
+                              onClick={() => void handleSaveFloorLayout()}
+                              className={classes.toolbarSaveBtn}
+                            >
+                              Lưu sơ đồ ({floorMapSelectedDate.format("DD/MM")})
+                            </Button>
+                            <Button
+                              size="sm"
+                              leftSection={<Save size={16} />}
+                              variant="light"
+                              loading={isSavingLayout}
+                              disabled={!editLayout || !isLayoutDirty}
+                              onClick={() => void handleSaveFloorLayoutAsGlobal()}
+                              className={classes.toolbarSaveBtn}
+                            >
+                              Lưu sơ đồ mặc định
+                            </Button>
+                            <Button
+                              size={isCompact ? "sm" : "compact-sm"}
+                              variant="default"
+                              className={classes.toolbarDayListBtn}
+                              onClick={() => setLayoutTemplatesOpen(true)}
+                              disabled={!areaId || !hasSupabase}
+                            >
+                              Mẫu sơ đồ…
+                            </Button>
+                          </>
+                        ) : null}
+                      </Group>
+                    </div>
+                  ) : null}
+              </div>
+          </Accordion.Panel>
+        </Accordion.Item>
+      </Accordion>
 
       <PortalSectionCard>
         <div
@@ -4118,21 +4102,6 @@ export default function FloorMapPage() {
                 transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
               }}
             >
-              <svg className={classes.gridSvg} viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}>
-                {gridNodes.map((node) => {
-                  const x = CANVAS_PADDING + node.col * effectiveNodeSpacing;
-                  const y = CANVAS_PADDING + node.row * effectiveNodeSpacing;
-                  return (
-                    <circle
-                      key={`${node.row}-${node.col}`}
-                      className={classes.gridNode}
-                      cx={x}
-                      cy={y}
-                      r={6}
-                    />
-                  );
-                })}
-              </svg>
               {mergeBBoxes.map((bbox) => {
                 const mergeGroup = effectiveMergeGroups.find(
                   (candidate) => candidate.id === bbox.groupId
@@ -4143,6 +4112,173 @@ export default function FloorMapPage() {
                 const mergeActive =
                   (isEditMode && openedMergeGroupId === bbox.groupId) ||
                   (!isEditMode && detailMergeGroup?.id === bbox.groupId);
+                const viewMergeStatus = !isEditMode
+                  ? (mergeGroupStatusById.get(bbox.groupId) ?? "available")
+                  : null;
+                const mergeStatusSurfaceClass = !isEditMode
+                  ? MERGE_GROUP_STATUS_SURFACE_CLASS[viewMergeStatus ?? "available"]
+                  : "";
+                return (
+                  <div
+                    key={`merge-backdrop-${bbox.groupId}`}
+                    className={`${classes.mergeGroupContainer} ${mergeStatusSurfaceClass} ${
+                      mergeActive ? classes.mergeGroupContainerActive : ""
+                    } ${
+                      mergeGroupDragState?.groupId === bbox.groupId
+                        ? classes.mergeGroupContainerDragging
+                        : ""
+                    }`}
+                    style={{
+                      left: bbox.x,
+                      top: bbox.y,
+                      width: bbox.width,
+                      height: bbox.height,
+                    }}
+                    aria-hidden
+                  >
+                    <div
+                      className={classes.mergeGroupContainerBody}
+                      style={{ top: bbox.headerHeight }}
+                    />
+                  </div>
+                );
+              })}
+              <FloorMapGrid
+                gridConfig={rglGridConfig}
+                layout={rglLayoutItems}
+                scale={scale}
+                isEditMode={isEditMode}
+                allowExternalDrop={isEditMode}
+                droppingItem={paletteDroppingItem ?? undefined}
+                className={classes.floorMapGridRoot}
+                onDragStop={handleRglDragStop}
+                onDrop={handleRglDrop}
+                onDropDragOver={(event) => {
+                  event.preventDefault();
+                  return { w: 1, h: 1 };
+                }}
+              >
+                {placedTables.map((table) => {
+                  const mergeGroupId = tableToMergeGroupId.get(table.id) ?? null;
+                  const isMergeMember = Boolean(mergeGroupId);
+                  const mergeGroupBooking =
+                    mergeGroupId != null
+                      ? (primaryBookingByMergeGroupId.get(mergeGroupId) ?? null)
+                      : null;
+                  const mergeGuestArrived =
+                    mergeGroupId != null &&
+                    mergeGroupPrimaryGuestHasArrived(mergeGroupId, floorMapDayBookings);
+                  if (!isEditMode) {
+                    const tableBooking = primaryBookingByTableId.get(table.id) ?? null;
+                    const displayBooking =
+                      isMergeMember && mergeGroupBooking && mergeGuestArrived
+                        ? null
+                        : tableBooking;
+                    const peekCustomer = displayBooking
+                      ? customerById.get(displayBooking.customerId)
+                      : undefined;
+                    const showStatusMenu =
+                      !isMergeMember &&
+                      (table.status === "available" ||
+                        table.status === "locked" ||
+                        table.status === "occupied");
+                    const canComplete =
+                      table.status === "occupied" &&
+                      displayBooking != null &&
+                      (displayBooking.status === "checked_in" ||
+                        displayBooking.status === "seated");
+                    const canLock =
+                      table.status === "available" &&
+                      !tableHasActiveBookingOnFloorDay(table.id, floorMapDayBookings);
+                    const showUnlock = table.status === "locked";
+                    return (
+                      <div key={table.id} className={classes.floorMapGridCell}>
+                        <FloorTableBlockView
+                          table={table}
+                          style={{}}
+                          isMergeMember={isMergeMember}
+                          displayBooking={displayBooking}
+                          bookingGuestBadge={
+                            isMergeMember ? mergeGroupBooking : null
+                          }
+                          hideBookingPeek={Boolean(isMergeMember && mergeGroupBooking)}
+                          customerName={peekCustomer?.fullName ?? ""}
+                          isEmployee={isEmployee}
+                          isBusy={isTableStatusBusy(table.id)}
+                          isDragging={false}
+                          showStatusMenu={showStatusMenu}
+                          canComplete={canComplete}
+                          canLock={canLock}
+                          showUnlock={showUnlock}
+                          onOpenTable={() => handleViewOrRegisterForTable(table)}
+                          onOpenDetail={() => openDetailForTable(table)}
+                          onCompleteBooking={() => void handleTableBlockComplete(table)}
+                          onLockTable={() => void handleTableBlockLock(table)}
+                          onUnlockTable={() => void handleTableBlockUnlock(table)}
+                          onStatusMenuOpen={() => {
+                            panStateRef.current = null;
+                            placementTapRef.current = null;
+                            setStatusMenuOpen(true);
+                          }}
+                          onStatusMenuClose={() => setStatusMenuOpen(false)}
+                        />
+                      </div>
+                    );
+                  }
+                  const isMergeSelected = editSelectedTableIds.includes(table.id);
+                  return (
+                    <div
+                      key={table.id}
+                      className={classes.floorMapGridCell}
+                      onClick={(event) => {
+                        if (event.shiftKey && !isMergeMember) {
+                          event.stopPropagation();
+                          toggleEditMergeTableSelection(table.id, table.name);
+                        }
+                      }}
+                    >
+                      <div
+                        data-table-block="true"
+                        data-table-status={table.status}
+                        className={`${classes.tableBlock} ${classes.tableBlockEdit} ${
+                          isMergeMember ? classes.tableBlockMergeMember : ""
+                        } ${isMergeSelected ? classes.tableBlockMergeSelected : ""} ${
+                          isMergeMember ? classes.tableBlockMergeMemberLocked : ""
+                        }`}
+                      >
+                        {!isMergeMember ? (
+                          <ActionIcon
+                            type="button"
+                            variant="subtle"
+                            color="gray"
+                            size="sm"
+                            className={classes.tableBlockRemove}
+                            data-table-remove="true"
+                            aria-label={`Chuyển ${table.name} vào kho`}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              removeTableToStorage(table);
+                            }}
+                          >
+                            <X size={14} />
+                          </ActionIcon>
+                        ) : null}
+                        <Text fw={600} size="sm" lineClamp={1}>
+                          {table.name}
+                        </Text>
+                      </div>
+                    </div>
+                  );
+                })}
+              </FloorMapGrid>
+              {mergeBBoxes.map((bbox) => {
+                const mergeGroup = effectiveMergeGroups.find(
+                  (candidate) => candidate.id === bbox.groupId
+                );
+                if (!mergeGroup) {
+                  return null;
+                }
                 const viewMergeStatus = !isEditMode
                   ? (mergeGroupStatusById.get(bbox.groupId) ?? "available")
                   : null;
@@ -4157,19 +4293,17 @@ export default function FloorMapPage() {
                   : "";
                 return (
                   <div
-                    key={`merge-group-${bbox.groupId}`}
-                    className={`${classes.mergeGroupContainer} ${mergeStatusSurfaceClass} ${
-                      mergeActive ? classes.mergeGroupContainerActive : ""
-                    } ${
+                    key={`merge-header-${bbox.groupId}`}
+                    className={`${classes.mergeGroupHeaderLayer} ${
                       mergeGroupDragState?.groupId === bbox.groupId
-                        ? classes.mergeGroupContainerDragging
+                        ? classes.mergeGroupHeaderLayerDragging
                         : ""
-                    }`}
+                    } ${mergeStatusSurfaceClass}`}
                     style={{
-                      left: bbox.x,
-                      top: bbox.y,
-                      width: bbox.width,
-                      height: bbox.height,
+                      left: bbox.x + MERGE_GROUP_FRAME_BORDER_PX,
+                      top: bbox.y + MERGE_GROUP_FRAME_BORDER_PX,
+                      width: bbox.width - MERGE_GROUP_FRAME_BORDER_PX * 2,
+                      height: bbox.headerHeight,
                     }}
                     onPointerDown={(event) => event.stopPropagation()}
                   >
@@ -4252,190 +4386,62 @@ export default function FloorMapPage() {
                               </Badge>
                             ) : null}
                           </span>
-                          <span className={classes.mergeGroupContainerCapacity}>
-                            {formatMergeGroupDateRange(
-                              mergeGroup.startDate,
-                              mergeGroup.endDate
-                            )}
-                          </span>
+                          {viewMergeBooking && isGuestCountSpecified(viewMergeBooking) ? (
+                            <Badge variant="filled" color="dark" size="xs" radius="sm">
+                              {viewMergeBooking.guestCount} khách
+                            </Badge>
+                          ) : !viewMergeBooking ? (
+                            <span className={classes.mergeGroupContainerCapacity}>
+                              Khả dụng:{" "}
+                              {formatMergeGroupDateRange(
+                                mergeGroup.startDate,
+                                mergeGroup.endDate
+                              )}
+                            </span>
+                          ) : null}
                         </span>
                         {viewMergeBooking ? (
-                          <span className={classes.mergeGroupContainerBookingPeek}>
-                            <Text
-                              component="span"
-                              size="xs"
-                              fw={600}
-                              className={classes.mergeGroupContainerBookingCustomer}
-                            >
-                              {viewMergeCustomer?.fullName ?? "—"}
-                            </Text>
-                            <Text
-                              component="span"
-                              size="xs"
-                              c="dimmed"
-                              className={classes.mergeGroupContainerBookingTimes}
-                            >
-                              {dayjs(
-                                viewMergeBooking.startTime ?? viewMergeBooking.bookingAt
-                              ).format("HH:mm")}
-                              {viewMergeBooking.endTime
-                                ? `–${dayjs(viewMergeBooking.endTime).format("HH:mm")}`
-                                : ""}{" "}
-                              ·{" "}
-                              {dayjs(
-                                viewMergeBooking.startTime ?? viewMergeBooking.bookingAt
-                              ).format("DD/MM")}
-                            </Text>
+                          <span className={classes.mergeGroupContainerHeaderBookingRow}>
+                            <span className={classes.mergeGroupContainerCustomerTimes}>
+                              <Text
+                                component="span"
+                                size="xs"
+                                fw={700}
+                                className={classes.mergeGroupContainerBookingCustomer}
+                              >
+                                {viewMergeCustomer?.fullName ?? "—"}
+                              </Text>
+                              <Text
+                                component="span"
+                                size="xs"
+                                c="dimmed"
+                                className={classes.mergeGroupContainerBookingTimes}
+                              >
+                                {dayjs(
+                                  viewMergeBooking.startTime ?? viewMergeBooking.bookingAt
+                                ).format("HH:mm")}
+                                {viewMergeBooking.endTime
+                                  ? `–${dayjs(viewMergeBooking.endTime).format("HH:mm")}`
+                                  : ""}{" "}
+                                ·{" "}
+                                {dayjs(
+                                  viewMergeBooking.startTime ?? viewMergeBooking.bookingAt
+                                ).format("DD/MM")}
+                              </Text>
+                            </span>
+                            <span className={classes.mergeGroupContainerCapacity}>
+                              Khả dụng:{" "}
+                              {formatMergeGroupDateRange(
+                                mergeGroup.startDate,
+                                mergeGroup.endDate
+                              )}
+                            </span>
                           </span>
                         ) : null}
                       </button>
                     )}
-                    <div
-                      className={classes.mergeGroupContainerBody}
-                      style={{ top: bbox.headerHeight }}
-                    />
                   </div>
                 );
-              })}
-              {gridNodes.map((node) => {
-                const key = `${node.row}-${node.col}`;
-                const tables = tableByNode.get(key) ?? [];
-                const x = CANVAS_PADDING + node.col * effectiveNodeSpacing;
-                const y = CANVAS_PADDING + node.row * effectiveNodeSpacing;
-                return tables.map((table, stackIndex) => {
-                  const stackKey = `${table.id}-${selectedLayoutDate}-${node.row}-${node.col}-${stackIndex}`;
-                  const style = {
-                    left: x + stackIndex * FLOOR_TABLE_STACK_OFFSET_PX,
-                    top: y + stackIndex * FLOOR_TABLE_STACK_OFFSET_PX,
-                    transform: "translate(-50%, -50%)",
-                  };
-                  const mergeGroupId = tableToMergeGroupId.get(table.id) ?? null;
-                  const isMergeMember = Boolean(mergeGroupId);
-                  const mergeGroupBooking =
-                    mergeGroupId != null
-                      ? (primaryBookingByMergeGroupId.get(mergeGroupId) ?? null)
-                      : null;
-                  const mergeGuestArrived =
-                    mergeGroupId != null &&
-                    mergeGroupPrimaryGuestHasArrived(mergeGroupId, floorMapDayBookings);
-                  if (!isEditMode) {
-                    const tableBooking = primaryBookingByTableId.get(table.id) ?? null;
-                    const displayBooking =
-                      isMergeMember && mergeGroupBooking && mergeGuestArrived
-                        ? null
-                        : tableBooking;
-                    const peekCustomer = displayBooking
-                      ? customerById.get(displayBooking.customerId)
-                      : undefined;
-                    const showStatusMenu =
-                      !isMergeMember &&
-                      (table.status === "available" ||
-                        table.status === "locked" ||
-                        table.status === "occupied");
-                    const canComplete =
-                      table.status === "occupied" &&
-                      displayBooking != null &&
-                      (displayBooking.status === "checked_in" ||
-                        displayBooking.status === "seated");
-                    const canLock =
-                      table.status === "available" &&
-                      !tableHasActiveBookingOnFloorDay(table.id, floorMapDayBookings);
-                    const showUnlock = table.status === "locked";
-                    return (
-                      <FloorTableBlockView
-                        key={stackKey}
-                        table={table}
-                        style={style}
-                        isMergeMember={isMergeMember}
-                        displayBooking={displayBooking}
-                        customerName={peekCustomer?.fullName ?? ""}
-                        isEmployee={isEmployee}
-                        isBusy={isTableStatusBusy(table.id)}
-                        isDragging={dragState?.tableId === table.id}
-                        showStatusMenu={showStatusMenu}
-                        canComplete={canComplete}
-                        canLock={canLock}
-                        showUnlock={showUnlock}
-                        onOpenTable={() => handleViewOrRegisterForTable(table)}
-                        onOpenDetail={() => openDetailForTable(table)}
-                        onCompleteBooking={() => void handleTableBlockComplete(table)}
-                        onLockTable={() => void handleTableBlockLock(table)}
-                        onUnlockTable={() => void handleTableBlockUnlock(table)}
-                        onStatusMenuOpen={() => {
-                          panStateRef.current = null;
-                          placementTapRef.current = null;
-                          setStatusMenuOpen(true);
-                        }}
-                        onStatusMenuClose={() => setStatusMenuOpen(false)}
-                      />
-                    );
-                  }
-                  const isMergeSelected = editSelectedTableIds.includes(table.id);
-                  return (
-                    <div
-                      key={stackKey}
-                      data-table-block="true"
-                      data-table-status={table.status}
-                      className={`${classes.tableBlock} ${classes.tableBlockEdit} ${dragState?.tableId === table.id ? classes.tableBlockDragging : ""
-                        } ${isMergeMember ? classes.tableBlockMergeMember : ""} ${
-                          isMergeSelected ? classes.tableBlockMergeSelected : ""
-                        } ${isMergeMember ? classes.tableBlockMergeMemberLocked : ""}`}
-                      style={style}
-                      onPointerDown={(event) => {
-                        if (isMergeMember && !event.shiftKey) {
-                          event.stopPropagation();
-                          return;
-                        }
-                        // Shift-click toggles a merge-pick selection without starting a drag.
-                        if (event.shiftKey) {
-                          event.stopPropagation();
-                          if (event.pointerType !== "touch") {
-                            event.preventDefault();
-                          }
-                          toggleEditMergeTableSelection(table.id, table.name);
-                          return;
-                        }
-                        event.preventDefault();
-                        event.stopPropagation();
-                        const viewport = viewportRef.current;
-                        if (viewport) {
-                          viewport.setPointerCapture(event.pointerId);
-                        }
-                        tablePickGestureRef.current = {
-                          pointerId: event.pointerId,
-                          startX: event.clientX,
-                          startY: event.clientY,
-                          tableId: table.id,
-                        };
-                        if (event.pointerType === "mouse") {
-                          startTableDrag(event, table);
-                        }
-                      }}
-                    >
-                      {!isMergeMember ? (
-                        <ActionIcon
-                          type="button"
-                          variant="subtle"
-                          color="gray"
-                          size="sm"
-                          className={classes.tableBlockRemove}
-                          data-table-remove="true"
-                          aria-label={`Chuyển ${table.name} vào kho`}
-                          onPointerDown={(event) => event.stopPropagation()}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            removeTableToStorage(table);
-                          }}
-                        >
-                          <X size={14} />
-                        </ActionIcon>
-                      ) : null}
-                      <Text fw={600} size="sm" lineClamp={1}>
-                        {table.name}
-                      </Text>
-                    </div>
-                  );
-                });
               })}
             </div>
           </div>
@@ -4464,145 +4470,143 @@ export default function FloorMapPage() {
             </div>
           ) : null}
           <div className={classes.canvasOverlay}>
-            {isTopToolbarOpen ? (
-              <div className={classes.canvasTopToolbar}>
-                <div className={classes.toolbarModeRow}>
-                {!isEditMode ? (
-                  <div className={classes.toolbarPopoverAnchor}>
-                    <ActionIcon
-                      variant={isSearchPanelOpen ? "filled" : "light"}
-                      size="lg"
-                      aria-label="Search filters"
-                      onClick={() => {
-                        setIsSearchPanelOpen((value) => !value);
-                        setIsToolsPanelOpen(false);
+            {!isEmployee || isEditMode ? (
+              <div className={classes.canvasTopLeftDocks}>
+                {isDatePickerDockOpen && !isEmployee ? (
+                  <div className={classes.canvasDateDock}>
+                    <Group justify="space-between" align="center" wrap="nowrap" mb={4}>
+                      <Text size="sm" fw={600}>
+                        Ngày xem sơ đồ
+                      </Text>
+                      <ActionIcon
+                        variant="transparent"
+                        size="sm"
+                        onClick={() => setIsDatePickerDockOpen(false)}
+                        aria-label="Ẩn ngày xem sơ đồ"
+                      >
+                        <ChevronUp size={14} />
+                      </ActionIcon>
+                    </Group>
+                    <DatePickerInput
+                      value={floorMapSelectedDate.format("YYYY-MM-DD")}
+                      onChange={(value) => {
+                        if (!value) {
+                          return;
+                        }
+                        setFloorMapSelectedDate(dayjs(value, "YYYY-MM-DD"));
                       }}
-                    >
-                      <Search size={16} />
-                    </ActionIcon>
-                    <div
-                      className={`${classes.canvasPopoverPanel} ${isSearchPanelOpen ? classes.canvasPopoverPanelOpen : ""
-                        } ${classes.toolbarPopoverLeft}`}
-                      aria-hidden={!isSearchPanelOpen}
-                    >
-                      <Stack gap="sm">
-                        <TextInputWithVoice
-                          label="Tìm bàn"
-                          placeholder="Tên bàn, khách, SĐT, giờ đặt, giờ check-in…"
-                          value={search}
-                          onChange={(event) => setSearch(event.currentTarget.value)}
-                          size="sm"
-                        />
-                        <Select
-                          label="Lọc trạng thái"
-                          value={statusFilter}
-                          onChange={(value) => setStatusFilter(value ?? "all")}
-                          data={[
-                            { value: "all", label: "Tất cả trạng thái" },
-                            ...(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
-                              (status) => ({
-                                value: status,
-                                label: tableStatusLabel[status],
-                              })
-                            ),
-                          ]}
-                        />
-                      </Stack>
-                    </div>
+                      valueFormat="DD/MM/YYYY"
+                      dropdownType="modal"
+                      size={isCompact ? "xs" : "sm"}
+                    />
                   </div>
                 ) : null}
-
-                {isEditMode ? (
-                  <div className={classes.toolbarPopoverAnchor}>
-                    <ActionIcon
-                      variant={isToolsPanelOpen ? "filled" : "light"}
-                      size="lg"
-                      aria-label="Grid tools"
-                      onClick={() => {
-                        setIsToolsPanelOpen((value) => !value);
-                        setIsSearchPanelOpen(false);
-                      }}
-                    >
-                      <Wrench size={16} />
-                    </ActionIcon>
-                    <div
-                      className={`${classes.canvasPopoverPanel} ${isToolsPanelOpen ? classes.canvasPopoverPanelOpen : ""
-                        } ${classes.toolbarPopoverLeft}`}
-                      aria-hidden={!isToolsPanelOpen}
-                    >
-                      <Stack gap="sm">
-                        <Group align="end" gap="xs" wrap="nowrap">
-                          <EditableNumberInput
-                            label="Cột"
-                            required
-                            value={editLayout?.gridColumns ?? gridColumns}
-                            onChange={(value) =>
-                              setEditLayout((prev) =>
-                                prev
-                                  ? {
-                                      ...prev,
-                                      gridColumns: clamp(
-                                        value ?? DEFAULT_GRID_COLUMNS,
-                                        4,
-                                        24
-                                      ),
-                                    }
-                                  : prev
-                              )
-                            }
-                            min={4}
-                            max={24}
-                            style={{ flex: 1 }}
-                            disabled={!editLayout}
-                          />
-                          <EditableNumberInput
-                            label="Hàng"
-                            required
-                            value={editLayout?.gridRows ?? gridRows}
-                            onChange={(value) =>
-                              setEditLayout((prev) =>
-                                prev
-                                  ? {
-                                      ...prev,
-                                      gridRows: clamp(value ?? DEFAULT_GRID_ROWS, 4, 18),
-                                    }
-                                  : prev
-                              )
-                            }
-                            min={4}
-                            max={18}
-                            style={{ flex: 1 }}
-                            disabled={!editLayout}
-                          />
-                        </Group>
+                {!isEmployee && !isDatePickerDockOpen ? (
+                  <ActionIcon
+                    variant="filled"
+                    size="lg"
+                    onClick={() => setIsDatePickerDockOpen(true)}
+                    aria-label="Hiện ngày xem sơ đồ"
+                  >
+                    <Calendar size={16} />
+                  </ActionIcon>
+                ) : null}
+                {isEditMode && !isGridToolsDockOpen ? (
+                  <ActionIcon
+                    variant="filled"
+                    size="lg"
+                    onClick={() => setIsGridToolsDockOpen(true)}
+                    aria-label="Hiện công cụ lưới"
+                  >
+                    <Wrench size={16} />
+                  </ActionIcon>
+                ) : null}
+                {isEditMode && isGridToolsDockOpen ? (
+                  <div className={classes.canvasGridToolsDock}>
+                    <Group justify="space-between" align="center" wrap="nowrap" mb={4}>
+                      <Text size="sm" fw={600}>
+                        Công cụ lưới
+                      </Text>
+                      <ActionIcon
+                        variant="transparent"
+                        size="sm"
+                        onClick={() => setIsGridToolsDockOpen(false)}
+                        aria-label="Ẩn công cụ lưới"
+                      >
+                        <ChevronUp size={14} />
+                      </ActionIcon>
+                    </Group>
+                    <Stack gap="sm">
+                      <Group align="end" gap="xs" wrap="nowrap">
                         <EditableNumberInput
-                          label="Khoảng cách node"
+                          label="Cột"
                           required
-                          value={editLayout?.nodeSpacing ?? nodeSpacing}
+                          value={editLayout?.gridColumns ?? gridColumns}
                           onChange={(value) =>
                             setEditLayout((prev) =>
                               prev
                                 ? {
                                     ...prev,
-                                    nodeSpacing: clampFloorNodeSpacing(
-                                      value ?? FLOOR_DEFAULT_NODE_SPACING_PX
-                                    ),
+                                    gridColumns: clamp(value ?? DEFAULT_GRID_COLUMNS, 4, 24),
                                   }
                                 : prev
                             )
                           }
-                          min={FLOOR_NODE_SPACING_MIN_PX}
-                          max={FLOOR_NODE_SPACING_MAX_PX}
-                          step={4}
+                          min={4}
+                          max={24}
+                          style={{ flex: 1 }}
                           disabled={!editLayout}
                         />
+                        <EditableNumberInput
+                          label="Hàng"
+                          required
+                          value={editLayout?.gridRows ?? gridRows}
+                          onChange={(value) =>
+                            setEditLayout((prev) =>
+                              prev
+                                ? {
+                                    ...prev,
+                                    gridRows: clamp(value ?? DEFAULT_GRID_ROWS, 4, 18),
+                                  }
+                                : prev
+                            )
+                          }
+                          min={4}
+                          max={18}
+                          style={{ flex: 1 }}
+                          disabled={!editLayout}
+                        />
+                      </Group>
+                      <EditableNumberInput
+                        label="Khoảng cách node"
+                        required
+                        value={editLayout?.nodeSpacing ?? nodeSpacing}
+                        onChange={(value) =>
+                          setEditLayout((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  nodeSpacing: clampFloorNodeSpacing(
+                                    value ?? FLOOR_DEFAULT_NODE_SPACING_PX
+                                  ),
+                                }
+                              : prev
+                          )
+                        }
+                        min={FLOOR_NODE_SPACING_MIN_PX}
+                        max={FLOOR_NODE_SPACING_MAX_PX}
+                        step={4}
+                        disabled={!editLayout}
+                      />
+                      <Group gap="xs" wrap="nowrap" align="center">
                         <Button
-                          variant="light"
+                          variant="filled"
                           size="xs"
                           leftSection={<Minimize2 size={14} />}
                           loading={isTrimmingGrid}
                           onClick={() => trimRedundantGrid()}
                           disabled={!editLayout}
+                          style={{ flex: 1 }}
                         >
                           Thu gọn lưới thừa
                         </Button>
@@ -4614,214 +4618,20 @@ export default function FloorMapPage() {
                         >
                           <RotateCcw size={16} />
                         </ActionIcon>
-                      </Stack>
-                    </div>
+                      </Group>
+                    </Stack>
                   </div>
                 ) : null}
-
-                {!isEmployee ? (
-                  <SegmentedControl
-                    fullWidth
-                    value={mode}
-                    onChange={(value) => {
-                      const nextMode = value as CanvasMode;
-                      if (nextMode === "edit") {
-                        if (editBlockedByOther) {
-                          notifications.show({
-                            color: "yellow",
-                            message: `${layoutLockHolderName ?? "Người khác"} đang chỉnh sửa sơ đồ. Chỉ xem được.`,
-                          });
-                          return;
-                        }
-                        if (!areaId) {
-                          return;
-                        }
-                        void (async () => {
-                          const acquired = await acquireFloorLayoutEditLock(areaId);
-                          if (!acquired.ok) {
-                            notifications.show({
-                              color: "yellow",
-                              message: `${acquired.holderFullName} đang chỉnh sửa sơ đồ. Thử lại sau.`,
-                            });
-                            return;
-                          }
-                          setMode("edit");
-                          setPendingPlacementTableId(null);
-                        })();
-                        return;
-                      }
-                      if (mode === "edit" && isLayoutDirty) {
-                        confirmDiscardLayoutEdits();
-                        return;
-                      }
-                      exitEditModeToView();
-                    }}
-                    data={[
-                      { label: "View", value: "view" },
-                      {
-                        label: "Edit",
-                        value: "edit",
-                        disabled: editBlockedByOther,
-                      },
-                    ]}
-                    className={classes.toolbarModeControl}
-                  />
-                ) : null}
-                </div>
-
-                <div className={classes.toolbarAreaRow}>
-                  <div className={classes.toolbarAreaSelectRow}>
-                    <Select
-                      value={areaId}
-                      onChange={setActiveAreaId}
-                      data={availableAreas.map((area) => ({
-                        value: area.id,
-                        label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
-                      }))}
-                      searchable
-                      disabled={isEditMode}
-                      className={classes.toolbarAreaSelect}
-                      comboboxProps={{ withinPortal: true }}
-                    />
-                    {!isEmployee && !isBranchManager ? (
-                      <Group
-                        gap={isCompact ? 8 : 4}
-                        className={classes.toolbarAreaActions}
-                        wrap="nowrap"
-                      >
-                        <ActionIcon
-                          variant="transparent"
-                          size={isCompact ? "input-md" : "lg"}
-                          className={classes.toolbarAreaActionBtn}
-                          aria-label="Sửa khu vực"
-                          disabled={!areaId || !hasSupabase}
-                          onClick={openAreaMetadataEdit}
-                        >
-                          <Pencil size={16} />
-                        </ActionIcon>
-                        <ActionIcon
-                          variant="transparent"
-                          color="red"
-                          size={isCompact ? "input-md" : "lg"}
-                          className={classes.toolbarAreaActionBtn}
-                          aria-label="Xóa khu vực"
-                          disabled={!areaId || !hasSupabase}
-                          onClick={() => setAreaDeleteOpen(true)}
-                        >
-                          <Trash2 size={16} />
-                        </ActionIcon>
-                      </Group>
-                    ) : null}
-                  </div>
-                  {!isEmployee ? (
-                    <div className={classes.toolbarAreaSecondary}>
-                      <Group
-                        gap={isCompact ? 8 : 4}
-                        wrap="wrap"
-                        className={classes.toolbarAreaPrimaryBtns}
-                      >
-                        {!isEditMode ? (
-                          <>
-                            <Button
-                              color="brand"
-                              size={isCompact ? "sm" : "compact-sm"}
-                              className={classes.toolbarDayListBtn}
-                              onClick={() => setCreateBookingModalOpened(true)}
-                            >
-                              Tạo booking
-                            </Button>
-                            <Button
-                              size={isCompact ? "sm" : "compact-sm"}
-                              variant="filled"
-                              className={classes.toolbarDayListBtn}
-                              onClick={() => dayListModalRef.current?.openDayListModal()}
-                            >
-                              Danh sách booking
-                            </Button>
-                            <Button
-                              size={isCompact ? "sm" : "compact-sm"}
-                              variant="light"
-                              className={classes.toolbarDayListBtn}
-                              onClick={() => setMergeModalOpen(true)}
-                              disabled={!activeAreaBranchId}
-                            >
-                              Gộp bàn
-                            </Button>
-                            <Button
-                              size={isCompact ? "sm" : "compact-sm"}
-                              variant="default"
-                              className={classes.toolbarDayListBtn}
-                              onClick={() => setMergeGroupsListModalOpen(true)}
-                              disabled={!activeAreaBranchId}
-                            >
-                              Danh sách bàn gộp
-                            </Button>
-                          </>
-                        ) : null}
-                        {isEditMode ? (
-                          <>
-                            <Button
-                              size="sm"
-                              leftSection={<Save size={16} />}
-                              loading={isSavingLayout}
-                              disabled={!editLayout || !isLayoutDirty}
-                              onClick={() => void handleSaveFloorLayout()}
-                              className={classes.toolbarSaveBtn}
-                            >
-                              Lưu sơ đồ ({floorMapSelectedDate.format("DD/MM")})
-                            </Button>
-                            <Button
-                              size="sm"
-                              leftSection={<Save size={16} />}
-                              variant="light"
-                              loading={isSavingLayout}
-                              disabled={!editLayout || !isLayoutDirty}
-                              onClick={() => void handleSaveFloorLayoutAsGlobal()}
-                              className={classes.toolbarSaveBtn}
-                            >
-                              Lưu sơ đồ mặc định
-                            </Button>
-                            <Button
-                              size={isCompact ? "sm" : "compact-sm"}
-                              variant="default"
-                              className={classes.toolbarDayListBtn}
-                              onClick={() => setLayoutTemplatesOpen(true)}
-                              disabled={!areaId || !hasSupabase}
-                            >
-                              Mẫu sơ đồ…
-                            </Button>
-                          </>
-                        ) : null}
-                      </Group>
-                    </div>
-                  ) : null}
-                </div>
-                <ActionIcon
-                  variant="transparent"
-                  size="lg"
-                  className={classes.topToolbarCollapseBtn}
-                  onClick={() => {
-                    setIsTopToolbarOpen(false);
-                    setIsSearchPanelOpen(false);
-                    setIsToolsPanelOpen(false);
-                  }}
-                  aria-label="Ẩn thanh công cụ"
-                >
-                  <ChevronUp size={16} />
-                </ActionIcon>
               </div>
-            ) : (
-              <div className={classes.topToolbarToggleDock}>
-                <ActionIcon
-                  variant="filled"
-                  size="lg"
-                  onClick={() => setIsTopToolbarOpen(true)}
-                  aria-label="Hiện thanh công cụ"
-                >
-                  <ChevronDown size={16} />
-                </ActionIcon>
+            ) : null}
+
+            {isEditMode && isLayoutDirty ? (
+              <div className={classes.canvasUnsavedBadgeDock}>
+                <Badge color="orange" variant="light">
+                  Chưa lưu
+                </Badge>
               </div>
-            )}
+            ) : null}
 
             <div
               className={`${classes.canvasZoomDock} ${isEditMode && isPaletteOpen ? classes.canvasZoomDockRaised : ""
@@ -4882,26 +4692,31 @@ export default function FloorMapPage() {
                           <div
                             key={`palette-${table.id}`}
                             data-table-status={table.status}
+                            draggable={isEditMode}
                             className={`${classes.paletteTableBlock} ${TABLE_STATUS_SURFACE_CLASS[table.status]} ${pendingPlacementTableId === table.id
                               ? classes.paletteTableBlockPending
                               : ""
                               }`}
-                            onPointerDown={(event) => handlePalettePointerDown(event, table)}
-                            onPointerMove={(event) => handlePalettePointerMove(event, table)}
-                            onPointerUp={(event) => handlePalettePointerUp(event, table)}
-                            onPointerCancel={(event) => handlePalettePointerCancel(event, table)}
+                            onDragStart={() => {
+                              paletteDragTableIdRef.current = table.id;
+                              setPaletteDroppingItem({
+                                i: table.id,
+                                x: 0,
+                                y: 0,
+                                w: 1,
+                                h: 1,
+                              });
+                            }}
+                            onDragEnd={() => {
+                              paletteDragTableIdRef.current = null;
+                              setPaletteDroppingItem(null);
+                            }}
+                            onClick={() => handlePaletteTableClick(table)}
                           >
                             <Stack gap={4} style={{ width: "100%" }}>
                               <Text size="sm" fw={600} lineClamp={1}>
                                 {table.name}
                               </Text>
-                              <Badge
-                                color={tableStatusColor[table.status]}
-                                variant="light"
-                                size="xs"
-                              >
-                                {tableStatusLabel[table.status]}
-                              </Badge>
                               <TableBlockBookingPeek
                                 compact
                                 tableId={table.id}
@@ -4932,7 +4747,7 @@ export default function FloorMapPage() {
         </div>
       </PortalSectionCard>
 
-      <Modal
+      <PortalStandardModal
         opened={Boolean(registerTable || registerMergeGroup)}
         onClose={() => {
           if (!registerSaving) {
@@ -4942,24 +4757,90 @@ export default function FloorMapPage() {
         closeOnClickOutside={!registerSaving}
         closeOnEscape={!registerSaving}
         title={
-          registerMergeGroup
-            ? `Đăng ký - ${registerMergeGroup.mergedName}`
-            : registerTable
-              ? `Đăng ký - ${registerTable.name}`
-              : "Đăng ký"
+          registerMergeGroup ? (
+            <Group gap="xs" wrap="wrap">
+              <Text fw={700} span>
+                Đăng ký
+              </Text>
+              <Text fw={700} c="blue.6" span>
+                {registerMergeGroup.mergedName}
+              </Text>
+              <Text fw={700} c="dimmed" span>
+                ({tableStatusLabel[mergeGroupStatusById.get(registerMergeGroup.id) ?? "available"]})
+              </Text>
+            </Group>
+          ) : registerTable ? (
+            <Group gap="xs" wrap="wrap">
+              <Text fw={700} span>
+                Đăng ký
+              </Text>
+              <Text fw={700} c="blue.6" span>
+                {registerTable.name}
+              </Text>
+              <Text fw={700} c="dimmed" span>
+                ({tableStatusLabel[registerTable.status]})
+              </Text>
+            </Group>
+          ) : (
+            "Đăng ký"
+          )
         }
-        size={registerModalTab === "assign" ? "xl" : "md"}
+        size="xl"
         centered
         overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
+        footer={
+          registerTable || registerMergeGroup ? (
+            registerModalTab === "assign" ? (
+              <Group justify="flex-end" gap={8}>
+                <Button
+                  variant="default"
+                  disabled={registerSaving}
+                  onClick={closeRegistrationPanel}
+                >
+                  Hủy
+                </Button>
+                <Button
+                  variant="light"
+                  loading={registerSaving}
+                  disabled={
+                    registerSaving ||
+                    !hasSupabase ||
+                    isLoading ||
+                    (registerPendingAssignPlan?.assignable.length ?? 0) === 0
+                  }
+                  onClick={() => void handleAssignPendingBookings()}
+                >
+                  {(registerPendingAssignPlan?.assignable.length ?? 0) > 1
+                    ? `Gán ${registerPendingAssignPlan?.assignable.length} booking`
+                    : "Gán booking chờ"}
+                </Button>
+              </Group>
+            ) : (
+              <Group justify="flex-end" gap={8}>
+                <Button variant="default" disabled={registerSaving} onClick={closeRegistrationPanel}>
+                  Hủy
+                </Button>
+                <Button
+                  loading={registerSaving}
+                  disabled={
+                    registerSaving ||
+                    !hasSupabase ||
+                    isLoading ||
+                    registerImmediateBlocked ||
+                    (!registerMergeGroup && registerTableSlotConflicts.length > 0)
+                  }
+                  onClick={() => void handleRegisterCustomer()}
+                >
+                  Tạo booking
+                </Button>
+              </Group>
+            )
+          ) : null
+        }
       >
         {registerTable || registerMergeGroup ? (
           <Stack gap="sm">
-            <Group justify="space-between" align="flex-start" wrap="wrap" gap="xs">
-              <Text size="sm" c="dimmed">
-                {registerMergeGroup
-                  ? tableStatusLabel[mergeGroupStatusById.get(registerMergeGroup.id) ?? "available"]
-                  : tableStatusLabel[registerTable!.status]}
-              </Text>
+            <Group justify="flex-end" align="flex-start" wrap="wrap" gap="xs">
               {registerMergeGroup ? (
                 (mergeGroupStatusById.get(registerMergeGroup.id) === "occupied" ||
                   mergeGroupStatusById.get(registerMergeGroup.id) === "hold") ? (
@@ -5033,24 +4914,6 @@ export default function FloorMapPage() {
                       {registerTableConflictMessage}
                     </Alert>
                   ) : null}
-                  <Group justify="flex-end" gap={8}>
-                    <Button variant="default" disabled={registerSaving} onClick={closeRegistrationPanel}>
-                      Hủy
-                    </Button>
-                    <Button
-                      loading={registerSaving}
-                      disabled={
-                        registerSaving ||
-                        !hasSupabase ||
-                        isLoading ||
-                        registerImmediateBlocked ||
-                        (!registerMergeGroup && registerTableSlotConflicts.length > 0)
-                      }
-                      onClick={() => void handleRegisterCustomer()}
-                    >
-                      Tạo booking
-                    </Button>
-                  </Group>
                 </Stack>
               </Tabs.Panel>
 
@@ -5077,36 +4940,12 @@ export default function FloorMapPage() {
                     onNavigateToBookingList={confirmNavigateToDayBookingList}
                     disabled={registerSaving}
                   />
-                  <Group justify="flex-end" gap={8}>
-                    <Button
-                      variant="default"
-                      disabled={registerSaving}
-                      onClick={closeRegistrationPanel}
-                    >
-                      Hủy
-                    </Button>
-                    <Button
-                      variant="light"
-                      loading={registerSaving}
-                      disabled={
-                        registerSaving ||
-                        !hasSupabase ||
-                        isLoading ||
-                        (registerPendingAssignPlan?.assignable.length ?? 0) === 0
-                      }
-                      onClick={() => void handleAssignPendingBookings()}
-                    >
-                      {(registerPendingAssignPlan?.assignable.length ?? 0) > 1
-                        ? `Gán ${registerPendingAssignPlan?.assignable.length} booking`
-                        : "Gán booking chờ"}
-                    </Button>
-                  </Group>
                 </Stack>
               </Tabs.Panel>
             </Tabs>
           </Stack>
         ) : null}
-      </Modal>
+      </PortalStandardModal>
 
       <TableBlockDetailModal
         opened={Boolean(detailTable || detailMergeGroup)}
