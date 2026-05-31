@@ -1,6 +1,6 @@
 "use client";
 
-import { ActionIcon, Badge, Group, Menu, Stack, Text } from "@mantine/core";
+import { ActionIcon, Badge, Checkbox, Group, Menu, Stack, Text } from "@mantine/core";
 import dayjs from "dayjs";
 import { MoreVertical } from "lucide-react";
 import { memo, type CSSProperties, type MouseEvent } from "react";
@@ -104,6 +104,14 @@ export type FloorTableBlockViewProps = {
   /** When set (e.g. merge group booking), shown as guest badge even if displayBooking is null. */
   bookingGuestBadge?: Booking | null;
   hideBookingPeek?: boolean;
+  /** Grid merge/split picking — checkbox at top-right of the block. */
+  selectionCheckbox?: {
+    checked: boolean;
+    onToggle: () => void;
+  } | null;
+  isGridSelected?: boolean;
+  /** When true, block click does not open register/detail (grid action mode). */
+  suppressOpen?: boolean;
 };
 
 function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
@@ -129,6 +137,9 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
     onStatusMenuClose,
     bookingGuestBadge = null,
     hideBookingPeek = false,
+    selectionCheckbox = null,
+    isGridSelected = false,
+    suppressOpen = false,
   } = props;
 
   const hasQuickActions = canComplete || canLock || showUnlock;
@@ -144,16 +155,29 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
         data-table-status={table.status}
         className={`${classes.tableBlock} ${classes.tableBlockView} ${TABLE_STATUS_SURFACE_CLASS[table.status]} ${
           isDragging ? classes.tableBlockDragging : ""
-        }`}
+        } ${isGridSelected ? classes.tableBlockMergeSelected : ""}`}
         style={bookingRowBusyStyle(isBusy)}
         onClick={(event) => {
           event.stopPropagation();
-          if (isBusy) {
+          if (isBusy || suppressOpen) {
             return;
           }
           onOpenTable();
         }}
       >
+        {selectionCheckbox ? (
+          <Checkbox
+            checked={selectionCheckbox.checked}
+            aria-label={`Chọn ${table.name}`}
+            className={classes.tableBlockSelectionCheckbox}
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+            onChange={() => {
+              selectionCheckbox.onToggle();
+            }}
+          />
+        ) : null}
         <Group gap={6} wrap="nowrap" align="center" justify="space-between">
           <Text fw={600} size="sm" lineClamp={1} style={{ minWidth: 0, flex: 1 }}>
             {table.name}
@@ -165,7 +189,7 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
             className={classes.tableBlockHeaderActions}
             data-table-status-menu=""
           >
-            {showStatusMenu && !isEmployee ? (
+            {showStatusMenu && !isEmployee && !selectionCheckbox ? (
               <Menu
                 withinPortal
                 position="bottom-end"
@@ -278,7 +302,10 @@ function propsAreEqual(prev: FloorTableBlockViewProps, next: FloorTableBlockView
     prev.style.top === next.style.top &&
     prev.bookingGuestBadge?.id === next.bookingGuestBadge?.id &&
     prev.bookingGuestBadge?.guestCount === next.bookingGuestBadge?.guestCount &&
-    prev.hideBookingPeek === next.hideBookingPeek
+    prev.hideBookingPeek === next.hideBookingPeek &&
+    prev.selectionCheckbox?.checked === next.selectionCheckbox?.checked &&
+    prev.isGridSelected === next.isGridSelected &&
+    prev.suppressOpen === next.suppressOpen
   );
 }
 

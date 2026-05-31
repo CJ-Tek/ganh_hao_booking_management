@@ -12,7 +12,6 @@ import {
   Menu,
   Loader,
   Modal,
-  MultiSelect,
   Radio,
   Select,
   SegmentedControl,
@@ -106,9 +105,11 @@ import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import {
   clampFloorNodeSpacing,
+  estimateFloorTableBlockHeightPx,
   FLOOR_DEFAULT_NODE_SPACING_PX,
   FLOOR_NODE_SPACING_MAX_PX,
   FLOOR_NODE_SPACING_MIN_PX,
+  FLOOR_TABLE_BLOCK_EDIT_HEIGHT_PX,
   FLOOR_TABLE_BLOCK_HEIGHT_PX,
   FLOOR_TABLE_BLOCK_WIDTH_PX,
   FLOOR_TABLE_PALETTE_SENTINEL,
@@ -195,6 +196,7 @@ import {
 } from "@/lib/merge-group-utils";
 import {
   filterTablesForFloorMapDay,
+  isSplitCloneEffectiveOnDate,
   isSplitCloneTable,
 } from "@/lib/table-split-clone-utils";
 import {
@@ -217,9 +219,6 @@ const MERGE_GROUP_HEADER_BOOKED_HEIGHT_PX = 54;
 const MERGE_GROUP_HEADER_TABLE_GAP_PX = 6;
 /** Matches `.mergeGroupContainer` dashed border width — header sits inside the frame. */
 const MERGE_GROUP_FRAME_BORDER_PX = 2;
-/** Calibrated offsets for merge-group dashed box (preview: top +44px, height −84px). */
-const MERGE_GROUP_BBOX_TOP_OFFSET_PX = 44;
-const MERGE_GROUP_BBOX_HEIGHT_ADJUST_PX = -84;
 
 const MERGE_GROUP_STATUS_SURFACE_CLASS: Record<TableStatus, string> = {
   available: classes.statusSurface_available,
@@ -285,6 +284,8 @@ const FIT_VIEWPORT_MARGIN = 0.94;
 /** World-space padding around the union of table blocks when fitting (px). */
 const FIT_TABLE_BOUNDS_PADDING = 40;
 const TAP_PLACE_THRESHOLD_PX = 14;
+/** How long the merge/split instruction alert stays visible on the canvas (ms). */
+const GRID_TABLE_ACTION_HINT_MS = 3000;
 
 function isTableBlockTarget(target: EventTarget | null) {
   const el = target as HTMLElement | null;
@@ -593,7 +594,11 @@ export default function FloorMapPage() {
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
   const [mergeGroupsListModalOpen, setMergeGroupsListModalOpen] = useState(false);
   const [mergeGroupReleaseBusyId, setMergeGroupReleaseBusyId] = useState<string | null>(null);
-  /** Modal multi-select of tables to merge (view-mode "Gộp bàn" flow). */
+  /** Grid-view merge/split picking before the date confirmation modal. */
+  const [gridTableActionMode, setGridTableActionMode] = useState<"merge" | "split" | null>(null);
+  const [gridTableActionHintVisible, setGridTableActionHintVisible] = useState(false);
+  const gridTableActionHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Tables selected on the grid for view-mode "Gộp bàn". */
   const [mergeSelectedTableIds, setMergeSelectedTableIds] = useState<string[]>([]);
   const [mergeStartDate, setMergeStartDate] = useState<string | null>(() =>
     formatMergeGroupDate(dayjs())
@@ -633,6 +638,31 @@ export default function FloorMapPage() {
     useState<BookingCreatedNextStepPayload | null>(null);
   const [registerCreatedNextStepOpened, setRegisterCreatedNextStepOpened] = useState(false);
   const consumedFloorFocusBookingRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!gridTableActionMode) {
+      if (gridTableActionHintTimerRef.current) {
+        clearTimeout(gridTableActionHintTimerRef.current);
+        gridTableActionHintTimerRef.current = null;
+      }
+      setGridTableActionHintVisible(false);
+      return;
+    }
+    setGridTableActionHintVisible(true);
+    if (gridTableActionHintTimerRef.current) {
+      clearTimeout(gridTableActionHintTimerRef.current);
+    }
+    gridTableActionHintTimerRef.current = setTimeout(() => {
+      setGridTableActionHintVisible(false);
+      gridTableActionHintTimerRef.current = null;
+    }, GRID_TABLE_ACTION_HINT_MS);
+    return () => {
+      if (gridTableActionHintTimerRef.current) {
+        clearTimeout(gridTableActionHintTimerRef.current);
+        gridTableActionHintTimerRef.current = null;
+      }
+    };
+  }, [gridTableActionMode]);
 
   useEffect(() => {
     const dateFromUrl = parseFloorMapDateParam(searchParams.get(FLOOR_MAP_DATE_PARAM));
@@ -1227,22 +1257,14 @@ export default function FloorMapPage() {
       .sort((a, b) => a.name.localeCompare(b.name, "vi"));
   }, [allActiveMergedTableIds, areaId, state.tables]);
 
-  const splitTableOptions = useMemo(
-    () =>
-      splitCandidateTables.map((table) => ({
-        value: table.id,
-        label: table.name,
-      })),
-    [splitCandidateTables]
+  const mergeCandidateTableIds = useMemo(
+    () => new Set(mergeCandidateTables.map((table) => table.id)),
+    [mergeCandidateTables]
   );
 
-  const mergeTableOptions = useMemo(
-    () =>
-      mergeCandidateTables.map((table) => ({
-        value: table.id,
-        label: table.name,
-      })),
-    [mergeCandidateTables]
+  const splitCandidateTableIds = useMemo(
+    () => new Set(splitCandidateTables.map((table) => table.id)),
+    [splitCandidateTables]
   );
 
   /** Active merge groups inside the currently selected area (snapshot-derived, no extra fetch). */
@@ -1338,6 +1360,12 @@ export default function FloorMapPage() {
     if (!isEditMode) {
       setEditSelectedTableIds([]);
       setMergeGroupDragState(null);
+    } else {
+      setGridTableActionMode(null);
+      setMergeSelectedTableIds([]);
+      setSplitSelectedTableId(null);
+      setMergeModalOpen(false);
+      setSplitModalOpen(false);
     }
   }, [isEditMode]);
 
@@ -1353,6 +1381,11 @@ export default function FloorMapPage() {
   }, [isEditMode]);
   useEffect(() => {
     setEditSelectedTableIds([]);
+    setGridTableActionMode(null);
+    setMergeSelectedTableIds([]);
+    setSplitSelectedTableId(null);
+    setMergeModalOpen(false);
+    setSplitModalOpen(false);
   }, [areaId]);
 
   const closeDetailModal = () => {
@@ -2243,9 +2276,9 @@ export default function FloorMapPage() {
       return [];
     }
     const halfW = FLOOR_TABLE_BLOCK_WIDTH_PX / 2;
-    const halfH = FLOOR_TABLE_BLOCK_HEIGHT_PX / 2;
     const marginX = 10;
     const marginY = MERGE_GROUP_HEADER_TABLE_GAP_PX;
+    const tableById = new Map(placedTables.map((table) => [table.id, table]));
     const rects: Array<{
       groupId: string;
       mergedName: string;
@@ -2259,48 +2292,70 @@ export default function FloorMapPage() {
     }> = [];
     for (const group of effectiveMergeGroups) {
       let memberCount = 0;
-      let minRow = Number.POSITIVE_INFINITY;
-      let maxRow = Number.NEGATIVE_INFINITY;
-      let minCol = Number.POSITIVE_INFINITY;
-      let maxCol = Number.NEGATIVE_INFINITY;
+      let tableXMin = Number.POSITIVE_INFINITY;
+      let tableXMax = Number.NEGATIVE_INFINITY;
+      let minTableTop = Number.POSITIVE_INFINITY;
+      let maxTableBottom = Number.NEGATIVE_INFINITY;
+      const mergeGroupBooking = !isEditMode
+        ? (primaryBookingByMergeGroupId.get(group.id) ?? null)
+        : null;
       for (const tableId of group.tableIds) {
         const pos = effectiveTablePositions.get(tableId);
         if (!pos) {
           continue;
         }
+        const table = tableById.get(tableId);
+        if (!table) {
+          continue;
+        }
         memberCount += 1;
-        minRow = Math.min(minRow, pos.row);
-        maxRow = Math.max(maxRow, pos.row);
-        minCol = Math.min(minCol, pos.col);
-        maxCol = Math.max(maxCol, pos.col);
+        const center = gridCellCenterPx(pos.col, pos.row, rglGridConfig);
+        const tableBooking = isEditMode
+          ? null
+          : (primaryBookingByTableId.get(tableId) ?? null);
+        const hideBookingPeek = Boolean(mergeGroupBooking && !tableBooking);
+        const showBookingPeek = !hideBookingPeek && tableBooking != null;
+        const showCheckInLine =
+          showBookingPeek &&
+          tableBooking != null &&
+          (tableBooking.status === "checked_in" || tableBooking.status === "seated") &&
+          Boolean(tableBooking.checkedInAt);
+        const tableHeight = isEditMode
+          ? FLOOR_TABLE_BLOCK_EDIT_HEIGHT_PX
+          : estimateFloorTableBlockHeightPx({
+              showBookingPeek,
+              showCheckInLine,
+              showSplitCloneAvailability:
+                isSplitCloneTable(table) &&
+                Boolean(table.splitStartDate && table.splitEndDate) &&
+                isSplitCloneEffectiveOnDate(table, floorMapSelectedDate),
+            });
+        const halfH = tableHeight / 2;
+        tableXMin = Math.min(tableXMin, center.x - halfW);
+        tableXMax = Math.max(tableXMax, center.x + halfW);
+        minTableTop = Math.min(minTableTop, center.y - halfH);
+        maxTableBottom = Math.max(maxTableBottom, center.y + halfH);
       }
       if (memberCount === 0) {
         continue;
       }
-      const tableXMin = gridCellCenterPx(minCol, minRow, rglGridConfig).x - halfW;
-      const tableXMax = gridCellCenterPx(maxCol, maxRow, rglGridConfig).x + halfW;
-      const tableYMin = gridCellCenterPx(minCol, minRow, rglGridConfig).y - halfH;
-      const tableYMax = gridCellCenterPx(maxCol, maxRow, rglGridConfig).y + halfH;
       const xMin = tableXMin - marginX;
       const xMax = tableXMax + marginX;
       const headerHeight =
         isEditMode || !mergeGroupHasBookingOnDay(group.id, floorMapDayBookings)
           ? MERGE_GROUP_HEADER_BASE_HEIGHT_PX
           : MERGE_GROUP_HEADER_BOOKED_HEIGHT_PX;
-      const yMin = tableYMin - headerHeight - marginY;
-      const yMax = tableYMax + marginY;
+      const yMin = minTableTop - headerHeight - marginY;
+      const yMax = maxTableBottom + marginY;
       rects.push({
         groupId: group.id,
         mergedName: group.mergedName,
         memberCount,
         tableIds: group.tableIds,
         x: xMin,
-        y: yMin + MERGE_GROUP_BBOX_TOP_OFFSET_PX,
+        y: yMin,
         width: Math.max(0, xMax - xMin),
-        height: Math.max(
-          headerHeight,
-          yMax - yMin + MERGE_GROUP_BBOX_HEIGHT_ADJUST_PX
-        ),
+        height: Math.max(headerHeight, yMax - yMin),
         headerHeight,
       });
     }
@@ -2309,8 +2364,12 @@ export default function FloorMapPage() {
     effectiveTablePositions,
     effectiveMergeGroups,
     floorMapDayBookings,
+    floorMapSelectedDate,
     isEditMode,
     mergeGroupDragState,
+    placedTables,
+    primaryBookingByMergeGroupId,
+    primaryBookingByTableId,
     rglGridConfig,
   ]);
 
@@ -3326,6 +3385,7 @@ export default function FloorMapPage() {
       });
       if (result.ok) {
         setMergeModalOpen(false);
+        setGridTableActionMode(null);
         setMergeSelectedTableIds([]);
         setEditSelectedTableIds([]);
         const dayRow =
@@ -3334,9 +3394,6 @@ export default function FloorMapPage() {
             : await refreshDayLayout();
         if (result.dayLayout !== undefined) {
           setCurrentDayLayoutCache(result.dayLayout);
-        }
-        if (result.groupId) {
-          setOpenedMergeGroupId(result.groupId);
         }
         if (isEditMode) {
           syncEditLayoutFromDayOverride(dayRow);
@@ -3385,6 +3442,7 @@ export default function FloorMapPage() {
       });
       if (result.ok) {
         setSplitModalOpen(false);
+        setGridTableActionMode(null);
         setSplitSelectedTableId(null);
         const dayRow =
           result.dayLayout !== undefined
@@ -3392,10 +3450,6 @@ export default function FloorMapPage() {
             : await refreshDayLayout();
         if (result.dayLayout !== undefined) {
           setCurrentDayLayoutCache(result.dayLayout);
-        }
-        if (result.table) {
-          setDetailTable(result.table);
-          setDetailMergeGroup(null);
         }
         if (isEditMode) {
           syncEditLayoutFromDayOverride(dayRow);
@@ -4023,6 +4077,93 @@ export default function FloorMapPage() {
     );
   };
 
+  const cancelGridTableAction = () => {
+    setGridTableActionMode(null);
+    setMergeSelectedTableIds([]);
+    setSplitSelectedTableId(null);
+    setMergeModalOpen(false);
+    setSplitModalOpen(false);
+  };
+
+  const startGridMergeSelection = () => {
+    if (gridTableActionMode === "merge") {
+      cancelGridTableAction();
+      return;
+    }
+    setSplitSelectedTableId(null);
+    setMergeSelectedTableIds([]);
+    setMergeModalOpen(false);
+    setSplitModalOpen(false);
+    setGridTableActionMode("merge");
+  };
+
+  const startGridSplitSelection = () => {
+    if (gridTableActionMode === "split") {
+      cancelGridTableAction();
+      return;
+    }
+    setMergeSelectedTableIds([]);
+    setSplitSelectedTableId(null);
+    setMergeModalOpen(false);
+    setSplitModalOpen(false);
+    setGridTableActionMode("split");
+  };
+
+  const toggleGridMergeTableSelection = (tableId: string) => {
+    if (!mergeCandidateTableIds.has(tableId)) {
+      return;
+    }
+    setMergeSelectedTableIds((prev) =>
+      prev.includes(tableId) ? prev.filter((id) => id !== tableId) : [...prev, tableId]
+    );
+  };
+
+  const toggleGridSplitTableSelection = (tableId: string) => {
+    if (!splitCandidateTableIds.has(tableId)) {
+      return;
+    }
+    setSplitSelectedTableId((prev) => (prev === tableId ? null : tableId));
+  };
+
+  const confirmGridTableActionSelection = () => {
+    if (gridTableActionMode === "merge") {
+      if (mergeSelectedTableIds.length < 2) {
+        notifications.show({
+          color: "yellow",
+          message: "Cần chọn ít nhất 2 bàn để gộp.",
+        });
+        return;
+      }
+      setMergeModalOpen(true);
+      return;
+    }
+    if (gridTableActionMode === "split") {
+      if (!splitSelectedTableId) {
+        notifications.show({
+          color: "yellow",
+          message: "Vui lòng chọn một bàn cần tách.",
+        });
+        return;
+      }
+      setSplitModalOpen(true);
+    }
+  };
+
+  const mergeSelectedTableNames = useMemo(
+    () =>
+      mergeSelectedTableIds
+        .map((tableId) => state.tables.find((table) => table.id === tableId)?.name)
+        .filter((name): name is string => Boolean(name)),
+    [mergeSelectedTableIds, state.tables]
+  );
+
+  const splitSelectedTableName = useMemo(() => {
+    if (!splitSelectedTableId) {
+      return null;
+    }
+    return state.tables.find((table) => table.id === splitSelectedTableId)?.name ?? null;
+  }, [splitSelectedTableId, state.tables]);
+
   return (
     <Stack
       className={classes.pageRoot}
@@ -4197,7 +4338,8 @@ export default function FloorMapPage() {
                     <div className={classes.toolbarAreaSecondary}>
                       <Group
                         gap={isCompact ? 8 : 4}
-                        wrap="wrap"
+                        wrap={isCompact ? "wrap" : "nowrap"}
+                        grow={!isCompact}
                         className={classes.toolbarAreaPrimaryBtns}
                       >
                         {!isEditMode ? (
@@ -4217,24 +4359,6 @@ export default function FloorMapPage() {
                               onClick={() => dayListModalRef.current?.openDayListModal()}
                             >
                               Danh sách booking
-                            </Button>
-                            <Button
-                              size={isCompact ? "sm" : "compact-sm"}
-                              variant="light"
-                              className={classes.toolbarDayListBtn}
-                              onClick={() => setMergeModalOpen(true)}
-                              disabled={!activeAreaBranchId}
-                            >
-                              Gộp bàn
-                            </Button>
-                            <Button
-                              size={isCompact ? "sm" : "compact-sm"}
-                              variant="light"
-                              className={classes.toolbarDayListBtn}
-                              onClick={() => setSplitModalOpen(true)}
-                              disabled={!activeAreaBranchId}
-                            >
-                              Tách bàn
                             </Button>
                             <Button
                               size={isCompact ? "sm" : "compact-sm"}
@@ -4398,6 +4522,34 @@ export default function FloorMapPage() {
                         excludeMergeGroupId: mergeGroupId ?? undefined,
                       });
                     const showUnlock = table.status === "locked";
+                    const isMergeGridSelect = gridTableActionMode === "merge";
+                    const isSplitGridSelect = gridTableActionMode === "split";
+                    const isGridSelecting = isMergeGridSelect || isSplitGridSelect;
+                    const isGridSelectionCandidate =
+                      !isMergeMember &&
+                      (isMergeGridSelect
+                        ? mergeCandidateTableIds.has(table.id)
+                        : isSplitGridSelect
+                          ? splitCandidateTableIds.has(table.id)
+                          : false);
+                    const isGridSelected = isMergeGridSelect
+                      ? mergeSelectedTableIds.includes(table.id)
+                      : isSplitGridSelect
+                        ? splitSelectedTableId === table.id
+                        : false;
+                    const selectionCheckbox =
+                      isGridSelecting && isGridSelectionCandidate
+                        ? {
+                            checked: isGridSelected,
+                            onToggle: () => {
+                              if (isMergeGridSelect) {
+                                toggleGridMergeTableSelection(table.id);
+                              } else {
+                                toggleGridSplitTableSelection(table.id);
+                              }
+                            },
+                          }
+                        : null;
                     return (
                       <div key={table.id} className={classes.floorMapGridCell}>
                         <FloorTableBlockView
@@ -4420,10 +4572,13 @@ export default function FloorMapPage() {
                           isEmployee={isEmployee}
                           isBusy={isTableStatusBusy(table.id)}
                           isDragging={false}
-                          showStatusMenu={showStatusMenu}
+                          showStatusMenu={showStatusMenu && !isGridSelecting}
                           canComplete={canComplete}
                           canLock={canLock}
                           showUnlock={showUnlock}
+                          selectionCheckbox={selectionCheckbox}
+                          isGridSelected={isGridSelected}
+                          suppressOpen={isGridSelecting}
                           onOpenTable={() => handleViewOrRegisterForTable(table)}
                           onOpenDetail={() => openDetailForTable(table)}
                           onCompleteBooking={() => void handleTableBlockComplete(table)}
@@ -4777,6 +4932,33 @@ export default function FloorMapPage() {
               </Group>
             </div>
           ) : null}
+          {!isEditMode && gridTableActionMode ? (
+            <div className={classes.mergeSelectionDock}>
+              <Text size="sm" fw={600}>
+                {gridTableActionMode === "merge"
+                  ? `Đã chọn ${mergeSelectedTableIds.length} bàn`
+                  : splitSelectedTableName
+                    ? `Đã chọn: ${splitSelectedTableName}`
+                    : "Chọn một bàn cần tách"}
+              </Text>
+              <Group gap="xs">
+                <Button variant="default" size="xs" onClick={cancelGridTableAction}>
+                  Hủy
+                </Button>
+                <Button
+                  size="xs"
+                  onClick={confirmGridTableActionSelection}
+                  disabled={
+                    gridTableActionMode === "merge"
+                      ? mergeSelectedTableIds.length < 2
+                      : !splitSelectedTableId
+                  }
+                >
+                  Xác nhận
+                </Button>
+              </Group>
+            </div>
+          ) : null}
           <div className={classes.canvasOverlay}>
             {!isEmployee || isEditMode ? (
               <div className={classes.canvasTopLeftDocks}>
@@ -4938,6 +5120,45 @@ export default function FloorMapPage() {
                 <Badge color="orange" variant="light">
                   Chưa lưu
                 </Badge>
+              </div>
+            ) : null}
+
+            {!isEmployee && !isEditMode ? (
+              <div className={classes.canvasTopRightDocks}>
+                <div className={classes.canvasTableActionDock}>
+                  <Group gap={isCompact ? 6 : 8} wrap="wrap" justify="flex-end">
+                    <Button
+                      size={isCompact ? "xs" : "compact-sm"}
+                      variant={gridTableActionMode === "merge" ? "filled" : "light"}
+                      onClick={startGridMergeSelection}
+                      disabled={!activeAreaBranchId}
+                    >
+                      Gộp bàn
+                    </Button>
+                    <Button
+                      size={isCompact ? "xs" : "compact-sm"}
+                      variant={gridTableActionMode === "split" ? "filled" : "light"}
+                      onClick={startGridSplitSelection}
+                      disabled={!activeAreaBranchId}
+                    >
+                      Tách bàn
+                    </Button>
+                  </Group>
+                </div>
+                {gridTableActionMode && gridTableActionHintVisible ? (
+                  <Alert
+                    variant="light"
+                    color="blue"
+                    className={classes.canvasTableActionHint}
+                    title={
+                      gridTableActionMode === "merge" ? "Đang gộp bàn" : "Đang tách bàn"
+                    }
+                  >
+                    {gridTableActionMode === "merge"
+                      ? "Chọn ít nhất 2 bàn trên sơ đồ, sau đó nhấn Xác nhận ở thanh dưới."
+                      : "Chọn một bàn trên sơ đồ, sau đó nhấn Xác nhận ở thanh dưới."}
+                  </Alert>
+                ) : null}
               </div>
             ) : null}
 
@@ -5362,14 +5583,22 @@ export default function FloorMapPage() {
       <Modal
         opened={mergeModalOpen}
         onClose={() => setMergeModalOpen(false)}
-        title="Gộp bàn"
+        title="Gộp bàn — chọn thời gian"
         size="md"
       >
         <Stack gap="sm">
           <Text size="sm" c="dimmed">
-            Chọn ít nhất 2 bàn trong cùng khu vực. Cụm gộp chỉ hiển thị trong khoảng ngày đã chọn;
-            sau ngày kết thúc hệ thống tự bỏ gộp để trả bàn lẻ.
+            Cụm gộp chỉ hiển thị trong khoảng ngày đã chọn; sau ngày kết thúc hệ thống tự bỏ gộp
+            để trả bàn lẻ.
           </Text>
+          {mergeSelectedTableNames.length > 0 ? (
+            <Text size="sm">
+              Bàn đã chọn:{" "}
+              <Text component="span" fw={600}>
+                {mergeSelectedTableNames.join(", ")}
+              </Text>
+            </Text>
+          ) : null}
           <Group grow align="flex-end">
             <DatePickerInput
               label="Từ ngày"
@@ -5394,23 +5623,9 @@ export default function FloorMapPage() {
               disabled={mergeSaving}
             />
           </Group>
-          <MultiSelect
-            label="Bàn thành viên"
-            data={mergeTableOptions}
-            value={mergeSelectedTableIds}
-            onChange={setMergeSelectedTableIds}
-            searchable
-            hidePickedOptions
-            placeholder="Chọn từ 2 bàn trở lên"
-          />
-          {mergeSelectedTableIds.length > 0 ? (
-            <Text size="xs" c="dimmed">
-              Đã chọn {mergeSelectedTableIds.length} bàn.
-            </Text>
-          ) : null}
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setMergeModalOpen(false)}>
-              Hủy
+              Quay lại
             </Button>
             <Button
               loading={mergeSaving}
@@ -5426,14 +5641,27 @@ export default function FloorMapPage() {
       <Modal
         opened={splitModalOpen}
         onClose={() => setSplitModalOpen(false)}
-        title="Tách bàn"
+        title="Tách bàn — chọn thời gian"
         size="md"
       >
         <Stack gap="sm">
           <Text size="sm" c="dimmed">
-            Tạo một bản sao bàn lẻ trên sơ đồ. Bản sao chỉ hiển thị trong khoảng ngày đã chọn và
-            có thể nhận booking độc lập với bàn gốc. Cụm bàn gộp không hỗ trợ tách bàn.
+            Bản sao chỉ hiển thị trong khoảng ngày đã chọn và có thể nhận booking độc lập với bàn
+            gốc.
           </Text>
+          {splitSelectedTableName ? (
+            <Text size="sm">
+              Bàn đã chọn:{" "}
+              <Text component="span" fw={600}>
+                {splitSelectedTableName}
+              </Text>
+            </Text>
+          ) : null}
+          {splitSelectedTableName ? (
+            <Text size="xs" c="dimmed">
+              Bản sao sẽ được đặt tên theo dạng &quot;{"{tên bàn} - n"}&quot; (n = 1, 2, 3…).
+            </Text>
+          ) : null}
           <Group grow align="flex-end">
             <DatePickerInput
               label="Từ ngày"
@@ -5458,22 +5686,9 @@ export default function FloorMapPage() {
               disabled={splitSaving}
             />
           </Group>
-          <Select
-            label="Bàn cần tách"
-            data={splitTableOptions}
-            value={splitSelectedTableId}
-            onChange={setSplitSelectedTableId}
-            searchable
-            placeholder="Chọn một bàn lẻ"
-          />
-          {splitSelectedTableId ? (
-            <Text size="xs" c="dimmed">
-              Bản sao sẽ được đặt tên theo dạng &quot;{"{tên bàn} - n"}&quot; (n = 1, 2, 3…).
-            </Text>
-          ) : null}
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setSplitModalOpen(false)}>
-              Hủy
+              Quay lại
             </Button>
             <Button
               loading={splitSaving}

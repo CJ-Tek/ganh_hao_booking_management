@@ -211,8 +211,9 @@
 }
 
 .toolbarSaveBtn {
-  flex-shrink: 0;
-  align-self: center;
+  flex: 1 1 0;
+  min-width: 0;
+  align-self: stretch;
 }
 
 .pageAreaSelectRow {
@@ -252,12 +253,16 @@
   gap: 8px;
   flex-shrink: 0;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  width: 100%;
 }
 
 .toolbarAreaPrimaryBtns {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  width: 100%;
 }
 
 .toolbarAreaActions {
@@ -269,9 +274,11 @@
 }
 
 .toolbarDayListBtn {
-  flex-shrink: 0;
-  align-self: flex-end;
+  flex: 1 1 0;
+  min-width: 0;
+  align-self: stretch;
   white-space: nowrap;
+  width: auto;
 }
 
 .canvasTopLeftDocks {
@@ -324,6 +331,39 @@
   right: 12px;
   z-index: 11;
   pointer-events: auto;
+}
+
+.canvasTopRightDocks {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: min(360px, calc(100% - 24px));
+  pointer-events: none;
+}
+
+.canvasTableActionDock {
+  pointer-events: auto;
+  width: auto;
+}
+
+.canvasTableActionHint {
+  pointer-events: auto;
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
+  padding: 8px 10px;
+}
+
+:global([data-mantine-color-scheme="dark"]) .canvasTableActionHint {
+  background: rgba(30, 36, 48, 0.92);
 }
 
 .canvasZoomDock {
@@ -398,101 +438,14 @@
   pointer-events: auto;
 }
 
-/* Toolbar stacks by canvas width (sidebar-open “tablet” desktop is often <62em wide). */
-@container floor-map-toolbar (max-width: 62em) {
+/* Toolbar stacks only when the accordion itself is very narrow (mobile). */
+@container floor-map-toolbar (max-width: 32em) {
   .canvasTopToolbar {
-    width: 100%;
-    max-width: 100%;
-    padding: 10px;
+    align-items: stretch;
     gap: 10px;
-    align-items: stretch;
   }
 
   .toolbarSaveBtn {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-
-  .toolbarAreaSecondary {
-    width: 100%;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-  }
-
-  .toolbarAreaPrimaryBtns {
-    flex: none;
-    flex-direction: column;
-    align-items: stretch;
-    width: 100%;
-    min-width: 0;
-  }
-
-  .toolbarDayListBtn {
-    flex: none;
-    width: 100%;
-    min-width: 0;
-    align-self: stretch;
-    min-height: 42px;
-  }
-
-  .toolbarAreaActions {
-    flex-shrink: 0;
-  }
-
-  .toolbarAreaActionBtn {
-    width: 42px;
-    height: 42px;
-    min-width: 42px;
-    min-height: 42px;
-  }
-}
-
-@container floor-map-toolbar (min-width: 52.01em) and (max-width: 62em) {
-  .toolbarAreaSecondary {
-    width: 100%;
-    flex-direction: row;
-  }
-
-  .toolbarAreaPrimaryBtns {
-    flex-wrap: wrap;
-  }
-
-  .toolbarSaveBtn {
-    flex: 0 1 auto;
-    min-width: 0;
-  }
-}
-
-/* Tablet canvas: pair action buttons on two rows (2×2). */
-@container floor-map-toolbar (min-width: 48.01em) and (max-width: 62em) {
-  .toolbarAreaPrimaryBtns {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-    align-items: stretch;
-    width: 100%;
-    min-width: 0;
-  }
-
-  .toolbarDayListBtn {
-    width: 100%;
-    flex: none;
-    min-height: 42px;
-    align-self: stretch;
-  }
-}
-
-@container floor-map-toolbar (max-width: 48em) {
-  .canvasTopToolbar {
-    padding: 12px;
-    gap: 10px;
-    flex-wrap: wrap;
-    align-items: stretch;
-  }
-
-  .toolbarSaveBtn {
-    flex: none;
     width: 100%;
     min-height: 44px;
   }
@@ -500,6 +453,7 @@
   .toolbarAreaSecondary {
     flex-direction: column;
     align-items: stretch;
+    flex-wrap: wrap;
     gap: 10px;
   }
 
@@ -507,12 +461,13 @@
     flex-direction: column;
     align-items: stretch;
     width: 100%;
+    flex-wrap: nowrap;
   }
 
   .toolbarDayListBtn {
     width: 100%;
     min-height: 44px;
-    font-size: 0.875rem;
+    align-self: stretch;
   }
 
   .toolbarAreaActionBtn {
@@ -521,39 +476,6 @@
     min-width: 44px;
     min-height: 44px;
   }
-}
-
-@container floor-map-toolbar (min-width: 62.01em) {
-  .toolbarSaveBtn {
-    flex: 0 1 auto;
-    min-width: 0;
-  }
-
-  .toolbarAreaSecondary {
-    width: 100%;
-    min-width: 0;
-    flex-direction: row;
-    align-items: center;
-    box-sizing: border-box;
-  }
-
-  .toolbarAreaPrimaryBtns {
-    flex: 1 1 auto;
-    flex-direction: row;
-    flex-wrap: nowrap;
-    align-items: stretch;
-    width: 100%;
-    min-width: 0;
-  }
-
-  .toolbarDayListBtn {
-    flex: 1 1 0;
-    min-width: 0;
-    width: auto;
-    align-self: stretch;
-    min-height: unset;
-  }
-
 }
 
 @media (max-width: 62em) {
@@ -608,6 +530,16 @@
   .canvasUnsavedBadgeDock {
     top: 8px;
     right: 8px;
+  }
+
+  .canvasTopRightDocks {
+    top: 8px;
+    right: 8px;
+    max-width: calc(100% - 16px);
+  }
+
+  .canvasTableActionHint {
+    padding: 8px;
   }
 
   .canvasZoomDock {
@@ -1105,6 +1037,14 @@ button.mergeGroupContainerHeaderClickable:hover .mergeGroupContainerTitle {
 
 :global([data-mantine-color-scheme="dark"]) .mergeGroupBlock {
   border-color: rgba(116, 192, 252, 0.65);
+}
+
+.tableBlockSelectionCheckbox {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 4;
+  pointer-events: auto;
 }
 
 /* ---- Edit-mode multi-select highlight for merge picking ---- */
