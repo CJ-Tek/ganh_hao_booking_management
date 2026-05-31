@@ -55,6 +55,8 @@ export type TableBlockDetailModalProps = {
   onComplete: () => void;
   onChangeTable: () => void;
   onCancelBooking: () => void;
+  /** Opens merge-group member management (view mode; non-employees only). */
+  onOpenMergeGroupManage?: () => void;
 };
 
 export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
@@ -76,6 +78,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     onComplete,
     onChangeTable,
     onCancelBooking,
+    onOpenMergeGroupManage,
   } = props;
 
   const isMerge = Boolean(mergeGroup);
@@ -150,15 +153,28 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
           </Group>
 
           {!isEmployee ? (
-            <Group gap="xs">
-              {displayStatus === "occupied" || displayStatus === "hold" ? (
-                <Button variant="filled" color="brand" size="compact-sm" onClick={onNewBooking}>
-                  Đặt bàn mới
-                </Button>
-              ) : null}
-              {displayStatus === "hold" ? (
-                <Button variant="filled" color="blue" size="compact-sm" onClick={onAssignPending}>
-                  {isMerge ? "Gán booking chờ vào cụm này" : "Gán booking chờ vào bàn này"}
+            <Group justify="space-between" align="center" wrap="wrap" gap="xs" w="100%">
+              <Group gap="xs" wrap="wrap">
+                {displayStatus === "occupied" || displayStatus === "hold" ? (
+                  <Button variant="filled" color="brand" size="compact-sm" onClick={onNewBooking}>
+                    Đặt bàn mới
+                  </Button>
+                ) : null}
+                {displayStatus === "hold" ? (
+                  <Button variant="filled" color="blue" size="compact-sm" onClick={onAssignPending}>
+                    {isMerge ? "Gán booking chờ vào cụm này" : "Gán booking chờ vào bàn này"}
+                  </Button>
+                ) : null}
+              </Group>
+              {mergeGroup && onOpenMergeGroupManage ? (
+                <Button
+                  variant="light"
+                  color="blue"
+                  size="compact-sm"
+                  onClick={onOpenMergeGroupManage}
+                  style={{ marginLeft: "auto" }}
+                >
+                  Quản lý bàn thành viên
                 </Button>
               ) : null}
             </Group>

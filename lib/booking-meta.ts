@@ -383,11 +383,21 @@ function isActiveFloorBooking(booking: Booking): boolean {
 /** True when the table has any non-terminal booking on the floor-map selected day. */
 export function tableHasActiveBookingOnFloorDay(
   tableId: string,
-  dayBookings: readonly Booking[]
+  dayBookings: readonly Booking[],
+  options?: { excludeMergeGroupId?: string | null }
 ): boolean {
-  return dayBookings.some(
-    (booking) => booking.tableId === tableId && isActiveFloorBooking(booking)
-  );
+  return dayBookings.some((booking) => {
+    if (booking.tableId !== tableId || !isActiveFloorBooking(booking)) {
+      return false;
+    }
+    if (
+      options?.excludeMergeGroupId &&
+      isMergeGroupBookingOnMemberTable(booking, tableId, options.excludeMergeGroupId)
+    ) {
+      return false;
+    }
+    return true;
+  });
 }
 
 /** Prefer in-table seated guest, else soonest confirmed, else any active booking on the table. */
@@ -464,6 +474,61 @@ export function mergeGroupPrimaryGuestHasArrived(
     primary != null &&
     (primary.status === "checked_in" || primary.status === "seated")
   );
+}
+
+/** Cluster booking stored on a member's table_id (RPC fallback) — not an individual table hold. */
+export function isMergeGroupBookingOnMemberTable(
+  booking: Pick<Booking, "tableId" | "mergeGroupId">,
+  tableId: string,
+  mergeGroupId: string
+): boolean {
+  return booking.tableId === tableId && booking.mergeGroupId === mergeGroupId;
+}
+
+/**
+ * Floor-map preview for a merge member: show that table's own bookings first (walk-in / non-overlapping).
+ * Cluster reservations stored on a member table_id do not change the block. When the cluster guest
+ * has arrived and the member has no separate booking, mirror the cluster status.
+ */
+export function deriveMergeMemberTableStatusFromDayBookings(
+  table: Pick<DiningTable, "id" | "status">,
+  mergeGroupId: string,
+  dayBookings: readonly Booking[]
+): DiningTable["status"] {
+  if (table.status === "locked") {
+    return "locked";
+  }
+  const bookingsExcludingMergeFallback = dayBookings.filter(
+    (booking) => !isMergeGroupBookingOnMemberTable(booking, table.id, mergeGroupId)
+  );
+  const memberOwnStatus = deriveTableStatusFromDayBookings(
+    table,
+    bookingsExcludingMergeFallback
+  );
+  if (memberOwnStatus !== "available") {
+    return memberOwnStatus;
+  }
+  if (mergeGroupPrimaryGuestHasArrived(mergeGroupId, dayBookings)) {
+    return deriveMergeGroupStatusFromDayBookings(mergeGroupId, dayBookings);
+  }
+  return "available";
+}
+
+/** Like pickPrimaryBookingOnTable but skips merge-cluster rows stored on a member table_id. */
+export function pickPrimaryBookingOnTableForFloorDisplay(
+  tableId: string,
+  bookings: readonly Booking[],
+  options?: { excludeMergeGroupId?: string | null }
+): Booking | null {
+  const primary = pickPrimaryBookingOnTable(tableId, bookings);
+  if (
+    !primary ||
+    !options?.excludeMergeGroupId ||
+    !isMergeGroupBookingOnMemberTable(primary, tableId, options.excludeMergeGroupId)
+  ) {
+    return primary;
+  }
+  return null;
 }
 
 /** Floor-map calendar preview: derive merge-bar color from bookings on the selected day. */
@@ -734,7 +799,7 @@ export function getAssignableCandidateTables(
 
 /**
  * True when the candidate booking overlaps another active reservation on the merge group
- * itself OR on any of its member tables (members are physically blocked while the group is held).
+ * or on a member table (member tables only block overlapping slots, not the whole day).
  */
 export function hasAssignableSlotConflictAtMergeGroup(
   candidate: Booking,

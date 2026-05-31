@@ -914,10 +914,25 @@
 
 .mergeGroupContainerHeaderTitleRow {
   display: flex;
+  flex: 1 1 auto;
   min-width: 0;
   align-items: center;
   gap: 6px;
   flex-shrink: 1;
+}
+
+.mergeGroupContainerHeaderTrailing {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  pointer-events: auto;
+}
+
+.mergeGroupContainerHeaderActions {
+  flex-shrink: 0;
+  pointer-events: auto;
 }
 
 .mergeGroupContainerHeaderClickable:hover {
@@ -1047,16 +1062,17 @@ button.mergeGroupContainerHeaderClickable:hover .mergeGroupContainerTitle {
   flex-shrink: 0;
 }
 
-.mergeGroupContainerHeaderPrimary > .mergeGroupContainerCapacity {
-  margin-left: auto;
-}
-
 :global([data-mantine-color-scheme="dark"]) .mergeGroupContainerCapacity {
   color: #cbd5e1;
 }
 
 .mergeGroupReleaseBtn {
   color: #c92a2a !important;
+}
+
+.mergeGroupDetailBtn {
+  flex-shrink: 0;
+  color: #0c61a4 !important;
 }
 
 .mergeGroupContainerBody {
