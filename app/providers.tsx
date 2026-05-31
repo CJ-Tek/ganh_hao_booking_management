@@ -13,6 +13,7 @@ import {
   MultiSelect,
   Popover,
   Select,
+  Tooltip,
   createTheme,
   MantineColorsTuple,
   MantineProvider,
@@ -77,6 +78,9 @@ const theme = createTheme({
       defaultProps: portaledOverlayProps,
     }),
     Popover: Popover.extend({
+      defaultProps: portaledOverlayProps,
+    }),
+    Tooltip: Tooltip.extend({
       defaultProps: portaledOverlayProps,
     }),
     DatePickerInput: DatePickerInput.extend({

@@ -35,11 +35,13 @@ export const bookingStatusColor: Record<BookingStatus, string> = {
 };
 
 /** Active pipeline statuses (today tab; list “Tất cả” excludes completed). */
+/** Default status chip on booking list / calendar / day-list filters. */
+export const defaultBookingStatusFilter: BookingStatus = "pending";
+
 export const bookingPipelineStatusFilterStatuses = [
   "pending",
   "confirmed",
   "seated",
-  "checked_in",
   "no_show",
   "cancelled",
 ] as const satisfies readonly BookingStatus[];

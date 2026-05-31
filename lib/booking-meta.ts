@@ -548,6 +548,43 @@ export function deriveMergeGroupStatusFromDayBookings(
   return hasSeated ? "occupied" : "hold";
 }
 
+/** Member tables with their own seated guests (excludes cluster booking rows on member table_id). */
+export function listOccupiedMergeMemberTableNames(
+  group: Pick<TableMergeGroup, "id" | "tableIds">,
+  tables: readonly Pick<DiningTable, "id" | "name" | "status">[],
+  dayBookings: readonly Booking[]
+): string[] {
+  const tableById = new Map(tables.map((table) => [table.id, table]));
+  const names: string[] = [];
+  for (const tableId of group.tableIds) {
+    const table = tableById.get(tableId);
+    if (!table) {
+      continue;
+    }
+    const bookingsExcludingMergeFallback = dayBookings.filter(
+      (booking) => !isMergeGroupBookingOnMemberTable(booking, tableId, group.id)
+    );
+    if (
+      deriveTableStatusFromDayBookings(table, bookingsExcludingMergeFallback) === "occupied"
+    ) {
+      names.push(table.name);
+    }
+  }
+  return names;
+}
+
+/** True when a merge member still has its own seated/checked-in guests. */
+export function mergeGroupHasOccupiedMemberTable(
+  group: Pick<TableMergeGroup, "id" | "tableIds">,
+  tables: readonly Pick<DiningTable, "id" | "name" | "status">[],
+  dayBookings: readonly Booking[]
+): boolean {
+  return listOccupiedMergeMemberTableNames(group, tables, dayBookings).length > 0;
+}
+
+export const MERGE_GROUP_CHECK_IN_BLOCKED_BY_MEMBER_OCCUPIED =
+  "Không thể check-in cụm gộp khi còn bàn thành viên đang có khách.";
+
 /**
  * Higher rank = further along the booking lifecycle (used when merging day cache + global state).
  * Prevents stale global rows from undoing optimistic check-in / complete on the floor map.

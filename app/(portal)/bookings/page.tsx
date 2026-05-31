@@ -52,6 +52,7 @@ import {
 import {
   bookingListStatusFilterStatuses,
   bookingPipelineStatusFilterStatuses,
+  defaultBookingStatusFilter,
   bookingStatusColor,
   bookingStatusLabel,
 } from "@/lib/display";
@@ -159,7 +160,9 @@ function BookingsPageContent() {
   const [todayMobileFiltersOpen, setTodayMobileFiltersOpen] = useState(false);
   const [listFocusBookingId, setListFocusBookingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [listStatusFilter, setListStatusFilter] = useState<BookingStatus | null>(null);
+  const [listStatusFilter, setListStatusFilter] = useState<BookingStatus | null>(
+    defaultBookingStatusFilter
+  );
   const [listTableAssignFilter, setListTableAssignFilter] = useState<
     "all" | "assigned" | "unassigned"
   >("all");
@@ -184,7 +187,9 @@ function BookingsPageContent() {
   const [mobileBookingsPageSize, setMobileBookingsPageSize] = useState<number>(8);
 
   const [todaySearchQuery, setTodaySearchQuery] = useState("");
-  const [todayStatusFilter, setTodayStatusFilter] = useState<BookingStatus | null>(null);
+  const [todayStatusFilter, setTodayStatusFilter] = useState<BookingStatus | null>(
+    defaultBookingStatusFilter
+  );
   const [todayGuestTypeFilter, setTodayGuestTypeFilter] = useState<string | null>(null);
 
   const [todaySortStatus, setTodaySortStatus] = useState<DataTableSortStatus<Booking>>({
@@ -929,7 +934,7 @@ function BookingsPageContent() {
           return booking.lastEditedAt ? dayjs(booking.lastEditedAt).valueOf() : 0;
         }
         if (acc === "status") {
-          return bookingStatusLabel[booking.status];
+          return getReceptionBookingStatus(booking, receptionThresholds).label;
         }
         if (acc === "checkedInAt") {
           return booking.checkedInAt ? dayjs(booking.checkedInAt).valueOf() : 0;
@@ -946,7 +951,7 @@ function BookingsPageContent() {
         return sortStatus.direction === "asc" ? compare : -compare;
       });
     },
-    [bookingAreaTableLookup, state.customers, state.users]
+    [bookingAreaTableLookup, receptionThresholds, state.customers, state.users]
   );
 
   const sortedBookings = useMemo(
@@ -1515,11 +1520,14 @@ function BookingsPageContent() {
             accessor: "status",
             title: "Trạng thái",
             sortable: true,
-            render: (booking) => (
-              <Badge color={bookingStatusColor[booking.status]} variant="light">
-                {bookingStatusLabel[booking.status]}
-              </Badge>
-            ),
+            render: (booking) => {
+              const receptionStatus = getReceptionBookingStatus(booking, receptionThresholds);
+              return (
+                <Badge color={receptionStatus.color} variant="light">
+                  {receptionStatus.label}
+                </Badge>
+              );
+            },
           },
         ]}
       />

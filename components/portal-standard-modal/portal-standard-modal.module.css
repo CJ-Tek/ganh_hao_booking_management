@@ -23,6 +23,13 @@
   padding: 0;
 }
 
+.modalTopNotice {
+  flex-shrink: 0;
+  padding: 10px var(--mantine-spacing-md);
+  background: var(--mantine-color-body);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
 .modalBodyScroll {
   flex: 1;
   min-height: 0;

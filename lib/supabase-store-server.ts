@@ -163,6 +163,8 @@ async function maybeRunBookingMaintenance(force = false): Promise<void> {
     .then(([result]) => {
       if (result.ok) {
         lastBookingMaintenanceAt = Date.now();
+      } else {
+        console.warn("[booking-maintenance] failed:", result.message);
       }
     })
     .finally(() => {
@@ -2313,6 +2315,33 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
   const mergeGroupId = (target.merge_group_id as string | null) ?? null;
   if (!tableId && !mergeGroupId) {
     throw new Error("Booking chưa được gán bàn. Vui lòng gán trong mục Sơ đồ trước.");
+  }
+
+  if (mergeGroupId) {
+    const memberTableIds = await listMergeGroupMemberTableIds(client, mergeGroupId);
+    if (memberTableIds.length > 0) {
+      const { data: memberBookings, error: memberBookingsErr } = await client
+        .from("bookings")
+        .select("id, table_id, merge_group_id")
+        .in("table_id", memberTableIds)
+        .in("status", ["seated", "checked_in"]);
+      if (memberBookingsErr) {
+        throw new Error(memberBookingsErr.message);
+      }
+      const blocking = (memberBookings ?? []).some((row) => {
+        const rowMergeGroupId = (row.merge_group_id as string | null) ?? null;
+        const rowTableId = (row.table_id as string | null) ?? null;
+        return !(
+          rowTableId &&
+          rowMergeGroupId === mergeGroupId
+        );
+      });
+      if (blocking) {
+        throw new Error(
+          "Không thể check-in cụm gộp khi còn bàn thành viên đang có khách."
+        );
+      }
+    }
   }
 
   const { error: bookingErr } = await (client as any)

@@ -173,6 +173,8 @@ import {
   pickNonOverlappingBookingsForTable,
   deriveMergeGroupStatusFromDayBookings,
   deriveMergeMemberTableStatusFromDayBookings,
+  listOccupiedMergeMemberTableNames,
+  MERGE_GROUP_CHECK_IN_BLOCKED_BY_MEMBER_OCCUPIED,
   pickPrimaryBookingOnTableForFloorDisplay,
   deriveTableStatusFromDayBookings,
   hasAssignableSlotConflictAtMergeGroup,
@@ -1425,6 +1427,16 @@ export default function FloorMapPage() {
     if (booking.status !== "confirmed") {
       return;
     }
+    if (
+      detailMergeGroup &&
+      detailMergeMemberOccupiedTableNames.length > 0
+    ) {
+      notifications.show({
+        color: "yellow",
+        message: MERGE_GROUP_CHECK_IN_BLOCKED_BY_MEMBER_OCCUPIED,
+      });
+      return;
+    }
     if (!hasSupabase) {
       notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
       return;
@@ -1922,6 +1934,17 @@ export default function FloorMapPage() {
       return { ...table, status };
     });
   }, [effectiveMergeGroups, floorMapDayBookings, layoutTablesInArea]);
+
+  const detailMergeMemberOccupiedTableNames = useMemo(() => {
+    if (!detailMergeGroup) {
+      return [] as string[];
+    }
+    return listOccupiedMergeMemberTableNames(
+      detailMergeGroup,
+      floorMapDisplayTables,
+      floorMapDayBookings
+    );
+  }, [detailMergeGroup, floorMapDayBookings, floorMapDisplayTables]);
 
   const tablesForFloorView = isEditMode ? layoutTablesInArea : floorMapDisplayTables;
 
@@ -5124,6 +5147,7 @@ export default function FloorMapPage() {
         table={detailTable}
         mergeGroup={detailMergeGroup}
         mergeStatus={detailMergeGroupStatus}
+        mergeMemberOccupiedTableNames={detailMergeMemberOccupiedTableNames}
         blockState={detailTableBlockState}
         blockLoading={detailTableBlockLoading}
         activeBooking={activeBookingForDetail}

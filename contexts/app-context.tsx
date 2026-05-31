@@ -21,6 +21,8 @@ import {
 } from "@/lib/branch-pick";
 import { type BookingDuplicateInfo, DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import {
+  MERGE_GROUP_CHECK_IN_BLOCKED_BY_MEMBER_OCCUPIED,
+  mergeGroupHasOccupiedMemberTable,
   tableStatusForCreateBooking,
   type BookingArrivalIntent,
 } from "@/lib/booking-meta";
@@ -1576,6 +1578,15 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }
     if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
       throw new Error("Bạn không có quyền chỉnh booking của chi nhánh này.");
+    }
+    if (booking.mergeGroupId) {
+      const mergeGroup = state.mergeGroups.find((group) => group.id === booking.mergeGroupId);
+      if (
+        mergeGroup &&
+        mergeGroupHasOccupiedMemberTable(mergeGroup, state.tables, state.bookings)
+      ) {
+        throw new Error(MERGE_GROUP_CHECK_IN_BLOCKED_BY_MEMBER_OCCUPIED);
+      }
     }
 
     const revertPatch: Partial<Booking> = {

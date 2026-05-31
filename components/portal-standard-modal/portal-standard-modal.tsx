@@ -6,10 +6,13 @@ import classes from "./portal-standard-modal.module.css";
 
 export type PortalStandardModalProps = ModalProps & {
   footer?: ReactNode;
+  /** Full-width notice below the modal header (does not scroll with body). */
+  topNotice?: ReactNode;
 };
 
 export function PortalStandardModal({
   footer,
+  topNotice,
   children,
   classNames,
   ...rest
@@ -24,6 +27,7 @@ export function PortalStandardModal({
         ...classNames,
       }}
     >
+      {topNotice ? <div className={classes.modalTopNotice}>{topNotice}</div> : null}
       <div className={classes.modalBodyScroll}>{children}</div>
       {footer ? <div className={classes.modalFooter}>{footer}</div> : null}
     </Modal>

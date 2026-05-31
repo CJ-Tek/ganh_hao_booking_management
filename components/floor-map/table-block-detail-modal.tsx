@@ -2,6 +2,7 @@
 
 import dayjs from "dayjs";
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -10,14 +11,18 @@ import {
   Loader,
   Stack,
   Text,
-  Tooltip,
 } from "@mantine/core";
 import { useEffect, useMemo } from "react";
 import { TableBlockConfirmedScheduleTable } from "@/components/floor-map/table-block-confirmed-schedule-table";
 import { canChangeBookingTable } from "@/components/booking-management/shared";
 import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
-import { bookingStatusColor, bookingStatusLabel, tableStatusLabel } from "@/lib/display";
-import { inferGuestTypeLabel, stripUnknownGuestTag } from "@/lib/booking-meta";
+import { useAppContext } from "@/contexts/app-context";
+import { tableStatusLabel } from "@/lib/display";
+import {
+  getReceptionBookingStatus,
+  inferGuestTypeLabel,
+  stripUnknownGuestTag,
+} from "@/lib/booking-meta";
 import { formatMergeGroupDateRange } from "@/lib/merge-group-utils";
 import {
   type Booking,
@@ -43,6 +48,8 @@ export type TableBlockDetailModalProps = {
   table: DiningTable | null;
   mergeGroup?: TableMergeGroup | null;
   mergeStatus?: TableStatus;
+  /** Merge-group check-in blocked while member tables have their own seated guests. */
+  mergeMemberOccupiedTableNames?: string[];
   blockState: TableBlockState | null;
   blockLoading: boolean;
   activeBooking: Booking | null;
@@ -66,6 +73,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     table,
     mergeGroup = null,
     mergeStatus = "available",
+    mergeMemberOccupiedTableNames = [],
     blockState,
     blockLoading,
     activeBooking,
@@ -81,9 +89,22 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     onOpenMergeGroupManage,
   } = props;
 
+  const { state } = useAppContext();
+  const receptionThresholds = useMemo(
+    () => ({
+      groupPartyGuestThreshold: state.bookingRuntimeSettings.groupPartyGuestThreshold,
+      repeatCustomerMinCompleted: state.bookingRuntimeSettings.repeatCustomerMinCompleted,
+      receptionArrivalGraceMinutes: state.bookingRuntimeSettings.receptionArrivalGraceMinutes,
+      noShowGraceMinutes: state.bookingRuntimeSettings.noShowGraceMinutes,
+    }),
+    [state.bookingRuntimeSettings]
+  );
+
   const isMerge = Boolean(mergeGroup);
   const displayStatus = isMerge ? mergeStatus : (table?.status ?? "available");
   const isOccupied = displayStatus === "occupied";
+  const mergeMemberOccupiedBlocksCheckIn =
+    isMerge && mergeMemberOccupiedTableNames.length > 0;
 
   useEffect(() => {
     if (!opened) {
@@ -120,6 +141,14 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     [activeBooking, blockState?.confirmedSchedule]
   );
 
+  const mergeMemberOccupiedNotice =
+    mergeMemberOccupiedBlocksCheckIn ? (
+      <Alert color="yellow" variant="light" title="Chưa thể check-in">
+        Không thể check-in cụm gộp khi còn bàn thành viên đang có khách: Bàn{" "}
+        {mergeMemberOccupiedTableNames.join(", Bàn ")}.
+      </Alert>
+    ) : null;
+
   return (
     <PortalStandardModal
       opened={opened}
@@ -127,6 +156,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
       title={modalTitle}
       size="xl"
       centered
+      topNotice={mergeMemberOccupiedNotice}
       overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
     >
       {targetReady ? (
@@ -182,7 +212,10 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
 
           {activeBooking ? (
             (() => {
-              const statusColor = bookingStatusColor[activeBooking.status];
+              const receptionStatus = getReceptionBookingStatus(
+                activeBooking,
+                receptionThresholds
+              );
               const visitStart = dayjs(
                 activeBooking.startTime ?? activeBooking.bookingAt
               );
@@ -199,8 +232,8 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                   style={{
                     borderLeftWidth: 4,
                     borderLeftStyle: "solid",
-                    borderLeftColor: `var(--mantine-color-${statusColor}-6)`,
-                    backgroundColor: `var(--mantine-color-${statusColor}-0)`,
+                    borderLeftColor: `var(--mantine-color-${receptionStatus.color}-6)`,
+                    backgroundColor: `var(--mantine-color-${receptionStatus.color}-0)`,
                   }}
                 >
                   <Stack gap="sm">
@@ -214,12 +247,12 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                         </Text>
                       </Stack>
                       <Badge
-                        color={statusColor}
+                        color={receptionStatus.color}
                         variant="filled"
                         size="md"
                         style={{ flexShrink: 0 }}
                       >
-                        {bookingStatusLabel[activeBooking.status]}
+                        {receptionStatus.label}
                       </Badge>
                     </Group>
 
@@ -302,30 +335,21 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                               Đổi bàn
                             </Button>
                           ) : null}
-                          {!isOccupied
-                            ? (() => {
-                                const checkInDisabled = activeBooking.status !== "confirmed";
-                                const checkInBtn = (
-                                  <Button
-                                    size="sm"
-                                    variant="filled"
-                                    color="green"
-                                    disabled={checkInDisabled}
-                                    loading={bookingActionLoading}
-                                    onClick={onCheckIn}
-                                  >
-                                    Check-in
-                                  </Button>
-                                );
-                                return checkInDisabled ? (
-                                  <Tooltip label="Chỉ check-in khi booking đã xác nhận." withArrow>
-                                    <span style={{ display: "inline-flex" }}>{checkInBtn}</span>
-                                  </Tooltip>
-                                ) : (
-                                  checkInBtn
-                                );
-                              })()
-                            : null}
+                          {!isOccupied ? (
+                            <Button
+                              size="sm"
+                              variant="filled"
+                              color="green"
+                              disabled={
+                                activeBooking.status !== "confirmed" ||
+                                mergeMemberOccupiedBlocksCheckIn
+                              }
+                              loading={bookingActionLoading}
+                              onClick={onCheckIn}
+                            >
+                              Check-in
+                            </Button>
+                          ) : null}
                           <Button
                             size="sm"
                             variant="filled"

@@ -7,7 +7,8 @@ import { type DataTableSortStatus } from "mantine-datatable";
 import { useCallback, useMemo, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { useAppContext } from "@/contexts/app-context";
-import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
+import { getReceptionBookingStatus } from "@/lib/booking-meta";
+import { bookingStatusLabel } from "@/lib/display";
 import { type Booking, type BookingStatus } from "@/lib/types";
 
 function formatScheduleVisitDate(iso: string): string {
@@ -21,7 +22,7 @@ function formatScheduleVisitDate(iso: string): string {
   return date.format("DD/MM/YYYY");
 }
 
-const scheduleStatusFilterData = (["confirmed", "seated", "checked_in"] as const).map((status) => ({
+const scheduleStatusFilterData = (["confirmed", "seated"] as const).map((status) => ({
   value: status,
   label: bookingStatusLabel[status],
 }));
@@ -29,6 +30,15 @@ const scheduleStatusFilterData = (["confirmed", "seated", "checked_in"] as const
 export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) {
   const { records } = props;
   const { state } = useAppContext();
+  const receptionThresholds = useMemo(
+    () => ({
+      groupPartyGuestThreshold: state.bookingRuntimeSettings.groupPartyGuestThreshold,
+      repeatCustomerMinCompleted: state.bookingRuntimeSettings.repeatCustomerMinCompleted,
+      receptionArrivalGraceMinutes: state.bookingRuntimeSettings.receptionArrivalGraceMinutes,
+      noShowGraceMinutes: state.bookingRuntimeSettings.noShowGraceMinutes,
+    }),
+    [state.bookingRuntimeSettings]
+  );
   const bookingAreaTableLookup = useMemo(
     () => ({
       areas: state.areas,
@@ -54,12 +64,12 @@ export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) 
         dayjs(booking.endTime).format("HH:mm"),
         customer?.fullName,
         booking.guestCount,
-        bookingStatusLabel[booking.status],
+        getReceptionBookingStatus(booking, receptionThresholds).label,
       ]
         .filter(Boolean)
         .join(" ");
     },
-    [state.customers]
+    [receptionThresholds, state.customers]
   );
 
   const sortRecords = useCallback(
@@ -78,7 +88,7 @@ export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) 
           return booking.guestCount;
         }
         if (sortStatus.columnAccessor === "status") {
-          return bookingStatusLabel[booking.status];
+          return getReceptionBookingStatus(booking, receptionThresholds).label;
         }
         return dayjs(booking.startTime ?? booking.bookingAt).valueOf();
       };
@@ -92,7 +102,7 @@ export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) 
         return sortStatus.direction === "asc" ? compare : -compare;
       });
     },
-    [state.customers]
+    [receptionThresholds, state.customers]
   );
 
   return (
@@ -173,11 +183,14 @@ export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) 
           accessor: "status",
           title: "Trạng thái",
           sortable: true,
-          render: (booking) => (
-            <Badge color={bookingStatusColor[booking.status]} variant="light" size="sm">
-              {bookingStatusLabel[booking.status]}
-            </Badge>
-          ),
+          render: (booking) => {
+            const receptionStatus = getReceptionBookingStatus(booking, receptionThresholds);
+            return (
+              <Badge color={receptionStatus.color} variant="light" size="sm">
+                {receptionStatus.label}
+              </Badge>
+            );
+          },
         },
       ]}
     />

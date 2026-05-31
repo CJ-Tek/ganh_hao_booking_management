@@ -22,12 +22,12 @@ export function BookingStatusFilterChips(props: BookingStatusFilterChipsProps) {
   const size = sizeProp ?? (isCompact ? "xs" : "compact-sm");
 
   const chips: { value: BookingStatus | null; label: string; color: string }[] = [
-    { value: null, label: "Tất cả", color: "gray" },
     ...statuses.map((status) => ({
       value: status,
       label: bookingStatusLabel[status],
       color: bookingStatusColor[status],
     })),
+    { value: null, label: "Tất cả", color: "gray" },
   ];
 
   return (

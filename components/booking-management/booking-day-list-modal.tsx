@@ -11,7 +11,7 @@ import { BookingDayBookingsTable } from "@/components/booking-management/booking
 import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingAreaTableSortKey } from "@/lib/booking-meta";
-import { bookingStatusLabel } from "@/lib/display";
+import { bookingStatusLabel, defaultBookingStatusFilter } from "@/lib/display";
 import { type Booking, type BookingStatus } from "@/lib/types";
 
 type DayTableStatusFilter = BookingStatus | null;
@@ -37,7 +37,8 @@ export const BookingDayListModal = forwardRef<
   const router = useRouter();
   const { state, filteredBranchIds } = useAppContext();
   const [opened, setOpened] = useState(false);
-  const [dayTableStatusFilter, setDayTableStatusFilter] = useState<DayTableStatusFilter>(null);
+  const [dayTableStatusFilter, setDayTableStatusFilter] =
+    useState<DayTableStatusFilter>(defaultBookingStatusFilter);
   const [focusBookingId, setFocusBookingId] = useState<string | null>(null);
 
   const filteredBookings = useMemo(
@@ -122,7 +123,7 @@ export const BookingDayListModal = forwardRef<
 
   const openDayListModal = useCallback(() => {
     setFocusBookingId(null);
-    setDayTableStatusFilter(null);
+    setDayTableStatusFilter(defaultBookingStatusFilter);
     setOpened(true);
   }, []);
 
@@ -141,7 +142,7 @@ export const BookingDayListModal = forwardRef<
     (booking: Booking) => {
       const date = dayjs(booking.bookingAt);
       onSelectedDateChange?.(date);
-      setDayTableStatusFilter(null);
+      setDayTableStatusFilter(booking.status);
       setFocusBookingId(booking.id);
       setOpened(true);
     },

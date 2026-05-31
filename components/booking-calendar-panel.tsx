@@ -117,7 +117,7 @@ export const BookingCalendarPanel = forwardRef<
 
   const dayListModalRef = useRef<BookingDayListModalHandle | null>(null);
 
-  const [statusFilter, setStatusFilter] = useState<CalendarStatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<CalendarStatusFilter>("pending");
   const [createBookingModalOpened, setCreateBookingModalOpened] = useState(false);
 
   const today = dayjs();
