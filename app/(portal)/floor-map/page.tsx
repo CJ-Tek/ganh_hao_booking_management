@@ -120,6 +120,7 @@ import {
   gridCellCenterPx,
   nearestGridCellFromWorldPx,
 } from "@/lib/floor-map-rgl";
+import { computeMergeGroupBboxes } from "@/lib/floor-map-merge-bbox";
 import type { EventCallback, Layout, LayoutItem } from "react-grid-layout";
 import {
   findMergeStripAnchorForMemberCells,
@@ -213,9 +214,6 @@ import {
 } from "@/lib/types";
 import classes from "./page.module.css";
 
-/** Reserved band above member table tops — must match mergeBBoxes yMin math. */
-const MERGE_GROUP_HEADER_BASE_HEIGHT_PX = 28;
-const MERGE_GROUP_HEADER_BOOKED_HEIGHT_PX = 54;
 const MERGE_GROUP_HEADER_TABLE_GAP_PX = 6;
 /** Matches `.mergeGroupContainer` dashed border width — header sits inside the frame. */
 const MERGE_GROUP_FRAME_BORDER_PX = 2;
@@ -2276,26 +2274,19 @@ export default function FloorMapPage() {
       return [];
     }
     const halfW = FLOOR_TABLE_BLOCK_WIDTH_PX / 2;
-    const marginX = 10;
-    const marginY = MERGE_GROUP_HEADER_TABLE_GAP_PX;
     const tableById = new Map(placedTables.map((table) => [table.id, table]));
-    const rects: Array<{
-      groupId: string;
-      mergedName: string;
-      memberCount: number;
-      tableIds: string[];
-      x: number;
-      y: number;
-      width: number;
-      height: number;
-      headerHeight: number;
-    }> = [];
+    const bboxTableById = new Map<
+      string,
+      {
+        id: string;
+        centerX: number;
+        centerY: number;
+        halfWidth: number;
+        halfHeight: number;
+      }
+    >();
+
     for (const group of effectiveMergeGroups) {
-      let memberCount = 0;
-      let tableXMin = Number.POSITIVE_INFINITY;
-      let tableXMax = Number.NEGATIVE_INFINITY;
-      let minTableTop = Number.POSITIVE_INFINITY;
-      let maxTableBottom = Number.NEGATIVE_INFINITY;
       const mergeGroupBooking = !isEditMode
         ? (primaryBookingByMergeGroupId.get(group.id) ?? null)
         : null;
@@ -2308,7 +2299,6 @@ export default function FloorMapPage() {
         if (!table) {
           continue;
         }
-        memberCount += 1;
         const center = gridCellCenterPx(pos.col, pos.row, rglGridConfig);
         const tableBooking = isEditMode
           ? null
@@ -2331,35 +2321,23 @@ export default function FloorMapPage() {
                 isSplitCloneEffectiveOnDate(table, floorMapSelectedDate),
             });
         const halfH = tableHeight / 2;
-        tableXMin = Math.min(tableXMin, center.x - halfW);
-        tableXMax = Math.max(tableXMax, center.x + halfW);
-        minTableTop = Math.min(minTableTop, center.y - halfH);
-        maxTableBottom = Math.max(maxTableBottom, center.y + halfH);
+        bboxTableById.set(tableId, {
+          id: tableId,
+          centerX: center.x,
+          centerY: center.y,
+          halfWidth: halfW,
+          halfHeight: halfH,
+        });
       }
-      if (memberCount === 0) {
-        continue;
-      }
-      const xMin = tableXMin - marginX;
-      const xMax = tableXMax + marginX;
-      const headerHeight =
-        isEditMode || !mergeGroupHasBookingOnDay(group.id, floorMapDayBookings)
-          ? MERGE_GROUP_HEADER_BASE_HEIGHT_PX
-          : MERGE_GROUP_HEADER_BOOKED_HEIGHT_PX;
-      const yMin = minTableTop - headerHeight - marginY;
-      const yMax = maxTableBottom + marginY;
-      rects.push({
-        groupId: group.id,
-        mergedName: group.mergedName,
-        memberCount,
-        tableIds: group.tableIds,
-        x: xMin,
-        y: yMin,
-        width: Math.max(0, xMax - xMin),
-        height: Math.max(headerHeight, yMax - yMin),
-        headerHeight,
-      });
     }
-    return rects;
+
+    return computeMergeGroupBboxes({
+      groups: effectiveMergeGroups,
+      tableById: bboxTableById,
+      compactHeader: false,
+      groupHasBookingOnDay: (groupId) =>
+        mergeGroupHasBookingOnDay(groupId, floorMapDayBookings),
+    });
   }, [
     effectiveTablePositions,
     effectiveMergeGroups,

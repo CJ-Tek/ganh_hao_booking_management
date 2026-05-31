@@ -19,12 +19,14 @@
     "@supabase/supabase-js": "^2.103.0",
     "ai": "^5.0.0",
     "dayjs": "^1.11.20",
+    "konva": "^10.3.0",
     "lucide-react": "^1.8.0",
     "mantine-datatable": "^8.3.13",
     "next": "16.2.3",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-grid-layout": "^2.2.3",
+    "react-konva": "^19.2.4",
     "zod": "^4.0.0"
   },
   "devDependencies": {

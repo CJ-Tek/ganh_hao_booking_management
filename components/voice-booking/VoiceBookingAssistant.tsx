@@ -15,6 +15,7 @@ import {
 import { BookingDateTimeFields } from "@/components/booking-datetime-fields";
 import { notifications } from "@mantine/notifications";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BookingTablePicker } from "@/components/booking-table-picker/booking-table-picker";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { BOOKING_GUEST_TYPE_OPTIONS, type BookingArrivalIntent } from "@/lib/booking-meta";
@@ -24,6 +25,7 @@ import { matchAreaId, matchTableId, type AreaLite, type TableLite } from "@/lib/
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
 import { warmUpMicrophoneForSpeech } from "@/lib/voice-booking/mic-warmup";
 import { tableStatusLabel } from "@/lib/display";
+import type { Area, Booking, DiningTable, TableMergeGroup } from "@/lib/types";
 
 type ActionResult = {
   ok: boolean;
@@ -154,6 +156,11 @@ export function VoiceBookingAssistant(props: {
   branch: { id: string; name: string } | null;
   areas: AreaLite[];
   tables: TableLite[];
+  /** Full floor data for Konva table picker (create booking). */
+  tablePickerAreas?: Area[];
+  tablePickerTables?: DiningTable[];
+  tablePickerMergeGroups?: TableMergeGroup[];
+  tablePickerBookings?: readonly Booking[];
   onCreateBooking: (input: {
     customerName: string;
     customerPhone?: string;
@@ -188,7 +195,19 @@ export function VoiceBookingAssistant(props: {
     lockAreaId = null,
     hideAreaTablePickers = false,
     initialBookingAt,
+    tablePickerAreas,
+    tablePickerTables,
+    tablePickerMergeGroups = [],
+    tablePickerBookings = [],
   } = props;
+
+  const useTablePicker =
+    !hideAreaTablePickers &&
+    Boolean(
+      branch?.id &&
+        tablePickerAreas &&
+        tablePickerTables
+    );
 
   const [opened, setOpened] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -720,7 +739,36 @@ export function VoiceBookingAssistant(props: {
             />
           ) : null}
 
-          {hideAreaTablePickers ? null : (
+          {hideAreaTablePickers ? null : useTablePicker && branch ? (
+            <BookingTablePicker
+              mode="create"
+              branchId={branch.id}
+              areas={tablePickerAreas!}
+              tables={tablePickerTables!}
+              mergeGroups={tablePickerMergeGroups}
+              bookings={tablePickerBookings}
+              layoutDate={
+                bookingAt
+                  ? dayjs(bookingAt).format("YYYY-MM-DD")
+                  : dayjs().format("YYYY-MM-DD")
+              }
+              areaId={lockAreaId ?? areaId}
+              tableId={lockTableId ?? tableId}
+              mergeGroupId={mergeGroupId}
+              disabled={formDisabled || Boolean(lockAreaId && lockTableId)}
+              onChange={(patch) => {
+                if (patch.areaId !== undefined && !lockAreaId) {
+                  setAreaId(patch.areaId);
+                }
+                if (patch.tableId !== undefined && !lockTableId) {
+                  setTableId(patch.tableId);
+                }
+                if (patch.mergeGroupId !== undefined) {
+                  setMergeGroupId(patch.mergeGroupId);
+                }
+              }}
+            />
+          ) : !hideAreaTablePickers ? (
             <Stack gap="sm">
               <Group grow align="flex-start">
                 <Select
@@ -768,16 +816,17 @@ export function VoiceBookingAssistant(props: {
                   disabled={formDisabled}
                 />
               ) : null}
+              {areaAvailability ? (
+                <Text size="sm" c="dimmed">
+                  Tình trạng khu: {areaAvailability.total} bàn · Trống{" "}
+                  {areaAvailability.byStatus.available ?? 0} · Giữ chỗ{" "}
+                  {areaAvailability.byStatus.hold ?? 0} · Đang ngồi{" "}
+                  {areaAvailability.byStatus.occupied ?? 0} · Khóa{" "}
+                  {areaAvailability.byStatus.locked ?? 0}
+                </Text>
+              ) : null}
             </Stack>
-          )}
-
-          {hideAreaTablePickers || !areaAvailability ? null : (
-            <Text size="sm" c="dimmed">
-              Tình trạng khu: {areaAvailability.total} bàn · Trống {areaAvailability.byStatus.available ?? 0} · Giữ chỗ{" "}
-              {areaAvailability.byStatus.hold ?? 0} · Đang ngồi {areaAvailability.byStatus.occupied ?? 0} · Khóa{" "}
-              {areaAvailability.byStatus.locked ?? 0}
-            </Text>
-          )}
+          ) : null}
 
           <Textarea
             label="Ghi chú"

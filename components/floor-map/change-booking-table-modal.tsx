@@ -1,8 +1,9 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Alert, Button, Group, Modal, Select, Stack, Text } from "@mantine/core";
+import { Alert, Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { useEffect, useMemo, useState } from "react";
+import { BookingTablePicker } from "@/components/booking-table-picker/booking-table-picker";
 import {
   findAssignableSlotConflictsAtTable,
   formatTableSlotConflictMessage,
@@ -50,15 +51,6 @@ export function ChangeBookingTableModal(props: ChangeBookingTableModalProps) {
     setTableId(null);
   }, [opened, booking, defaultAreaId]);
 
-  const areaOptions = useMemo(() => {
-    if (!booking) {
-      return [];
-    }
-    return [...areas.filter((area) => area.branchId === booking.branchId)]
-      .sort((a, b) => a.name.localeCompare(b.name, "vi") || a.id.localeCompare(b.id))
-      .map((area) => ({ value: area.id, label: area.name }));
-  }, [areas, booking]);
-
   const candidateTables = useMemo(() => {
     if (!booking) {
       return [];
@@ -68,12 +60,10 @@ export function ChangeBookingTableModal(props: ChangeBookingTableModalProps) {
     );
   }, [areaId, booking, bookings, tables]);
 
-  const tableOptions = useMemo(() => {
-    return candidateTables.map((table) => ({
-      value: table.id,
-      label: table.name,
-    }));
-  }, [candidateTables]);
+  const selectableTableIds = useMemo(
+    () => new Set(candidateTables.map((table) => table.id)),
+    [candidateTables]
+  );
 
   const targetConflictMessage = useMemo(() => {
     if (!booking || !tableId) {
@@ -115,7 +105,7 @@ export function ChangeBookingTableModal(props: ChangeBookingTableModalProps) {
       opened={opened}
       onClose={onClose}
       title="Đổi bàn"
-      size="lg"
+      size="xl"
       centered
       overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
     >
@@ -126,33 +116,32 @@ export function ChangeBookingTableModal(props: ChangeBookingTableModalProps) {
             {booking.guestCount} khách
           </Text>
           <Text size="xs" c="dimmed">
-            Chọn bàn mới. Khung giờ booking giữ nguyên; trạng thái check-in / đang ngồi được giữ
-            khi đổi bàn.
+            Chọn bàn mới trên sơ đồ. Khung giờ booking giữ nguyên; trạng thái check-in / đang ngồi
+            được giữ khi đổi bàn.
           </Text>
-          <Group grow>
-            <Select
-              label="Khu vực"
-              data={areaOptions}
-              value={areaId}
-              onChange={(value) => {
-                setAreaId(value);
-                setTableId(null);
-              }}
-              searchable
-              comboboxProps={{ withinPortal: true }}
-            />
-            <Select
-              label="Bàn đích"
-              data={tableOptions}
-              value={tableId}
-              onChange={setTableId}
-              searchable
-              clearable
-              disabled={!areaId}
-              placeholder={areaId ? "Chọn bàn" : "Chọn khu vực trước"}
-              comboboxProps={{ withinPortal: true }}
-            />
-          </Group>
+          <BookingTablePicker
+            mode="change_table"
+            branchId={booking.branchId}
+            areas={areas.filter((area) => area.branchId === booking.branchId)}
+            tables={tables.filter((table) => table.branchId === booking.branchId)}
+            mergeGroups={[]}
+            bookings={bookings}
+            layoutDate={dayjs(booking.bookingAt).format("YYYY-MM-DD")}
+            areaId={areaId}
+            tableId={tableId}
+            mergeGroupId={null}
+            selectableTableIds={selectableTableIds}
+            highlightTableId={booking.tableId}
+            disabled={loading}
+            onChange={(patch) => {
+              if (patch.areaId !== undefined) {
+                setAreaId(patch.areaId);
+              }
+              if (patch.tableId !== undefined) {
+                setTableId(patch.tableId);
+              }
+            }}
+          />
           {targetConflictMessage ? (
             <Alert color="red" variant="light" title="Không thể đổi sang bàn này">
               {targetConflictMessage}

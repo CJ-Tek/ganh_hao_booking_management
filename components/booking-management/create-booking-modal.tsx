@@ -341,7 +341,7 @@ export function CreateBookingModal({
       closeOnClickOutside={!isCreating}
       closeOnEscape={!isCreating}
       title="Tạo booking"
-      size="lg"
+      size="xl"
       centered
     >
       <PortalSectionCard>
@@ -372,6 +372,10 @@ export function CreateBookingModal({
               areaId: t.areaId,
               status: t.status,
             }))}
+            tablePickerAreas={createBranchAreas}
+            tablePickerTables={createBranchTables}
+            tablePickerMergeGroups={createBranchMergeGroups}
+            tablePickerBookings={state.bookings}
             mergeGroups={createBranchMergeGroups.map((group) => ({
               id: group.id,
               mergedName: group.mergedName,

@@ -39,6 +39,7 @@ import {
   BookingListMobileView,
 } from "@/components/booking-management/booking-list-mobile-view";
 import { BookingListPaginationBar } from "@/components/booking-management/booking-list-pagination";
+import { BookingTablePicker } from "@/components/booking-table-picker/booking-table-picker";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { useAppContext } from "@/contexts/app-context";
@@ -1802,6 +1803,27 @@ function BookingsPageContent() {
     return options;
   }, [assignAreaId, assignFormBooking, assignMergeGroupId, state.bookings, state.mergeGroups]);
 
+  const assignSelectableTableIds = useMemo(() => {
+    if (!assignFormBooking) {
+      return undefined;
+    }
+    return new Set(getCandidateTables(assignFormBooking).map((table) => table.id));
+  }, [assignFormBooking, state.bookings, state.tables]);
+
+  const assignSelectableMergeGroupIds = useMemo(() => {
+    if (!assignFormBooking) {
+      return undefined;
+    }
+    const groupsInScope = assignAreaId
+      ? state.mergeGroups.filter((group) => group.areaId === assignAreaId)
+      : state.mergeGroups.filter((group) => group.branchId === assignFormBooking.branchId);
+    return new Set(
+      getAssignableMergeGroups(assignFormBooking, groupsInScope, state.bookings).map(
+        (group) => group.id
+      )
+    );
+  }, [assignAreaId, assignFormBooking, state.bookings, state.mergeGroups]);
+
   const editModalAreaOptions = useMemo(() => {
     if (!editBooking) {
       return [];
@@ -1958,7 +1980,7 @@ function BookingsPageContent() {
         opened={editBooking != null}
         onClose={closeEditBookingModal}
         title="Chỉnh booking"
-        size="lg"
+        size="xl"
         centered
         zIndex={MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX}
       >
@@ -2003,61 +2025,31 @@ function BookingsPageContent() {
               placeholder="Chưa rõ"
               size={isCompact ? "md" : "sm"}
             />
-            <Group grow align="flex-start">
-              <Select
-                label="Khu vực"
-                placeholder="Chờ xếp bàn"
-                data={editModalAreaOptions}
-                value={editAreaId}
-                onChange={(value) => {
-                  setEditAreaId(value);
-                  setEditTableId(null);
-                  setEditMergeGroupId(null);
-                }}
-                searchable
-                clearable
-                size={isCompact ? "md" : "sm"}
-                comboboxProps={{ zIndex: portalModalOverlayPopoverProps.zIndex }}
-              />
-              <Select
-                label="Bàn"
-                placeholder={editAreaId ? "Chọn bàn" : "Chọn khu vực trước"}
-                data={editModalTableOptions}
-                value={editTableId}
-                onChange={(value) => {
-                  setEditTableId(value);
-                  if (value) {
-                    setEditMergeGroupId(null);
-                  }
-                }}
-                searchable
-                clearable
-                disabled={!editAreaId || Boolean(editMergeGroupId)}
-                size={isCompact ? "md" : "sm"}
-                comboboxProps={{ zIndex: portalModalOverlayPopoverProps.zIndex }}
-              />
-            </Group>
-            {editAreaId && editModalMergeGroupOptions.length > 0 ? (
-              <Select
-                label="Cụm gộp (Bàn gộp)"
-                placeholder="Chọn cụm gộp thay cho bàn lẻ"
-                data={editModalMergeGroupOptions}
-                value={editMergeGroupId}
-                onChange={(value) => {
-                  setEditMergeGroupId(value);
-                  if (value) {
-                    setEditTableId(null);
-                  }
-                }}
-                searchable
-                clearable
-                size={isCompact ? "md" : "sm"}
-                comboboxProps={{ zIndex: portalModalOverlayPopoverProps.zIndex }}
-              />
-            ) : null}
-            <Text size="xs" c="dimmed">
-              Để trống khu vực, bàn và cụm gộp nếu booking vẫn chờ xếp bàn.
-            </Text>
+            <BookingTablePicker
+              mode="edit"
+              branchId={editBooking.branchId}
+              areas={state.areas.filter((area) => area.branchId === editBooking.branchId)}
+              tables={state.tables.filter((table) => table.branchId === editBooking.branchId)}
+              mergeGroups={state.mergeGroups.filter(
+                (group) => group.branchId === editBooking.branchId
+              )}
+              bookings={state.bookings}
+              layoutDate={dayjs(editBookingAt).format("YYYY-MM-DD")}
+              areaId={editAreaId}
+              tableId={editTableId}
+              mergeGroupId={editMergeGroupId}
+              onChange={(patch) => {
+                if (patch.areaId !== undefined) {
+                  setEditAreaId(patch.areaId);
+                }
+                if (patch.tableId !== undefined) {
+                  setEditTableId(patch.tableId);
+                }
+                if (patch.mergeGroupId !== undefined) {
+                  setEditMergeGroupId(patch.mergeGroupId);
+                }
+              }}
+            />
             <Group justify="flex-end" gap="sm">
               <Button variant="default" onClick={closeEditBookingModal}>
                 Hủy
@@ -2103,7 +2095,7 @@ function BookingsPageContent() {
             setAssignMergeGroupId(null);
           }}
           title="Gán thủ công booking vào bàn"
-          size="lg"
+          size="xl"
           centered
           zIndex={MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX}
           overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
@@ -2124,54 +2116,33 @@ function BookingsPageContent() {
               value={assignManualGuestCount}
               onChange={setAssignManualGuestCount}
             />
-            <Group grow>
-              <Select
-                label="Khu vực"
-                data={assignModalAreaOptions}
-                value={assignAreaId}
-                onChange={(value) => {
-                  setAssignAreaId(value);
-                  setAssignTableId(null);
-                  setAssignMergeGroupId(null);
-                }}
-                searchable
-                clearable
-                comboboxProps={{ zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX }}
-              />
-              <Select
-                label="Bàn"
-                placeholder={assignAreaId ? "Chọn bàn hoặc cụm gộp" : "Chọn khu vực trước"}
-                data={assignModalTableOptions}
-                value={assignTableId}
-                onChange={(value) => {
-                  setAssignTableId(value);
-                  if (value) {
-                    setAssignMergeGroupId(null);
-                  }
-                }}
-                searchable
-                clearable
-                disabled={!assignAreaId || Boolean(assignMergeGroupId)}
-                comboboxProps={{ zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX }}
-              />
-            </Group>
-            {assignAreaId && (assignModalMergeGroupOptions.length > 0 || assignMergeGroupId) ? (
-              <Select
-                label="Cụm gộp (Bàn gộp)"
-                placeholder="Chọn cụm gộp thay cho bàn lẻ"
-                data={assignModalMergeGroupOptions}
-                value={assignMergeGroupId}
-                onChange={(value) => {
-                  setAssignMergeGroupId(value);
-                  if (value) {
-                    setAssignTableId(null);
-                  }
-                }}
-                searchable
-                clearable
-                comboboxProps={{ zIndex: MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX }}
-              />
-            ) : null}
+            <BookingTablePicker
+              mode="assign"
+              branchId={assignFormBooking.branchId}
+              areas={state.areas.filter((area) => area.branchId === assignFormBooking.branchId)}
+              tables={state.tables.filter((table) => table.branchId === assignFormBooking.branchId)}
+              mergeGroups={state.mergeGroups.filter(
+                (group) => group.branchId === assignFormBooking.branchId
+              )}
+              bookings={state.bookings}
+              layoutDate={dayjs(assignFormBooking.bookingAt).format("YYYY-MM-DD")}
+              areaId={assignAreaId}
+              tableId={assignTableId}
+              mergeGroupId={assignMergeGroupId}
+              selectableTableIds={assignSelectableTableIds}
+              selectableMergeGroupIds={assignSelectableMergeGroupIds}
+              onChange={(patch) => {
+                if (patch.areaId !== undefined) {
+                  setAssignAreaId(patch.areaId);
+                }
+                if (patch.tableId !== undefined) {
+                  setAssignTableId(patch.tableId);
+                }
+                if (patch.mergeGroupId !== undefined) {
+                  setAssignMergeGroupId(patch.mergeGroupId);
+                }
+              }}
+            />
             <Group justify="flex-end">
               <Button
                 variant="default"
