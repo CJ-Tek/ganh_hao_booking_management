@@ -194,6 +194,10 @@ import {
   validateMergeGroupDateRange,
 } from "@/lib/merge-group-utils";
 import {
+  filterTablesForFloorMapDay,
+  isSplitCloneTable,
+} from "@/lib/table-split-clone-utils";
+import {
   fetchFloorMapDayBookings,
   getTableBlockStateInSupabase,
 } from "@/lib/supabase-store";
@@ -501,6 +505,7 @@ export default function FloorMapPage() {
     deleteArea,
     reload,
     createTableMergeGroup,
+    createTableSplitClone,
     addTableToMergeGroup,
     removeTableFromMergeGroup,
     releaseTableMergeGroup,
@@ -597,6 +602,15 @@ export default function FloorMapPage() {
     formatMergeGroupDate(dayjs())
   );
   const [mergeSaving, setMergeSaving] = useState(false);
+  const [splitModalOpen, setSplitModalOpen] = useState(false);
+  const [splitSelectedTableId, setSplitSelectedTableId] = useState<string | null>(null);
+  const [splitStartDate, setSplitStartDate] = useState<string | null>(() =>
+    formatMergeGroupDate(dayjs())
+  );
+  const [splitEndDate, setSplitEndDate] = useState<string | null>(() =>
+    formatMergeGroupDate(dayjs())
+  );
+  const [splitSaving, setSplitSaving] = useState(false);
   /** Edit-mode shift-click selection: a set of table ids highlighted for the "Gộp đã chọn" toolbar action. */
   const [editSelectedTableIds, setEditSelectedTableIds] = useState<string[]>([]);
   /** Bbox detail panel: when set, shows members + active bookings + release control for a merge group. */
@@ -1192,10 +1206,35 @@ export default function FloorMapPage() {
         (table) =>
           table.areaId === areaId &&
           table.status !== "locked" &&
+          !isSplitCloneTable(table) &&
           !allActiveMergedTableIds.has(table.id)
       )
       .sort((a, b) => a.name.localeCompare(b.name, "vi"));
   }, [allActiveMergedTableIds, areaId, state.tables]);
+
+  const splitCandidateTables = useMemo(() => {
+    if (!areaId) {
+      return [];
+    }
+    return state.tables
+      .filter(
+        (table) =>
+          table.areaId === areaId &&
+          table.status !== "locked" &&
+          !isSplitCloneTable(table) &&
+          !allActiveMergedTableIds.has(table.id)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  }, [allActiveMergedTableIds, areaId, state.tables]);
+
+  const splitTableOptions = useMemo(
+    () =>
+      splitCandidateTables.map((table) => ({
+        value: table.id,
+        label: table.name,
+      })),
+    [splitCandidateTables]
+  );
 
   const mergeTableOptions = useMemo(
     () =>
@@ -1860,8 +1899,12 @@ export default function FloorMapPage() {
   }, [areaId, releaseFloorLayoutEditLock]);
 
   const tablesInArea = useMemo(
-    () => state.tables.filter((table) => table.areaId === areaId),
-    [areaId, state.tables]
+    () =>
+      filterTablesForFloorMapDay(
+        state.tables.filter((table) => table.areaId === areaId),
+        floorMapSelectedDate
+      ),
+    [areaId, floorMapSelectedDate, state.tables]
   );
 
   const resolvedLayout = useMemo(() => {
@@ -3235,6 +3278,8 @@ export default function FloorMapPage() {
     const day = formatMergeGroupDate(floorMapSelectedDate);
     setMergeStartDate(day);
     setMergeEndDate(day);
+    setSplitStartDate(day);
+    setSplitEndDate(day);
   }, [floorMapSelectedDate]);
 
   const handleCreateMergeGroup = async (tableIds: string[]) => {
@@ -3299,6 +3344,65 @@ export default function FloorMapPage() {
       }
     } finally {
       setMergeSaving(false);
+    }
+  };
+
+  const handleCreateSplitClone = async (sourceTableId: string) => {
+    if (!hasSupabase) {
+      notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
+      return;
+    }
+    if (!areaId) {
+      notifications.show({ color: "red", message: "Vui lòng chọn khu vực trước khi tách bàn." });
+      return;
+    }
+    if (!sourceTableId) {
+      notifications.show({ color: "red", message: "Vui lòng chọn bàn cần tách." });
+      return;
+    }
+    if (!splitStartDate || !splitEndDate) {
+      notifications.show({ color: "red", message: "Vui lòng chọn ngày bắt đầu và ngày kết thúc." });
+      return;
+    }
+    const startDate = formatMergeGroupDate(splitStartDate);
+    const endDate = formatMergeGroupDate(splitEndDate);
+    const dateCheck = validateMergeGroupDateRange({ startDate, endDate });
+    if (!dateCheck.ok) {
+      notifications.show({ color: "red", message: dateCheck.message });
+      return;
+    }
+    setSplitSaving(true);
+    try {
+      const result = await createTableSplitClone({
+        sourceTableId,
+        startDate,
+        endDate,
+        layoutDate: selectedLayoutDate,
+      });
+      notifications.show({
+        color: result.ok ? "green" : "red",
+        message: result.message,
+      });
+      if (result.ok) {
+        setSplitModalOpen(false);
+        setSplitSelectedTableId(null);
+        const dayRow =
+          result.dayLayout !== undefined
+            ? result.dayLayout
+            : await refreshDayLayout();
+        if (result.dayLayout !== undefined) {
+          setCurrentDayLayoutCache(result.dayLayout);
+        }
+        if (result.table) {
+          setDetailTable(result.table);
+          setDetailMergeGroup(null);
+        }
+        if (isEditMode) {
+          syncEditLayoutFromDayOverride(dayRow);
+        }
+      }
+    } finally {
+      setSplitSaving(false);
     }
   };
 
@@ -4125,6 +4229,15 @@ export default function FloorMapPage() {
                             </Button>
                             <Button
                               size={isCompact ? "sm" : "compact-sm"}
+                              variant="light"
+                              className={classes.toolbarDayListBtn}
+                              onClick={() => setSplitModalOpen(true)}
+                              disabled={!activeAreaBranchId}
+                            >
+                              Tách bàn
+                            </Button>
+                            <Button
+                              size={isCompact ? "sm" : "compact-sm"}
                               variant="default"
                               className={classes.toolbarDayListBtn}
                               onClick={() => setMergeGroupsListModalOpen(true)}
@@ -4368,6 +4481,17 @@ export default function FloorMapPage() {
                         <Text fw={600} size="sm" lineClamp={1}>
                           {table.name}
                         </Text>
+                        {isSplitCloneTable(table) &&
+                        table.splitStartDate &&
+                        table.splitEndDate ? (
+                          <Text size="xs" c="dimmed" lineClamp={2} lh={1.25}>
+                            Khả dụng:{" "}
+                            {formatMergeGroupDateRange(
+                              table.splitStartDate,
+                              table.splitEndDate
+                            )}
+                          </Text>
+                        ) : null}
                       </div>
                     </div>
                   );
@@ -5294,6 +5418,73 @@ export default function FloorMapPage() {
               onClick={() => void handleCreateMergeGroup(mergeSelectedTableIds)}
             >
               Tạo cụm gộp
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
+        opened={splitModalOpen}
+        onClose={() => setSplitModalOpen(false)}
+        title="Tách bàn"
+        size="md"
+      >
+        <Stack gap="sm">
+          <Text size="sm" c="dimmed">
+            Tạo một bản sao bàn lẻ trên sơ đồ. Bản sao chỉ hiển thị trong khoảng ngày đã chọn và
+            có thể nhận booking độc lập với bàn gốc. Cụm bàn gộp không hỗ trợ tách bàn.
+          </Text>
+          <Group grow align="flex-end">
+            <DatePickerInput
+              label="Từ ngày"
+              value={splitStartDate}
+              onChange={(value) => {
+                setSplitStartDate(value);
+                if (value && splitEndDate && dayjs(splitEndDate).isBefore(value, "day")) {
+                  setSplitEndDate(value);
+                }
+              }}
+              valueFormat="DD/MM/YYYY"
+              dropdownType="modal"
+              disabled={splitSaving}
+            />
+            <DatePickerInput
+              label="Đến ngày"
+              value={splitEndDate}
+              onChange={setSplitEndDate}
+              valueFormat="DD/MM/YYYY"
+              dropdownType="modal"
+              minDate={splitStartDate ? dayjs(splitStartDate).toDate() : undefined}
+              disabled={splitSaving}
+            />
+          </Group>
+          <Select
+            label="Bàn cần tách"
+            data={splitTableOptions}
+            value={splitSelectedTableId}
+            onChange={setSplitSelectedTableId}
+            searchable
+            placeholder="Chọn một bàn lẻ"
+          />
+          {splitSelectedTableId ? (
+            <Text size="xs" c="dimmed">
+              Bản sao sẽ được đặt tên theo dạng &quot;{"{tên bàn} - n"}&quot; (n = 1, 2, 3…).
+            </Text>
+          ) : null}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setSplitModalOpen(false)}>
+              Hủy
+            </Button>
+            <Button
+              loading={splitSaving}
+              disabled={!splitSelectedTableId}
+              onClick={() =>
+                splitSelectedTableId
+                  ? void handleCreateSplitClone(splitSelectedTableId)
+                  : undefined
+              }
+            >
+              Tách bàn
             </Button>
           </Group>
         </Stack>

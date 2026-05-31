@@ -45,6 +45,14 @@ export interface DiningTable {
   status: TableStatus;
   positionX: number;
   positionY: number;
+  /** When set, this row is a date-bounded Tách bàn clone of another table. */
+  splitSourceTableId?: string | null;
+  /** Sequence number in the clone name `{source} - n`. */
+  splitCloneNumber?: number | null;
+  /** Inclusive first calendar day the clone is shown on Sơ đồ. */
+  splitStartDate?: string | null;
+  /** Inclusive last calendar day the clone is shown on Sơ đồ. */
+  splitEndDate?: string | null;
 }
 
 export interface Customer {

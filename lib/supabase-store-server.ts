@@ -63,12 +63,20 @@ import {
 import { layoutDateRangeIso } from "./floor-map-day-bookings";
 import type { FloorMapStateSlice } from "./floor-map-state-slice";
 import {
+  buildOccupiedGridCells,
+  findAdjacentFreeGridCell,
+  formatSplitCloneName,
+  pickNextSplitCloneNumber,
+  validateSplitCloneDateRange,
+} from "./table-split-clone-utils";
+import {
   AppStateSnapshot,
   AppUser,
   Booking,
   BookingRuntimeSettings,
   BookingStatus,
   Customer,
+  DiningTable,
   Role,
   TableBlockState,
   TableMergeGroup,
@@ -192,6 +200,34 @@ function ensureClient(): StoreClient {
     throw new Error("Chưa cấu hình Supabase server (SUPABASE_SERVICE_ROLE_KEY).");
   }
   return client;
+}
+
+function mapDiningTableFromRow(item: {
+  id: string;
+  branch_id: string;
+  area_id: string;
+  name: string;
+  status: string;
+  position_x: number;
+  position_y: number;
+  split_source_table_id?: string | null;
+  split_clone_number?: number | null;
+  split_start_date?: string | null;
+  split_end_date?: string | null;
+}): DiningTable {
+  return {
+    id: item.id,
+    branchId: item.branch_id,
+    areaId: item.area_id,
+    name: item.name,
+    status: item.status as TableStatus,
+    positionX: item.position_x,
+    positionY: item.position_y,
+    splitSourceTableId: item.split_source_table_id ?? null,
+    splitCloneNumber: item.split_clone_number ?? null,
+    splitStartDate: item.split_start_date ?? null,
+    splitEndDate: item.split_end_date ?? null,
+  };
 }
 
 function mapBookingRuntimeSettingsRow(data: Record<string, unknown>): BookingRuntimeSettings {
@@ -852,16 +888,7 @@ export async function fetchSnapshot(options?: {
             ? item.floor_node_spacing
             : FLOOR_DEFAULT_NODE_SPACING_PX,
       })) ?? [],
-    tables:
-      tablesRowList.map((item) => ({
-        id: item.id,
-        branchId: item.branch_id,
-        areaId: item.area_id,
-        name: item.name,
-        status: item.status as TableStatus,
-        positionX: item.position_x,
-        positionY: item.position_y,
-      })) ?? [],
+    tables: tablesRowList.map((item) => mapDiningTableFromRow(item)) ?? [],
     customers:
       customersResult.data?.map((item) => ({
         id: item.id,
@@ -1001,16 +1028,7 @@ export async function fetchFloorMapSliceInSupabase(
             ? item.floor_node_spacing
             : FLOOR_DEFAULT_NODE_SPACING_PX,
       })) ?? [],
-    tables:
-      tablesRowList.map((item) => ({
-        id: item.id,
-        branchId: item.branch_id,
-        areaId: item.area_id,
-        name: item.name,
-        status: item.status as TableStatus,
-        positionX: item.position_x,
-        positionY: item.position_y,
-      })) ?? [],
+    tables: tablesRowList.map((item) => mapDiningTableFromRow(item)) ?? [],
     mergeGroups,
   };
 }
@@ -3210,6 +3228,184 @@ export async function createTableMergeGroupInSupabase(
     mergedName: groupName,
     group,
     dayLayout: packResult.dayLayout ?? null,
+    message,
+  };
+}
+
+type TableSplitCloneCreateResult = Result & {
+  table?: DiningTable;
+  dayLayout?: AreaFloorLayoutByDate | null;
+};
+
+export async function createTableSplitCloneInSupabase(input: {
+  sourceTableId: string;
+  startDate: string;
+  endDate: string;
+  layoutDate?: string;
+  createdByUserId?: string;
+}): Promise<TableSplitCloneCreateResult> {
+  const client = ensureClient();
+  const { data: source, error: sourceErr } = await client
+    .from("tables")
+    .select(
+      "id, name, status, branch_id, area_id, position_x, position_y, split_source_table_id"
+    )
+    .eq("id", input.sourceTableId)
+    .maybeSingle();
+  if (sourceErr || !source) {
+    return { ok: false, message: sourceErr?.message ?? "Không tìm thấy bàn nguồn." };
+  }
+  if (source.split_source_table_id) {
+    return { ok: false, message: "Chỉ tách được bàn gốc, không tách bản sao." };
+  }
+  if ((source.status as TableStatus) === "locked") {
+    return { ok: false, message: "Không tách được bàn đang khóa." };
+  }
+
+  const dateCheck = validateSplitCloneDateRange({
+    startDate: input.startDate,
+    endDate: input.endDate,
+  });
+  if (!dateCheck.ok) {
+    return { ok: false, message: dateCheck.message };
+  }
+
+  const mergeCheck = await ensureTablesAreFreeToMerge(client, [input.sourceTableId], {
+    startDate: input.startDate,
+    endDate: input.endDate,
+  });
+  if (!mergeCheck.ok) {
+    return {
+      ok: false,
+      message:
+        "Bàn đang thuộc cụm gộp trong khoảng ngày đã chọn. Chỉ tách được bàn lẻ.",
+    };
+  }
+
+  const { data: existingClones, error: clonesErr } = await client
+    .from("tables")
+    .select("split_clone_number")
+    .eq("split_source_table_id", input.sourceTableId);
+  if (clonesErr) {
+    return { ok: false, message: clonesErr.message };
+  }
+  const cloneNumber = pickNextSplitCloneNumber(
+    ((existingClones ?? []) as Array<{ split_clone_number: number | null }>).map(
+      (row) => row.split_clone_number ?? 0
+    )
+  );
+  const cloneName = formatSplitCloneName(source.name, cloneNumber);
+
+  const layoutDateCandidate = input.layoutDate?.trim() || input.startDate;
+  const primaryLayoutDate = isLayoutDateWithinMergeRange(layoutDateCandidate, {
+    startDate: input.startDate,
+    endDate: input.endDate,
+  })
+    ? layoutDateCandidate
+    : input.startDate;
+
+  const resolved = await loadResolvedLayoutForPack(client, source.area_id, primaryLayoutDate);
+  const sourcePos = resolved.areaTables.find((table) => table.id === source.id) ?? {
+    id: source.id,
+    positionX: source.position_x,
+    positionY: source.position_y,
+  };
+  const occupied = buildOccupiedGridCells(
+    resolved.areaTables,
+    resolved.gridColumns,
+    resolved.gridRows
+  );
+  const adjacent = findAdjacentFreeGridCell({
+    sourceCol: sourcePos.positionX,
+    sourceRow: sourcePos.positionY,
+    occupiedCells: occupied,
+    gridColumns: resolved.gridColumns,
+    gridRows: resolved.gridRows,
+  });
+  const clonePosition = adjacent ?? {
+    col: sourcePos.positionX,
+    row: sourcePos.positionY,
+  };
+
+  const { data: inserted, error: insertErr } = await client
+    .from("tables")
+    .insert({
+      branch_id: source.branch_id,
+      area_id: source.area_id,
+      name: cloneName,
+      status: "available",
+      position_x: clonePosition.col,
+      position_y: clonePosition.row,
+      split_source_table_id: source.id,
+      split_clone_number: cloneNumber,
+      split_start_date: input.startDate,
+      split_end_date: input.endDate,
+    })
+    .select(
+      "id, branch_id, area_id, name, status, position_x, position_y, split_source_table_id, split_clone_number, split_start_date, split_end_date"
+    )
+    .single();
+  if (insertErr || !inserted) {
+    return { ok: false, message: insertErr?.message ?? "Không tạo được bản sao bàn." };
+  }
+
+  const table = mapDiningTableFromRow(inserted);
+  let dayLayout: AreaFloorLayoutByDate | null | undefined;
+
+  if (isLayoutDateWithinMergeRange(primaryLayoutDate, {
+    startDate: input.startDate,
+    endDate: input.endDate,
+  })) {
+    const dayRow = await loadAreaFloorLayoutRowForDate(client, source.area_id, primaryLayoutDate);
+    const positions = dayRow
+      ? { ...dayRow.tablePositions }
+      : positionsRecordFromSnapshot(
+          snapshotFromGlobalArea(
+            {
+              floorGridColumns: resolved.gridColumns,
+              floorGridRows: resolved.gridRows,
+              floorNodeSpacing: resolved.nodeSpacing,
+            },
+            resolved.areaTables.map((t) => ({
+              id: t.id,
+              branchId: source.branch_id,
+              areaId: source.area_id,
+              name: t.id === source.id ? source.name : "",
+              status: "available" as TableStatus,
+              positionX: t.positionX,
+              positionY: t.positionY,
+            }))
+          )
+        );
+    positions[table.id] = { x: clonePosition.col, y: clonePosition.row };
+    const snapshot = snapshotFromPositionsRecord(
+      {
+        floorGridColumns: resolved.gridColumns,
+        floorGridRows: resolved.gridRows,
+        floorNodeSpacing: resolved.nodeSpacing,
+      },
+      positions
+    );
+    dayLayout = await upsertAreaFloorLayoutForDateInSupabase(
+      source.area_id,
+      primaryLayoutDate,
+      snapshot,
+      {
+        updatedByUserId: input.createdByUserId ?? null,
+      }
+    );
+  }
+
+  let message = `Đã tách bàn "${source.name}" thành "${cloneName}" (${input.startDate} → ${input.endDate}).`;
+  if (!adjacent) {
+    message +=
+      " Chưa tìm được ô trống kề bàn gốc — vào Sơ đồ (chỉnh sửa) để kéo bản sao sang vị trí phù hợp.";
+  }
+
+  return {
+    ok: true,
+    table,
+    dayLayout: dayLayout ?? null,
     message,
   };
 }

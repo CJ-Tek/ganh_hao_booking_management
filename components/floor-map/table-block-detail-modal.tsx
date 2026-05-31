@@ -24,6 +24,7 @@ import {
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
 import { formatMergeGroupDateRange } from "@/lib/merge-group-utils";
+import { isSplitCloneTable } from "@/lib/table-split-clone-utils";
 import {
   type Booking,
   type DiningTable,
@@ -165,7 +166,9 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
             <Text size="sm" c="dimmed">
               {mergeGroup
                 ? `${mergeGroup.tableIds.length} bàn · ${formatMergeGroupDateRange(mergeGroup.startDate, mergeGroup.endDate)} · ${tableStatusLabel[displayStatus]}`
-                : tableStatusLabel[displayStatus]}
+                : table && isSplitCloneTable(table) && table.splitStartDate && table.splitEndDate
+                  ? `Khả dụng: ${formatMergeGroupDateRange(table.splitStartDate, table.splitEndDate)} · ${tableStatusLabel[displayStatus]}`
+                  : tableStatusLabel[displayStatus]}
             </Text>
             {blockLoading ? (
               <Group gap={6}>

@@ -618,6 +618,10 @@ export type Database = {
           name: string
           position_x: number
           position_y: number
+          split_clone_number: number | null
+          split_end_date: string | null
+          split_source_table_id: string | null
+          split_start_date: string | null
           status: string
         }
         Insert: {
@@ -627,6 +631,10 @@ export type Database = {
           name: string
           position_x?: number
           position_y?: number
+          split_clone_number?: number | null
+          split_end_date?: string | null
+          split_source_table_id?: string | null
+          split_start_date?: string | null
           status: string
         }
         Update: {
@@ -636,6 +644,10 @@ export type Database = {
           name?: string
           position_x?: number
           position_y?: number
+          split_clone_number?: number | null
+          split_end_date?: string | null
+          split_source_table_id?: string | null
+          split_start_date?: string | null
           status?: string
         }
         Relationships: [

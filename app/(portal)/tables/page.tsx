@@ -125,7 +125,8 @@ function TablesPageContent() {
       state.tables
         .filter((table) => filteredBranchIds.includes(table.branchId))
         .filter((table) => (!branchId || table.branchId === branchId))
-        .filter((table) => (!areaId || table.areaId === areaId)),
+        .filter((table) => (!areaId || table.areaId === areaId))
+        .filter((table) => !table.splitSourceTableId),
     [areaId, branchId, filteredBranchIds, state.tables]
   );
 

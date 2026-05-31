@@ -53,7 +53,9 @@ import {
   addUserInSupabase,
   assignBookingToTableInSupabase,
   type CreateTableMergeGroupResult,
+  type CreateTableSplitCloneResult,
   createTableMergeGroupInSupabase,
+  createTableSplitCloneInSupabase,
   deleteAreaInSupabase,
   deleteUserInSupabase,
   updateUserInSupabase,
@@ -208,6 +210,12 @@ interface AppContextValue {
     endDate: string;
     layoutDate?: string;
   }) => Promise<CreateTableMergeGroupResult>;
+  createTableSplitClone: (input: {
+    sourceTableId: string;
+    startDate: string;
+    endDate: string;
+    layoutDate?: string;
+  }) => Promise<CreateTableSplitCloneResult>;
   addTableToMergeGroup: (input: {
     groupId: string;
     tableId: string;
@@ -2313,6 +2321,42 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     [currentUser, hasSupabase, reload]
   );
 
+  const createTableSplitClone = useCallback(
+    async (input: {
+      sourceTableId: string;
+      startDate: string;
+      endDate: string;
+      layoutDate?: string;
+    }) => {
+      if (isEmployeeUser(currentUser)) {
+        return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+      }
+      if (!hasSupabase) {
+        return { ok: false, message: "Chưa kết nối Supabase." };
+      }
+      if (!currentUser) {
+        return { ok: false, message: "Chưa đăng nhập." };
+      }
+      const result = await createTableSplitCloneInSupabase({
+        ...input,
+        createdByUserId: currentUser.id,
+      });
+      if (result.ok && result.table) {
+        setState((prev) => ({
+          ...prev,
+          tables: [
+            ...prev.tables.filter((table) => table.id !== result.table!.id),
+            result.table!,
+          ],
+        }));
+      } else if (result.ok) {
+        await reload({ scope: "floor" });
+      }
+      return result;
+    },
+    [currentUser, hasSupabase, reload]
+  );
+
   const addTableToMergeGroup = useCallback(
     async (input: {
       groupId: string;
@@ -2409,6 +2453,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     updateBookingOrder,
     changeBookingTable,
     createTableMergeGroup,
+    createTableSplitClone,
     addTableToMergeGroup,
     removeTableFromMergeGroup,
     releaseTableMergeGroup,

@@ -168,6 +168,17 @@ export async function createTableMergeGroupInSupabase(
   return callStore<CreateTableMergeGroupResult>("createTableMergeGroup", input);
 }
 
+export type CreateTableSplitCloneResult = Result & {
+  table?: import("@/lib/types").DiningTable;
+  dayLayout?: import("@/lib/floor-layout-snapshot").AreaFloorLayoutByDate | null;
+};
+
+export async function createTableSplitCloneInSupabase(
+  input: Parameters<typeof import("./supabase-store-server").createTableSplitCloneInSupabase>[0]
+): Promise<CreateTableSplitCloneResult> {
+  return callStore<CreateTableSplitCloneResult>("createTableSplitClone", input);
+}
+
 export async function addTableToMergeGroupInSupabase(input: {
   groupId: string;
   tableId: string;

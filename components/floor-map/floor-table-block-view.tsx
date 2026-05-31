@@ -7,6 +7,8 @@ import { memo, type CSSProperties, type MouseEvent } from "react";
 import { bookingRowBusyStyle } from "@/lib/busy-row-style";
 import { isGuestCountSpecified } from "@/lib/booking-meta";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
+import { formatMergeGroupDateRange } from "@/lib/merge-group-utils";
+import { isSplitCloneTable } from "@/lib/table-split-clone-utils";
 import type { Booking, DiningTable, TableStatus } from "@/lib/types";
 import classes from "@/app/(portal)/floor-map/page.module.css";
 
@@ -31,6 +33,24 @@ function TableBlockGuestBadge(props: { booking: Booking | null }) {
     <Badge variant="filled" color="dark" size="xs" radius="sm" style={{ flexShrink: 0 }}>
       {booking.guestCount} khách
     </Badge>
+  );
+}
+
+function TableBlockSplitCloneAvailability(props: {
+  table: Pick<DiningTable, "splitSourceTableId" | "splitStartDate" | "splitEndDate">;
+}) {
+  const { table } = props;
+  if (
+    !isSplitCloneTable(table) ||
+    !table.splitStartDate ||
+    !table.splitEndDate
+  ) {
+    return null;
+  }
+  return (
+    <Text size="xs" c="dimmed" lineClamp={2} lh={1.25} mt={2}>
+      Khả dụng: {formatMergeGroupDateRange(table.splitStartDate, table.splitEndDate)}
+    </Text>
   );
 }
 
@@ -225,6 +245,7 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
         {!hideBookingPeek ? (
           <TableBlockBookingPeek displayBooking={displayBooking} customerName={customerName} />
         ) : null}
+        <TableBlockSplitCloneAvailability table={table} />
       </div>
     </div>
   );
@@ -235,6 +256,9 @@ function propsAreEqual(prev: FloorTableBlockViewProps, next: FloorTableBlockView
     prev.table.id === next.table.id &&
     prev.table.status === next.table.status &&
     prev.table.name === next.table.name &&
+    prev.table.splitSourceTableId === next.table.splitSourceTableId &&
+    prev.table.splitStartDate === next.table.splitStartDate &&
+    prev.table.splitEndDate === next.table.splitEndDate &&
     prev.isMergeMember === next.isMergeMember &&
     prev.isEmployee === next.isEmployee &&
     prev.isBusy === next.isBusy &&

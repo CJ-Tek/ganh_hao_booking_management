@@ -72,6 +72,8 @@ const handlers: Record<string, StoreHandler> = {
     store.getTableBlockStateInSupabase(payload as Parameters<typeof store.getTableBlockStateInSupabase>[0]),
   createTableMergeGroup: (payload) =>
     store.createTableMergeGroupInSupabase(payload as Parameters<typeof store.createTableMergeGroupInSupabase>[0]),
+  createTableSplitClone: (payload) =>
+    store.createTableSplitCloneInSupabase(payload as Parameters<typeof store.createTableSplitCloneInSupabase>[0]),
   addTableToMergeGroup: (payload) =>
     store.addTableToMergeGroupInSupabase(payload as Parameters<typeof store.addTableToMergeGroupInSupabase>[0]),
   removeTableFromMergeGroup: (payload) =>
