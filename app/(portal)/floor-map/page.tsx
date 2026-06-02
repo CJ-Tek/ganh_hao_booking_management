@@ -1207,6 +1207,17 @@ export default function FloorMapPage() {
         .sort((a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf()),
     [floorMapDayBookings]
   );
+  const seatedTableIdsOnFloorDay = useMemo(() => {
+    const ids = new Set<string>();
+    for (const booking of floorMapDayBookings) {
+      if (booking.status !== "seated" || !booking.tableId) {
+        continue;
+      }
+      ids.add(booking.tableId);
+    }
+    return ids;
+  }, [floorMapDayBookings]);
+
   /** Active groups across all areas — used to exclude already-merged tables from new-merge candidates. */
   const allActiveMergedTableIds = useMemo(() => {
     const ids = new Set<string>();
@@ -1234,10 +1245,11 @@ export default function FloorMapPage() {
           table.areaId === areaId &&
           table.status !== "locked" &&
           !isSplitCloneTable(table) &&
+          !seatedTableIdsOnFloorDay.has(table.id) &&
           !allActiveMergedTableIds.has(table.id)
       )
       .sort((a, b) => a.name.localeCompare(b.name, "vi"));
-  }, [allActiveMergedTableIds, areaId, state.tables]);
+  }, [allActiveMergedTableIds, areaId, seatedTableIdsOnFloorDay, state.tables]);
 
   const splitCandidateTables = useMemo(() => {
     if (!areaId) {
@@ -1249,10 +1261,11 @@ export default function FloorMapPage() {
           table.areaId === areaId &&
           table.status !== "locked" &&
           !isSplitCloneTable(table) &&
+          !seatedTableIdsOnFloorDay.has(table.id) &&
           !allActiveMergedTableIds.has(table.id)
       )
       .sort((a, b) => a.name.localeCompare(b.name, "vi"));
-  }, [allActiveMergedTableIds, areaId, state.tables]);
+  }, [allActiveMergedTableIds, areaId, seatedTableIdsOnFloorDay, state.tables]);
 
   const mergeCandidateTableIds = useMemo(
     () => new Set(mergeCandidateTables.map((table) => table.id)),
@@ -3332,6 +3345,16 @@ export default function FloorMapPage() {
       notifications.show({ color: "red", message: "Cần chọn ít nhất 2 bàn để gộp." });
       return;
     }
+    const blockedMergeTable = uniqueIds
+      .map((tableId) => state.tables.find((table) => table.id === tableId))
+      .find((table) => table && seatedTableIdsOnFloorDay.has(table.id));
+    if (blockedMergeTable) {
+      notifications.show({
+        color: "yellow",
+        message: `Không thể gộp khi ${blockedMergeTable.name} đã có khách ngồi.`,
+      });
+      return;
+    }
     if (!mergeStartDate || !mergeEndDate) {
       notifications.show({ color: "red", message: "Vui lòng chọn ngày bắt đầu và ngày kết thúc." });
       return;
@@ -3392,6 +3415,15 @@ export default function FloorMapPage() {
     }
     if (!sourceTableId) {
       notifications.show({ color: "red", message: "Vui lòng chọn bàn cần tách." });
+      return;
+    }
+    if (seatedTableIdsOnFloorDay.has(sourceTableId)) {
+      const tableName =
+        state.tables.find((table) => table.id === sourceTableId)?.name ?? "Bàn đã chọn";
+      notifications.show({
+        color: "yellow",
+        message: `Không thể tách bàn khi ${tableName} đã có khách ngồi.`,
+      });
       return;
     }
     if (!splitStartDate || !splitEndDate) {
@@ -5982,6 +6014,7 @@ function MergeGroupDetailModal({
 
   const datesDirty =
     editStartDate !== group.startDate || editEndDate !== group.endDate;
+  const hasSeatedBookingInGroup = groupBookings.some((booking) => booking.status === "seated");
 
   const handleSaveDates = async () => {
     if (!editStartDate || !editEndDate) {
@@ -6089,16 +6122,26 @@ function MergeGroupDetailModal({
               {!isEmployee ? (
                 <Tooltip
                   label={
-                    memberTables.length <= 2
-                      ? "Cụm cần ít nhất 2 bàn — bỏ tiếp sẽ tự huỷ cụm."
-                      : "Tách bàn khỏi cụm"
+                    hasSeatedBookingInGroup
+                      ? "Không thể tách bàn khi cụm đang có khách ngồi."
+                      : memberTables.length <= 2
+                        ? "Cụm cần ít nhất 2 bàn — bỏ tiếp sẽ tự huỷ cụm."
+                        : "Tách bàn khỏi cụm"
                   }
                 >
                   <ActionIcon
                     variant="subtle"
                     color="red"
                     loading={removingTableId === table.id}
+                    disabled={hasSeatedBookingInGroup}
                     onClick={async () => {
+                      if (hasSeatedBookingInGroup) {
+                        notifications.show({
+                          color: "yellow",
+                          message: "Không thể tách bàn khi cụm đang có khách ngồi.",
+                        });
+                        return;
+                      }
                       setRemovingTableId(table.id);
                       try {
                         await onRequestRemoveMember(group.id, table.id);
