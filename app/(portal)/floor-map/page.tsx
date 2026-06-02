@@ -529,7 +529,6 @@ export default function FloorMapPage() {
   const [mergeGroupDragState, setMergeGroupDragState] = useState<MergeGroupDragState | null>(
     null
   );
-  const [toolbarAccordionValue, setToolbarAccordionValue] = useState<string | null>(null);
   const [filtersAccordionValue, setFiltersAccordionValue] = useState<string | null>(null);
   const [isPaletteOpen, setIsPaletteOpen] = useState(true);
   const [isDatePickerDockOpen, setIsDatePickerDockOpen] = useState(true);
@@ -4220,6 +4219,33 @@ export default function FloorMapPage() {
             comboboxProps={{ withinPortal: true }}
             size={isCompact ? "xs" : "sm"}
           />
+          {!isEmployee ? (
+            <Menu shadow="md" width={220} withinPortal position="bottom-end">
+              <Menu.Target>
+                <ActionIcon
+                  variant="transparent"
+                  size={isCompact ? "input-md" : "lg"}
+                  className={classes.toolbarAreaActionBtn}
+                  aria-label="Mở menu thao tác booking"
+                  disabled={isEditMode}
+                >
+                  <MoreVertical size={16} />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item onClick={() => setCreateBookingModalOpened(true)}>Tạo booking</Menu.Item>
+                <Menu.Item onClick={() => dayListModalRef.current?.openDayListModal()}>
+                  Danh sách booking
+                </Menu.Item>
+                <Menu.Item
+                  onClick={() => setMergeGroupsListModalOpen(true)}
+                  disabled={!activeAreaBranchId}
+                >
+                  Danh sách bàn gộp
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          ) : null}
           {!isEmployee && !isBranchManager ? (
             <Group gap={isCompact ? 8 : 4} className={classes.toolbarAreaActions} wrap="nowrap">
               <ActionIcon
@@ -4272,7 +4298,7 @@ export default function FloorMapPage() {
           <Accordion.Item value="search">
             <Accordion.Control icon={<Search size={16} />}>Tìm bàn & lọc</Accordion.Control>
             <Accordion.Panel>
-              <Stack gap="sm">
+              <Group gap="sm" grow wrap="nowrap" align="center">
                 <TextInputWithVoice
                   label="Tìm bàn"
                   placeholder="Tên bàn, khách, SĐT, giờ đặt, giờ check-in…"
@@ -4280,116 +4306,52 @@ export default function FloorMapPage() {
                   onChange={(event) => setSearch(event.currentTarget.value)}
                   size="sm"
                 />
-                <Select
-                  label="Lọc trạng thái"
-                  value={statusFilter}
-                  onChange={(value) => setStatusFilter(value ?? "all")}
-                  data={[
-                    { value: "all", label: "Tất cả trạng thái" },
-                    ...(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
-                      (status) => ({
-                        value: status,
-                        label: tableStatusLabel[status],
-                      })
-                    ),
-                  ]}
-                />
-              </Stack>
+                <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
+                  <Text size="sm" fw={500}>
+                    Lọc trạng thái
+                  </Text>
+                  <Group gap="xs" wrap="wrap" role="group" aria-label="Lọc trạng thái bàn">
+                    <Button
+                      size={isCompact ? "xs" : "compact-sm"}
+                      radius="xl"
+                      variant={statusFilter === "all" ? "filled" : "outline"}
+                      color="gray"
+                      onClick={() => setStatusFilter("all")}
+                    >
+                      Tất cả
+                    </Button>
+                    {(["available", "hold", "occupied", "locked"] as TableStatus[]).map((status) => {
+                      const selected = statusFilter === status;
+                      const color = tableStatusColor[status];
+                      return (
+                        <Button
+                          key={status}
+                          size={isCompact ? "xs" : "compact-sm"}
+                          radius="xl"
+                          variant={selected ? "filled" : "outline"}
+                          color={color}
+                          onClick={() => setStatusFilter(status)}
+                          styles={{
+                            root: selected
+                              ? {
+                                  borderWidth: 2,
+                                  borderStyle: "solid",
+                                  borderColor: `var(--mantine-color-${color}-7)`,
+                                }
+                              : undefined,
+                          }}
+                        >
+                          {tableStatusLabel[status]}
+                        </Button>
+                      );
+                    })}
+                  </Group>
+                </Stack>
+              </Group>
             </Accordion.Panel>
           </Accordion.Item>
         </Accordion>
       ) : null}
-
-      <Accordion
-        value={toolbarAccordionValue}
-        onChange={setToolbarAccordionValue}
-        classNames={{ root: classes.toolbarAccordion }}
-        variant="contained"
-        radius="md"
-        chevronPosition="right"
-      >
-        <Accordion.Item value="toolbar">
-          <Accordion.Control>Thanh công cụ sơ đồ</Accordion.Control>
-          <Accordion.Panel>
-            <div className={classes.canvasTopToolbar}>
-                {!isEmployee ? (
-                    <div className={classes.toolbarAreaSecondary}>
-                      <Group
-                        gap={isCompact ? 8 : 4}
-                        wrap={isCompact ? "wrap" : "nowrap"}
-                        grow={!isCompact}
-                        className={classes.toolbarAreaPrimaryBtns}
-                      >
-                        {!isEditMode ? (
-                          <>
-                            <Button
-                              color="brand"
-                              size={isCompact ? "sm" : "compact-sm"}
-                              className={classes.toolbarDayListBtn}
-                              onClick={() => setCreateBookingModalOpened(true)}
-                            >
-                              Tạo booking
-                            </Button>
-                            <Button
-                              size={isCompact ? "sm" : "compact-sm"}
-                              variant="filled"
-                              className={classes.toolbarDayListBtn}
-                              onClick={() => dayListModalRef.current?.openDayListModal()}
-                            >
-                              Danh sách booking
-                            </Button>
-                            <Button
-                              size={isCompact ? "sm" : "compact-sm"}
-                              variant="default"
-                              className={classes.toolbarDayListBtn}
-                              onClick={() => setMergeGroupsListModalOpen(true)}
-                              disabled={!activeAreaBranchId}
-                            >
-                              Danh sách bàn gộp
-                            </Button>
-                          </>
-                        ) : null}
-                        {isEditMode ? (
-                          <>
-                            <Button
-                              size="sm"
-                              leftSection={<Save size={16} />}
-                              loading={isSavingLayout}
-                              disabled={!editLayout || !isLayoutDirty}
-                              onClick={() => void handleSaveFloorLayout()}
-                              className={classes.toolbarSaveBtn}
-                            >
-                              Lưu sơ đồ ({floorMapSelectedDate.format("DD/MM")})
-                            </Button>
-                            <Button
-                              size="sm"
-                              leftSection={<Save size={16} />}
-                              variant="light"
-                              loading={isSavingLayout}
-                              disabled={!editLayout || !isLayoutDirty}
-                              onClick={() => void handleSaveFloorLayoutAsGlobal()}
-                              className={classes.toolbarSaveBtn}
-                            >
-                              Lưu sơ đồ mặc định
-                            </Button>
-                            <Button
-                              size={isCompact ? "sm" : "compact-sm"}
-                              variant="default"
-                              className={classes.toolbarDayListBtn}
-                              onClick={() => setLayoutTemplatesOpen(true)}
-                              disabled={!areaId || !hasSupabase}
-                            >
-                              Mẫu sơ đồ…
-                            </Button>
-                          </>
-                        ) : null}
-                      </Group>
-                    </div>
-                  ) : null}
-              </div>
-          </Accordion.Panel>
-        </Accordion.Item>
-      </Accordion>
 
       <PortalSectionCard>
         <div
@@ -4988,6 +4950,37 @@ export default function FloorMapPage() {
                   >
                     <Wrench size={16} />
                   </ActionIcon>
+                ) : null}
+                {isEditMode ? (
+                  <Group gap={isCompact ? 8 : 6} wrap="nowrap" style={{ pointerEvents: "auto" }}>
+                    <Button
+                      size="sm"
+                      leftSection={<Save size={16} />}
+                      loading={isSavingLayout}
+                      disabled={!editLayout || !isLayoutDirty}
+                      onClick={() => void handleSaveFloorLayout()}
+                    >
+                      Lưu sơ đồ ({floorMapSelectedDate.format("DD/MM")})
+                    </Button>
+                    <Button
+                      size="sm"
+                      leftSection={<Save size={16} />}
+                      variant="light"
+                      loading={isSavingLayout}
+                      disabled={!editLayout || !isLayoutDirty}
+                      onClick={() => void handleSaveFloorLayoutAsGlobal()}
+                    >
+                      Lưu sơ đồ mặc định
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={() => setLayoutTemplatesOpen(true)}
+                      disabled={!areaId || !hasSupabase}
+                    >
+                      Mẫu sơ đồ…
+                    </Button>
+                  </Group>
                 ) : null}
                 {isEditMode && isGridToolsDockOpen ? (
                   <div className={classes.canvasGridToolsDock}>
