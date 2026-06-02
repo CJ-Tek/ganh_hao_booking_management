@@ -2,7 +2,7 @@ export type PwaIconDef = {
   src: string;
   sizes: string;
   type: "image/png";
-  purpose?: "any" | "maskable" | "any maskable";
+  purpose?: "any" | "maskable";
 };
 
 export const ANDROID_PWA_ICONS: readonly PwaIconDef[] = [
@@ -15,14 +15,14 @@ export const ANDROID_PWA_ICONS: readonly PwaIconDef[] = [
     src: "/logo/pwa/android/192x192.png",
     sizes: "192x192",
     type: "image/png",
-    purpose: "any maskable",
+    purpose: "maskable",
   },
   { src: "/logo/pwa/android/384x384.png", sizes: "384x384", type: "image/png", purpose: "any" },
   {
     src: "/logo/pwa/android/512x512.png",
     sizes: "512x512",
     type: "image/png",
-    purpose: "any maskable",
+    purpose: "maskable",
   },
 ] as const;
 
