@@ -1,5 +1,10 @@
 .pageRoot {
   min-height: calc(100dvh - 88px - var(--manager-dock-reserve, 0px));
+  height: calc(100dvh - 88px - var(--manager-dock-reserve, 0px));
+  overflow: hidden;
+  padding-inline: clamp(8px, 1.2vw, 16px);
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
 }
 
 .toolbarAccordion {
@@ -18,8 +23,8 @@
 
 .canvasFrame {
   position: relative;
-  height: calc(100dvh - 210px - var(--manager-dock-reserve, 0px));
-  min-height: 620px;
+  height: max(360px, calc(100dvh - 210px - var(--manager-dock-reserve, 0px)));
+  min-height: 0;
   border: 1px solid #cbd5e1;
   border-radius: 12px;
   overflow: hidden;
@@ -480,8 +485,8 @@
 
 @media (max-width: 62em) {
   .canvasFrame {
-    height: calc(100dvh - 190px - var(--manager-dock-reserve, 0px));
-    min-height: 560px;
+    height: max(320px, calc(100dvh - 190px - var(--manager-dock-reserve, 0px)));
+    min-height: 0;
   }
 
   .canvasViewport {
@@ -501,11 +506,14 @@
 
   .pageRoot {
     min-height: calc(100dvh - 72px - var(--manager-dock-reserve, 0px));
+    height: calc(100dvh - 72px - var(--manager-dock-reserve, 0px));
+    padding-inline: 8px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
   }
 
   .canvasFrame {
-    height: calc(100dvh - 176px - var(--manager-dock-reserve, 0px));
-    min-height: 480px;
+    height: max(300px, calc(100dvh - 176px - var(--manager-dock-reserve, 0px)));
+    min-height: 0;
   }
 
   .canvasViewport {

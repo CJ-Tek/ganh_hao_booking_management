@@ -4146,7 +4146,10 @@ export default function FloorMapPage() {
       className={classes.pageRoot}
       style={
         reserveManagerDock
-          ? ({ ["--manager-dock-reserve" as string]: "58px" } as CSSProperties)
+          ? ({
+              ["--manager-dock-reserve" as string]:
+                "calc(72px + env(safe-area-inset-bottom, 0px))",
+            } as CSSProperties)
           : undefined
       }
     >
