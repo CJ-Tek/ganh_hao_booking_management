@@ -23,8 +23,10 @@ export function getSupabaseBrowserClient(): SupabaseClient<Database> | null {
   if (!browserClient) {
     browserClient = createClient<Database>(url, key, {
       auth: {
-        persistSession: false,
-        autoRefreshToken: false,
+        // Keep auth/session data across app restarts (critical for installed PWAs).
+        persistSession: true,
+        // Refresh tokens while app is active so reopened sessions remain valid.
+        autoRefreshToken: true,
       },
     });
   }
