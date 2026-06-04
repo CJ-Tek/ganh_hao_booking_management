@@ -31,6 +31,8 @@
   background: #f8fafc;
   container-type: inline-size;
   container-name: floor-map-canvas;
+  /* zoom dock width + right inset + gap — keeps mergeSelectionDock from overlapping */
+  --canvas-zoom-dock-clearance: 76px;
 }
 
 .canvasFramePendingPlacement {
@@ -304,18 +306,34 @@
 .canvasGridToolsDock {
   pointer-events: auto;
   flex: 0 1 auto;
-  width: auto;
-  min-width: min(220px, calc(100vw - 120px));
-  max-width: min(320px, calc(100vw - 80px));
   border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(6px);
   box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
-  padding: 8px 10px;
+}
+
+.canvasDateDock {
+  width: 10.5rem;
+  max-width: min(10.5rem, calc(100vw - 120px));
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 6px 8px;
+}
+
+.canvasDateDockTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .canvasGridToolsDock {
+  width: auto;
+  min-width: min(220px, calc(100vw - 120px));
+  max-width: min(320px, calc(100vw - 80px));
+  padding: 8px 10px;
   max-height: min(420px, calc(100% - 80px));
   overflow-y: auto;
 }
@@ -374,21 +392,6 @@
   .canvasTableActionGroup :global(.mantine-Button-root) {
     width: 100%;
   }
-}
-
-.canvasTableActionHint {
-  pointer-events: auto;
-  width: 100%;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(6px);
-  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.12);
-  padding: 8px 10px;
-}
-
-:global([data-mantine-color-scheme="dark"]) .canvasTableActionHint {
-  background: rgba(30, 36, 48, 0.92);
 }
 
 .canvasZoomDock {
@@ -550,7 +553,10 @@
     max-width: calc(100% - 16px);
   }
 
-  .canvasDateDock,
+  .canvasDateDock {
+    padding: 6px 8px;
+  }
+
   .canvasGridToolsDock {
     padding: 8px;
   }
@@ -578,10 +584,6 @@
 
   .canvasTableActionGroup :global(.mantine-Button-root) {
     width: 100%;
-  }
-
-  .canvasTableActionHint {
-    padding: 8px;
   }
 
   .canvasZoomDock {
@@ -1113,7 +1115,7 @@ button.mergeGroupContainerHeaderClickable:hover .mergeGroupContainerTitle {
   cursor: default;
 }
 
-/* Floating action bar for "Gộp đã chọn (N)" */
+/* Floating action bar for merge/split selection */
 .mergeSelectionDock {
   position: absolute;
   left: 50%;
@@ -1129,5 +1131,100 @@ button.mergeGroupContainerHeaderClickable:hover .mergeGroupContainerTitle {
   background: var(--mantine-color-body, #fff);
   border: 1px solid var(--mantine-color-default-border, #d0d7de);
   box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+  box-sizing: border-box;
+  max-width: calc(100% - 24px - var(--canvas-zoom-dock-clearance, 76px));
+}
+
+.mergeSelectionDockStatus {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.mergeSelectionDockActions {
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: 100%;
+}
+
+@container floor-map-canvas (max-width: 22em) {
+  .mergeSelectionDock {
+    left: 12px;
+    right: calc(12px + var(--canvas-zoom-dock-clearance, 76px));
+    width: auto;
+    bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    transform: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    max-width: none;
+  }
+
+  .mergeSelectionDockStatus {
+    width: 100%;
+    text-align: center;
+  }
+
+  .mergeSelectionDockActions {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    justify-content: stretch;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .mergeSelectionDockActions :global(.mantine-Button-root) {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
+    max-width: none;
+    box-sizing: border-box;
+  }
+}
+
+@media (max-width: 48em) {
+  .canvasFrame {
+    --canvas-zoom-dock-clearance: 68px;
+  }
+
+  .mergeSelectionDock {
+    left: 8px;
+    right: calc(8px + var(--canvas-zoom-dock-clearance, 68px));
+    width: auto;
+    bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    transform: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    max-width: none;
+  }
+
+  .mergeSelectionDockStatus {
+    width: 100%;
+    text-align: center;
+  }
+
+  .mergeSelectionDockActions {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    justify-content: stretch;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .mergeSelectionDockActions :global(.mantine-Button-root) {
+    flex: 1 1 0;
+    min-width: 0;
+    width: auto;
+    max-width: none;
+    box-sizing: border-box;
+  }
 }
 

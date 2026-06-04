@@ -284,6 +284,7 @@ const FIT_TABLE_BOUNDS_PADDING = 40;
 const TAP_PLACE_THRESHOLD_PX = 14;
 /** How long the merge/split instruction alert stays visible on the canvas (ms). */
 const GRID_TABLE_ACTION_HINT_MS = 3000;
+const GRID_TABLE_ACTION_HINT_ID = "floor-map-grid-table-action-hint";
 
 function isTableBlockTarget(target: EventTarget | null) {
   const el = target as HTMLElement | null;
@@ -593,8 +594,6 @@ export default function FloorMapPage() {
   const [mergeGroupReleaseBusyId, setMergeGroupReleaseBusyId] = useState<string | null>(null);
   /** Grid-view merge/split picking before the date confirmation modal. */
   const [gridTableActionMode, setGridTableActionMode] = useState<"merge" | "split" | null>(null);
-  const [gridTableActionHintVisible, setGridTableActionHintVisible] = useState(false);
-  const gridTableActionHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Tables selected on the grid for view-mode "Gộp bàn". */
   const [mergeSelectedTableIds, setMergeSelectedTableIds] = useState<string[]>([]);
   const [mergeStartDate, setMergeStartDate] = useState<string | null>(() =>
@@ -638,26 +637,23 @@ export default function FloorMapPage() {
 
   useEffect(() => {
     if (!gridTableActionMode) {
-      if (gridTableActionHintTimerRef.current) {
-        clearTimeout(gridTableActionHintTimerRef.current);
-        gridTableActionHintTimerRef.current = null;
-      }
-      setGridTableActionHintVisible(false);
+      notifications.hide(GRID_TABLE_ACTION_HINT_ID);
       return;
     }
-    setGridTableActionHintVisible(true);
-    if (gridTableActionHintTimerRef.current) {
-      clearTimeout(gridTableActionHintTimerRef.current);
-    }
-    gridTableActionHintTimerRef.current = setTimeout(() => {
-      setGridTableActionHintVisible(false);
-      gridTableActionHintTimerRef.current = null;
-    }, GRID_TABLE_ACTION_HINT_MS);
+    const title = gridTableActionMode === "merge" ? "Đang gộp bàn" : "Đang tách bàn";
+    const message =
+      gridTableActionMode === "merge"
+        ? "Chọn ít nhất 2 bàn trên sơ đồ, sau đó nhấn Xác nhận ở thanh dưới."
+        : "Chọn một bàn trên sơ đồ, sau đó nhấn Xác nhận ở thanh dưới.";
+    notifications.show({
+      id: GRID_TABLE_ACTION_HINT_ID,
+      title,
+      message,
+      color: "blue",
+      autoClose: GRID_TABLE_ACTION_HINT_MS,
+    });
     return () => {
-      if (gridTableActionHintTimerRef.current) {
-        clearTimeout(gridTableActionHintTimerRef.current);
-        gridTableActionHintTimerRef.current = null;
-      }
+      notifications.hide(GRID_TABLE_ACTION_HINT_ID);
     };
   }, [gridTableActionMode]);
 
@@ -4892,10 +4888,10 @@ export default function FloorMapPage() {
           </div>
           {isEditMode && editSelectedTableIds.length >= 2 ? (
             <div className={classes.mergeSelectionDock}>
-              <Text size="sm" fw={600}>
+              <Text size="sm" fw={600} className={classes.mergeSelectionDockStatus}>
                 Đã chọn {editSelectedTableIds.length} bàn
               </Text>
-              <Group gap="xs">
+              <Group gap="xs" className={classes.mergeSelectionDockActions}>
                 <Button
                   variant="default"
                   size="xs"
@@ -4916,14 +4912,14 @@ export default function FloorMapPage() {
           ) : null}
           {!isEditMode && gridTableActionMode ? (
             <div className={classes.mergeSelectionDock}>
-              <Text size="sm" fw={600}>
+              <Text size="sm" fw={600} className={classes.mergeSelectionDockStatus}>
                 {gridTableActionMode === "merge"
                   ? `Đã chọn ${mergeSelectedTableIds.length} bàn`
                   : splitSelectedTableName
                     ? `Đã chọn: ${splitSelectedTableName}`
                     : "Chọn một bàn cần tách"}
               </Text>
-              <Group gap="xs">
+              <Group gap="xs" className={classes.mergeSelectionDockActions}>
                 <Button variant="default" size="xs" onClick={cancelGridTableAction}>
                   Hủy
                 </Button>
@@ -4946,8 +4942,8 @@ export default function FloorMapPage() {
               <div className={classes.canvasTopLeftDocks}>
                 {isDatePickerDockOpen && !isEmployee ? (
                   <div className={classes.canvasDateDock}>
-                    <Group justify="space-between" align="center" wrap="nowrap" mb={4}>
-                      <Text size="sm" fw={600}>
+                    <Group justify="space-between" align="center" wrap="nowrap" mb={4} gap={4}>
+                      <Text size="sm" fw={600} className={classes.canvasDateDockTitle}>
                         Ngày xem sơ đồ
                       </Text>
                       <ActionIcon
@@ -4970,6 +4966,7 @@ export default function FloorMapPage() {
                       valueFormat="DD/MM/YYYY"
                       dropdownType="modal"
                       size={isCompact ? "xs" : "sm"}
+                      w="100%"
                     />
                   </div>
                 ) : null}
@@ -5163,20 +5160,6 @@ export default function FloorMapPage() {
                     </Button>
                   </Group>
                 </div>
-                {gridTableActionMode && gridTableActionHintVisible ? (
-                  <Alert
-                    variant="light"
-                    color="blue"
-                    className={classes.canvasTableActionHint}
-                    title={
-                      gridTableActionMode === "merge" ? "Đang gộp bàn" : "Đang tách bàn"
-                    }
-                  >
-                    {gridTableActionMode === "merge"
-                      ? "Chọn ít nhất 2 bàn trên sơ đồ, sau đó nhấn Xác nhận ở thanh dưới."
-                      : "Chọn một bàn trên sơ đồ, sau đó nhấn Xác nhận ở thanh dưới."}
-                  </Alert>
-                ) : null}
               </div>
             ) : null}
 
