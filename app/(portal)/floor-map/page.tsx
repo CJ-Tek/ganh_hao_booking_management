@@ -4345,42 +4345,49 @@ export default function FloorMapPage() {
                   <Text size="sm" fw={500}>
                     Lọc trạng thái
                   </Text>
-                  <Group gap="xs" wrap="wrap" role="group" aria-label="Lọc trạng thái bàn">
-                    <Button
-                      size={isCompact ? "xs" : "compact-sm"}
-                      radius="xl"
-                      variant={statusFilter === "all" ? "filled" : "outline"}
-                      color="gray"
-                      onClick={() => setStatusFilter("all")}
+                  <div className="mobile-filter-chip-scroll">
+                    <Group
+                      gap="xs"
+                      wrap={isCompact ? "nowrap" : "wrap"}
+                      role="group"
+                      aria-label="Lọc trạng thái bàn"
                     >
-                      Tất cả
-                    </Button>
-                    {(["available", "hold", "occupied", "locked"] as TableStatus[]).map((status) => {
-                      const selected = statusFilter === status;
-                      const color = tableStatusColor[status];
-                      return (
-                        <Button
-                          key={status}
-                          size={isCompact ? "xs" : "compact-sm"}
-                          radius="xl"
-                          variant={selected ? "filled" : "outline"}
-                          color={color}
-                          onClick={() => setStatusFilter(status)}
-                          styles={{
-                            root: selected
-                              ? {
-                                  borderWidth: 2,
-                                  borderStyle: "solid",
-                                  borderColor: `var(--mantine-color-${color}-7)`,
-                                }
-                              : undefined,
-                          }}
-                        >
-                          {tableStatusLabel[status]}
-                        </Button>
-                      );
-                    })}
-                  </Group>
+                      <Button
+                        size={isCompact ? "xs" : "compact-sm"}
+                        radius="xl"
+                        variant={statusFilter === "all" ? "filled" : "outline"}
+                        color="gray"
+                        onClick={() => setStatusFilter("all")}
+                      >
+                        Tất cả
+                      </Button>
+                      {(["available", "hold", "occupied", "locked"] as TableStatus[]).map((status) => {
+                        const selected = statusFilter === status;
+                        const color = tableStatusColor[status];
+                        return (
+                          <Button
+                            key={status}
+                            size={isCompact ? "xs" : "compact-sm"}
+                            radius="xl"
+                            variant={selected ? "filled" : "outline"}
+                            color={color}
+                            onClick={() => setStatusFilter(status)}
+                            styles={{
+                              root: selected
+                                ? {
+                                    borderWidth: 2,
+                                    borderStyle: "solid",
+                                    borderColor: `var(--mantine-color-${color}-7)`,
+                                  }
+                                : undefined,
+                            }}
+                          >
+                            {tableStatusLabel[status]}
+                          </Button>
+                        );
+                      })}
+                    </Group>
+                  </div>
                 </Stack>
               </Group>
             </Accordion.Panel>
@@ -5132,7 +5139,12 @@ export default function FloorMapPage() {
             {!isEmployee && !isEditMode ? (
               <div className={classes.canvasTopRightDocks}>
                 <div className={classes.canvasTableActionDock}>
-                  <Group gap={isCompact ? 6 : 8} wrap="wrap" justify="flex-end">
+                  <Group
+                    className={classes.canvasTableActionGroup}
+                    gap={isCompact ? 6 : 8}
+                    wrap="wrap"
+                    justify="flex-end"
+                  >
                     <Button
                       size={isCompact ? "xs" : "compact-sm"}
                       variant={gridTableActionMode === "merge" ? "filled" : "light"}

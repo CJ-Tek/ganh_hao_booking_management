@@ -13,7 +13,7 @@ export function BookingListPaginationNav(props: {
   const { page, totalPages, onPageChange } = props;
 
   return (
-    <Group justify="center" gap="xs" wrap="nowrap">
+    <Group justify="center" gap="xs" wrap="nowrap" className="booking-list-pagination-nav">
       <Button
         variant="default"
         size="compact-sm"

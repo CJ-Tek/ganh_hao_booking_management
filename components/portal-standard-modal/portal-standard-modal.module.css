@@ -5,6 +5,14 @@
   overflow: hidden;
 }
 
+@media (max-width: 61.9375em) {
+  .portal-standard-modal-content.modalContent {
+    max-height: 100dvh;
+    height: 100%;
+    border-radius: 0;
+  }
+}
+
 .modalHeader {
   position: sticky;
   top: 0;

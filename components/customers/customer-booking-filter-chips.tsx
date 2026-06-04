@@ -28,8 +28,8 @@ export function CustomerBookingFilterChips(props: {
 
   const chips: CustomerBookingFilter[] = ["all", "has_booking", "no_booking"];
 
-  return (
-    <Group gap="xs" wrap="wrap" role="group" aria-label="Lọc khách hàng theo booking">
+  const chipGroup = (
+    <Group gap="xs" wrap={isCompact ? "nowrap" : "wrap"} role="group" aria-label="Lọc khách hàng theo booking">
       {chips.map((chip) => {
         const selected = value === chip;
         const color = customerBookingFilterColor[chip];
@@ -57,4 +57,10 @@ export function CustomerBookingFilterChips(props: {
       })}
     </Group>
   );
+
+  if (isCompact) {
+    return <div className="mobile-filter-chip-scroll">{chipGroup}</div>;
+  }
+
+  return chipGroup;
 }

@@ -261,22 +261,6 @@ export default function DashboardPage() {
             size="md"
             voiceIconSize="md"
           />
-          <BookingListPaginationBar
-            pageSize={mobilePageSize}
-            pageSizeSelectData={["6", "8", "10", "12", "20"].map((value) => ({
-              value,
-              label: value,
-            }))}
-            onPageSizeChange={(size) => {
-              setMobilePageSize(size);
-              setMobilePage(1);
-            }}
-            page={mobilePageSafe}
-            totalPages={mobileTotalPages}
-            onPageChange={setMobilePage}
-            totalBookings={mobileSortedBookings.length}
-            summaryItemLabel="booking"
-          />
           {pagedMobileBookings.length === 0 ? (
             <Text c="dimmed" size="sm">
               Chưa có booking nào.
@@ -310,22 +294,24 @@ export default function DashboardPage() {
               );
             })
           )}
-          <BookingListPaginationBar
-            pageSize={mobilePageSize}
-            pageSizeSelectData={["6", "8", "10", "12", "20"].map((value) => ({
-              value,
-              label: value,
-            }))}
-            onPageSizeChange={(size) => {
-              setMobilePageSize(size);
-              setMobilePage(1);
-            }}
-            page={mobilePageSafe}
-            totalPages={mobileTotalPages}
-            onPageChange={setMobilePage}
-            totalBookings={mobileSortedBookings.length}
-            summaryItemLabel="booking"
-          />
+          <div className="mobile-list-pagination-footer">
+            <BookingListPaginationBar
+              pageSize={mobilePageSize}
+              pageSizeSelectData={["6", "8", "10", "12", "20"].map((value) => ({
+                value,
+                label: value,
+              }))}
+              onPageSizeChange={(size) => {
+                setMobilePageSize(size);
+                setMobilePage(1);
+              }}
+              page={mobilePageSafe}
+              totalPages={mobileTotalPages}
+              onPageChange={setMobilePage}
+              totalBookings={mobileSortedBookings.length}
+              summaryItemLabel="booking"
+            />
+          </div>
         </Stack>
       ) : (
         <PortalDataTable<Booking>

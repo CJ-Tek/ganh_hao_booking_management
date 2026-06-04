@@ -51,8 +51,14 @@ export default function LoginPage() {
   };
 
   return (
-    <Center mih="100dvh" bg="linear-gradient(180deg, #f4f8fd 0%, #eaf2fb 100%)">
-      <Container w={420}>
+    <Center
+      mih="100dvh"
+      bg="linear-gradient(180deg, #f4f8fd 0%, #eaf2fb 100%)"
+      px="md"
+      py="max(var(--mantine-spacing-md), env(safe-area-inset-top, 0px))"
+      pb="max(var(--mantine-spacing-md), env(safe-area-inset-bottom, 0px))"
+    >
+      <Container w={420} maw="100%">
         <Card shadow="lg" radius="lg" p="xl" withBorder>
           <Stack gap="md">
             <Center>

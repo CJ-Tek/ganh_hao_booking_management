@@ -2,6 +2,7 @@
 
 import { Modal, type ModalProps } from "@mantine/core";
 import { type ReactNode } from "react";
+import { usePortalModalLayoutProps } from "@/lib/use-portal-modal-layout";
 import classes from "./portal-standard-modal.module.css";
 
 export type PortalStandardModalProps = ModalProps & {
@@ -17,14 +18,20 @@ export function PortalStandardModal({
   classNames,
   ...rest
 }: PortalStandardModalProps) {
+  const modalLayout = usePortalModalLayoutProps();
+  const contentClassName = [classes.modalContent, "portal-standard-modal-content", classNames?.content]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <Modal
+      {...modalLayout}
       {...rest}
       classNames={{
-        header: classes.modalHeader,
-        body: classes.modalBody,
-        content: classes.modalContent,
         ...classNames,
+        header: classNames?.header ?? classes.modalHeader,
+        body: classNames?.body ?? classes.modalBody,
+        content: contentClassName,
       }}
     >
       {topNotice ? <div className={classes.modalTopNotice}>{topNotice}</div> : null}

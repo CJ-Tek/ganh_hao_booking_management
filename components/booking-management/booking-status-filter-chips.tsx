@@ -30,8 +30,8 @@ export function BookingStatusFilterChips(props: BookingStatusFilterChipsProps) {
     { value: null, label: "Tất cả", color: "gray" },
   ];
 
-  return (
-    <Group gap="xs" wrap="wrap" role="group" aria-label="Lọc trạng thái booking">
+  const chipGroup = (
+    <Group gap="xs" wrap={isCompact ? "nowrap" : "wrap"} role="group" aria-label="Lọc trạng thái booking">
       {chips.map((chip) => {
         const selected = value === chip.value;
         return (
@@ -58,4 +58,10 @@ export function BookingStatusFilterChips(props: BookingStatusFilterChipsProps) {
       })}
     </Group>
   );
+
+  if (isCompact) {
+    return <div className="mobile-filter-chip-scroll">{chipGroup}</div>;
+  }
+
+  return chipGroup;
 }

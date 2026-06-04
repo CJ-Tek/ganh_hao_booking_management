@@ -35,6 +35,7 @@ import {
   type BookingDuplicateInfo,
 } from "@/lib/booking-duplicate";
 import { usePortalCompact } from "@/lib/use-portal-compact";
+import { usePortalModalLayoutProps } from "@/lib/use-portal-modal-layout";
 import { type Booking } from "@/lib/types";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
 
@@ -73,6 +74,7 @@ export function CreateBookingModal({
     setActiveBranchId,
   } = useAppContext();
   const isCompact = usePortalCompact();
+  const modalLayout = usePortalModalLayoutProps();
   const branchId = filteredBranchIds[0] ?? null;
 
   const [isCreating, setIsCreating] = useState(false);
@@ -336,13 +338,13 @@ export function CreateBookingModal({
   return (
     <>
     <Modal
+      {...modalLayout}
       opened={opened}
       onClose={closeModal}
       closeOnClickOutside={!isCreating}
       closeOnEscape={!isCreating}
       title="Tạo booking"
       size="xl"
-      centered
     >
       <PortalSectionCard>
         <Stack gap="sm">

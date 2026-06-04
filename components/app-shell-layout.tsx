@@ -207,8 +207,12 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
         : "Cổng quản lý tổng";
 
   return (
+    <>
+      <a href="#portal-main-content" className="portal-skip-link">
+        Bỏ qua đến nội dung
+      </a>
     <AppShell
-      header={{ height: { base: 84, sm: 76 } }}
+      header={{ height: { base: 72, sm: 76 } }}
       navbar={{
         width: 320,
         breakpoint: "md",
@@ -283,6 +287,31 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 <RefreshCw size={20} strokeWidth={1.75} />
               </ActionIcon>
               {currentUser?.role !== "employee" ? (
+              isCompact ? (
+                <Box className={classes.notificationBellWrap}>
+                  <ActionIcon
+                    variant="transparent"
+                    color="white"
+                    size="lg"
+                    radius="md"
+                    aria-label="Thông báo nội bộ"
+                    onClick={() => router.push("/notifications")}
+                  >
+                    <Bell size={20} strokeWidth={1.75} />
+                  </ActionIcon>
+                  {unreadNotifications.length > 0 ? (
+                    <Badge
+                      size="xs"
+                      circle
+                      variant="filled"
+                      color="red"
+                      className={classes.notificationBadge}
+                    >
+                      {unreadNotifications.length > 99 ? "99+" : unreadNotifications.length}
+                    </Badge>
+                  ) : null}
+                </Box>
+              ) : (
               <Popover width={380} position="bottom-end" withArrow shadow="md">
                 <Popover.Target>
                   <Box className={classes.notificationBellWrap}>
@@ -432,6 +461,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 ) : null}
                 </Popover.Dropdown>
               </Popover>
+              )
               ) : null}
 
               <Group gap="xs" wrap="nowrap" visibleFrom="md">
@@ -572,6 +602,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
       </AppShell.Navbar>
 
       <AppShell.Main
+        id="portal-main-content"
+        tabIndex={-1}
         pb={
           showManagerDock
             ? "calc(66px + env(safe-area-inset-bottom, 0px))"
@@ -719,5 +751,6 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
         </>
       ) : null}
     </AppShell>
+    </>
   );
 }

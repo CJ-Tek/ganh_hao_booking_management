@@ -4,6 +4,7 @@ import { Button, Collapse, Group, Select, Stack } from "@mantine/core";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { ReactNode } from "react";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
+import { usePortalCompact } from "@/lib/use-portal-compact";
 
 export function BookingListTableAssignFilter(props: {
   value: "all" | "assigned" | "unassigned";
@@ -44,9 +45,11 @@ export function BookingListFiltersToolbar(props: {
     collapseFilters,
   } = props;
 
+  const isCompact = usePortalCompact();
+
   return (
     <Stack gap="sm">
-      <Group align="flex-end" gap="sm" wrap="nowrap">
+      <Group align="flex-end" gap="sm" wrap={isCompact ? "wrap" : "nowrap"}>
         <TextInputWithVoice
           placeholder={searchPlaceholder}
           value={searchQuery}
@@ -61,6 +64,7 @@ export function BookingListFiltersToolbar(props: {
           aria-expanded={filtersOpen}
           onClick={() => onFiltersOpenChange(!filtersOpen)}
           rightSection={filtersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          style={isCompact ? { flex: "1 1 auto", minWidth: "7.5rem" } : undefined}
         >
           {filtersOpen ? "Ẩn bộ lọc" : "Bộ lọc"}
         </Button>

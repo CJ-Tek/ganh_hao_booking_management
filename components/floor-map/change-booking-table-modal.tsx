@@ -9,6 +9,7 @@ import {
   formatTableSlotConflictMessage,
   getAssignableCandidateTables,
 } from "@/lib/booking-meta";
+import { usePortalModalLayoutProps } from "@/lib/use-portal-modal-layout";
 import type { Area, Booking, DiningTable } from "@/lib/types";
 
 export type ChangeBookingTableModalProps = {
@@ -100,13 +101,15 @@ export function ChangeBookingTableModal(props: ChangeBookingTableModalProps) {
     !targetConflictMessage &&
     !loading;
 
+  const modalLayout = usePortalModalLayoutProps();
+
   return (
     <Modal
+      {...modalLayout}
       opened={opened}
       onClose={onClose}
       title="Đổi bàn"
       size="xl"
-      centered
       overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
     >
       {booking ? (

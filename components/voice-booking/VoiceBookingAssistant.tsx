@@ -25,6 +25,7 @@ import { matchAreaId, matchTableId, type AreaLite, type TableLite } from "@/lib/
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
 import { warmUpMicrophoneForSpeech } from "@/lib/voice-booking/mic-warmup";
 import { tableStatusLabel } from "@/lib/display";
+import { usePortalModalLayoutProps } from "@/lib/use-portal-modal-layout";
 import type { Area, Booking, DiningTable, TableMergeGroup } from "@/lib/types";
 
 type ActionResult = {
@@ -200,6 +201,8 @@ export function VoiceBookingAssistant(props: {
     tablePickerMergeGroups = [],
     tablePickerBookings = [],
   } = props;
+
+  const modalLayout = usePortalModalLayoutProps();
 
   const useTablePicker =
     !hideAreaTablePickers &&
@@ -867,7 +870,13 @@ export function VoiceBookingAssistant(props: {
         Đặt bàn bằng giọng nói
       </Button>
 
-      <Modal opened={opened} onClose={closeModal} title="Đặt bàn bằng giọng nói" size="lg">
+      <Modal
+        {...modalLayout}
+        opened={opened}
+        onClose={closeModal}
+        title="Đặt bàn bằng giọng nói"
+        size="lg"
+      >
         {formBody}
       </Modal>
     </>

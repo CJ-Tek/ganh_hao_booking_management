@@ -356,6 +356,26 @@
   width: auto;
 }
 
+.canvasTableActionGroup {
+  flex-wrap: wrap;
+}
+
+@container floor-map-canvas (max-width: 22em) {
+  .canvasTableActionDock {
+    width: 100%;
+  }
+
+  .canvasTableActionGroup {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .canvasTableActionGroup :global(.mantine-Button-root) {
+    width: 100%;
+  }
+}
+
 .canvasTableActionHint {
   pointer-events: auto;
   width: 100%;
@@ -544,6 +564,20 @@
     top: 8px;
     right: 8px;
     max-width: calc(100% - 16px);
+  }
+
+  .canvasTableActionDock {
+    width: 100%;
+  }
+
+  .canvasTableActionGroup {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .canvasTableActionGroup :global(.mantine-Button-root) {
+    width: 100%;
   }
 
   .canvasTableActionHint {

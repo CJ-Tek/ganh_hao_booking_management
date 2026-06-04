@@ -20,9 +20,10 @@ export function PortalListSectionMobile(props: {
         <PortalListPanelHeader title={title} filters={headerFilters} />
         {filtersToolbar}
         <Stack gap="xs">
-          {paginationBar}
           {children}
-          {paginationBar}
+          {paginationBar ? (
+            <div className="mobile-list-pagination-footer">{paginationBar}</div>
+          ) : null}
         </Stack>
       </Stack>
     </PortalSectionCard>

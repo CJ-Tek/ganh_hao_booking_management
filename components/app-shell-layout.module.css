@@ -75,3 +75,13 @@
     width: 120px;
   }
 }
+
+@media (min-width: 48em) and (max-width: 61.9375em) {
+  .branchSelect {
+    width: min(200px, 28vw);
+  }
+
+  .brandCopy :global(.mantine-Title-root) {
+    font-size: 1rem;
+  }
+}

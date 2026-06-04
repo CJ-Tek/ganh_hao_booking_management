@@ -267,22 +267,6 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
       ) : null}
       {isCompact && mobileCardRender ? (
         <Stack gap="xs">
-          <BookingListPaginationBar
-            pageSize={mobileRecordsPerPage}
-            pageSizeSelectData={[...mobileRecordsPerPageOptions].map((size) => ({
-              value: String(size),
-              label: String(size),
-            }))}
-            onPageSizeChange={(size) => {
-              setMobileRecordsPerPage(size);
-              setMobilePage(1);
-            }}
-            page={mobilePageSafe}
-            totalPages={totalMobilePages}
-            onPageChange={setMobilePage}
-            totalBookings={sortedRecords.length}
-            summaryItemLabel={mobileSummaryItemLabel}
-          />
           {pagedMobileRecords.length === 0 ? (
             <Text c="dimmed" size="sm">
               {noRecordsText}
@@ -290,6 +274,7 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
           ) : (
             pagedMobileRecords.map((record) => mobileCardRender(record))
           )}
+          <div className="mobile-list-pagination-footer">
           <BookingListPaginationBar
             pageSize={mobileRecordsPerPage}
             pageSizeSelectData={[...mobileRecordsPerPageOptions].map((size) => ({
@@ -306,6 +291,7 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
             totalBookings={sortedRecords.length}
             summaryItemLabel={mobileSummaryItemLabel}
           />
+          </div>
         </Stack>
       ) : (
         <DataTable {...dataTableElementProps} />
