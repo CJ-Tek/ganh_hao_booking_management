@@ -1083,12 +1083,9 @@ button.mergeGroupContainerHeaderClickable:hover .mergeGroupContainerTitle {
   border-color: rgba(116, 192, 252, 0.65);
 }
 
-.tableBlockSelectionCheckbox {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  z-index: 4;
-  pointer-events: auto;
+.tableBlockGridSelectable {
+  cursor: pointer;
+  touch-action: manipulation;
 }
 
 /* ---- Edit-mode multi-select highlight for merge picking ---- */

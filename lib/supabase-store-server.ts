@@ -167,12 +167,19 @@ async function maybeRunBookingMaintenance(force = false): Promise<void> {
   bookingMaintenanceInFlight = Promise.all([
     runBookingMaintenanceInSupabase(),
     releaseExpiredTableMergeGroupsInSupabase(),
+    deleteExpiredTableSplitClonesInSupabase(),
   ])
-    .then(([result]) => {
-      if (result.ok) {
+    .then(([bookingResult, mergeResult, splitResult]) => {
+      if (bookingResult.ok) {
         lastBookingMaintenanceAt = Date.now();
       } else {
-        console.warn("[booking-maintenance] failed:", result.message);
+        console.warn("[booking-maintenance] failed:", bookingResult.message);
+      }
+      if (!mergeResult.ok) {
+        console.warn("[merge-expiry] failed:", mergeResult.message);
+      }
+      if (!splitResult.ok) {
+        console.warn("[split-expiry] failed:", splitResult.message);
       }
     })
     .finally(() => {
@@ -3256,7 +3263,7 @@ export async function createTableSplitCloneInSupabase(input: {
     return { ok: false, message: sourceErr?.message ?? "Không tìm thấy bàn nguồn." };
   }
   if (source.split_source_table_id) {
-    return { ok: false, message: "Chỉ tách được bàn gốc, không tách bản sao." };
+    return { ok: false, message: "Chỉ tách được bàn gốc, không tách bàn đã tách." };
   }
   if ((source.status as TableStatus) === "locked") {
     return { ok: false, message: "Không tách được bàn đang khóa." };
@@ -3346,7 +3353,7 @@ export async function createTableSplitCloneInSupabase(input: {
     )
     .single();
   if (insertErr || !inserted) {
-    return { ok: false, message: insertErr?.message ?? "Không tạo được bản sao bàn." };
+    return { ok: false, message: insertErr?.message ?? "Không tạo được bàn tách." };
   }
 
   const table = mapDiningTableFromRow(inserted);
@@ -3399,7 +3406,7 @@ export async function createTableSplitCloneInSupabase(input: {
   let message = `Đã tách bàn "${source.name}" thành "${cloneName}" (${input.startDate} → ${input.endDate}).`;
   if (!adjacent) {
     message +=
-      " Chưa tìm được ô trống kề bàn gốc — vào Sơ đồ (chỉnh sửa) để kéo bản sao sang vị trí phù hợp.";
+      " Chưa tìm được ô trống kề bàn gốc — vào Sơ đồ (chỉnh sửa) để kéo bàn tách sang vị trí phù hợp.";
   }
 
   return {
@@ -3706,6 +3713,84 @@ export async function releaseExpiredTableMergeGroupsInSupabase(): Promise<Result
     ok: true,
     releasedCount,
     message: `Đã tự giải tán ${releasedCount} cụm bàn gộp hết hạn.`,
+  };
+}
+
+const SPLIT_CLONE_MAINTENANCE_ACTIVE_BOOKING_STATUSES: BookingStatus[] = [
+  "pending",
+  "confirmed",
+  "seated",
+  "checked_in",
+];
+
+/** Delete split-clone rows whose end date is before today (calendar day). */
+export async function deleteExpiredTableSplitClonesInSupabase(): Promise<Result & {
+  deletedCount?: number;
+  skippedCount?: number;
+}> {
+  const client = ensureClient();
+  const today = dayjs().format("YYYY-MM-DD");
+  const { data: expiredRows, error } = await client
+    .from("tables")
+    .select("id, name")
+    .not("split_source_table_id", "is", null)
+    .lt("split_end_date", today);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  const rows = (expiredRows ?? []) as Array<{ id: string; name: string }>;
+  if (rows.length === 0) {
+    return { ok: true, message: "Không có bàn tách hết hạn.", deletedCount: 0, skippedCount: 0 };
+  }
+
+  let deletedCount = 0;
+  let skippedCount = 0;
+  const failures: string[] = [];
+
+  for (const row of rows) {
+    const { count: activeBookingCount, error: bookingErr } = await client
+      .from("bookings")
+      .select("*", { count: "exact", head: true })
+      .eq("table_id", row.id)
+      .in("status", SPLIT_CLONE_MAINTENANCE_ACTIVE_BOOKING_STATUSES);
+    if (bookingErr) {
+      failures.push(`${row.name}: ${bookingErr.message}`);
+      continue;
+    }
+    if ((activeBookingCount ?? 0) > 0) {
+      skippedCount += 1;
+      failures.push(
+        `${row.name}: còn ${activeBookingCount} booking đang giữ — chuyển hoặc kết thúc trước khi gỡ tách.`
+      );
+      continue;
+    }
+    try {
+      await deleteTableInSupabase(row.id);
+      deletedCount += 1;
+    } catch (deleteErr) {
+      const message =
+        deleteErr instanceof Error ? deleteErr.message : "Không xóa được bàn tách.";
+      failures.push(`${row.name}: ${message}`);
+    }
+  }
+
+  if (failures.length > 0) {
+    return {
+      ok: deletedCount > 0,
+      deletedCount,
+      skippedCount,
+      message:
+        deletedCount > 0
+          ? `Đã gỡ ${deletedCount} bàn tách hết hạn. Chưa gỡ được: ${failures.join("; ")}`
+          : failures.join("; "),
+    };
+  }
+
+  return {
+    ok: true,
+    deletedCount,
+    skippedCount,
+    message: `Đã tự gỡ ${deletedCount} bàn tách hết hạn.`,
   };
 }
 

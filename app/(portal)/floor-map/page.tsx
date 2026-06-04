@@ -59,6 +59,7 @@ import {
 import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
 import { useBookingManagement } from "@/components/booking-management/use-booking-management";
 import { MergeGroupsPanel } from "@/components/merge-groups/merge-groups-panel";
+import { SplitClonesPanel } from "@/components/split-clones/split-clones-panel";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import { FloorLayoutTemplatesModal } from "@/components/floor-map/floor-layout-templates-modal";
 import { FloorMapGrid } from "@/components/floor-map/floor-map-grid";
@@ -199,6 +200,7 @@ import {
   filterTablesForFloorMapDay,
   isSplitCloneEffectiveOnDate,
   isSplitCloneTable,
+  resolveSplitCloneNavigationDate,
 } from "@/lib/table-split-clone-utils";
 import {
   fetchFloorMapDayBookings,
@@ -510,6 +512,7 @@ export default function FloorMapPage() {
     removeTableFromMergeGroup,
     releaseTableMergeGroup,
     updateTableMergeGroupDates,
+    deleteTable,
   } = useAppContext();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -591,7 +594,10 @@ export default function FloorMapPage() {
   const { isBusy: isTableStatusBusy, run: runTableStatusAction } = useBusyId();
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
   const [mergeGroupsListModalOpen, setMergeGroupsListModalOpen] = useState(false);
+  const [splitClonesListModalOpen, setSplitClonesListModalOpen] = useState(false);
   const [mergeGroupReleaseBusyId, setMergeGroupReleaseBusyId] = useState<string | null>(null);
+  const [splitCloneBusyId, setSplitCloneBusyId] = useState<string | null>(null);
+  const [splitCloneDeleteTarget, setSplitCloneDeleteTarget] = useState<string | null>(null);
   /** Grid-view merge/split picking before the date confirmation modal. */
   const [gridTableActionMode, setGridTableActionMode] = useState<"merge" | "split" | null>(null);
   /** Tables selected on the grid for view-mode "Gộp bàn". */
@@ -643,8 +649,8 @@ export default function FloorMapPage() {
     const title = gridTableActionMode === "merge" ? "Đang gộp bàn" : "Đang tách bàn";
     const message =
       gridTableActionMode === "merge"
-        ? "Chọn ít nhất 2 bàn trên sơ đồ, sau đó nhấn Xác nhận ở thanh dưới."
-        : "Chọn một bàn trên sơ đồ, sau đó nhấn Xác nhận ở thanh dưới.";
+        ? "Chạm ít nhất 2 bàn trên sơ đồ để chọn, sau đó nhấn Xác nhận ở thanh dưới."
+        : "Chạm một bàn trên sơ đồ để chọn, sau đó nhấn Xác nhận ở thanh dưới.";
     notifications.show({
       id: GRID_TABLE_ACTION_HINT_ID,
       title,
@@ -1230,48 +1236,6 @@ export default function FloorMapPage() {
     }
     return ids;
   }, [floorMapSelectedDate, state.mergeGroups]);
-
-  const mergeCandidateTables = useMemo(() => {
-    if (!areaId) {
-      return [];
-    }
-    return state.tables
-      .filter(
-        (table) =>
-          table.areaId === areaId &&
-          table.status !== "locked" &&
-          !isSplitCloneTable(table) &&
-          !seatedTableIdsOnFloorDay.has(table.id) &&
-          !allActiveMergedTableIds.has(table.id)
-      )
-      .sort((a, b) => a.name.localeCompare(b.name, "vi"));
-  }, [allActiveMergedTableIds, areaId, seatedTableIdsOnFloorDay, state.tables]);
-
-  const splitCandidateTables = useMemo(() => {
-    if (!areaId) {
-      return [];
-    }
-    return state.tables
-      .filter(
-        (table) =>
-          table.areaId === areaId &&
-          table.status !== "locked" &&
-          !isSplitCloneTable(table) &&
-          !seatedTableIdsOnFloorDay.has(table.id) &&
-          !allActiveMergedTableIds.has(table.id)
-      )
-      .sort((a, b) => a.name.localeCompare(b.name, "vi"));
-  }, [allActiveMergedTableIds, areaId, seatedTableIdsOnFloorDay, state.tables]);
-
-  const mergeCandidateTableIds = useMemo(
-    () => new Set(mergeCandidateTables.map((table) => table.id)),
-    [mergeCandidateTables]
-  );
-
-  const splitCandidateTableIds = useMemo(
-    () => new Set(splitCandidateTables.map((table) => table.id)),
-    [splitCandidateTables]
-  );
 
   /** Active merge groups inside the currently selected area (snapshot-derived, no extra fetch). */
   const mergeGroupsInArea = useMemo<TableMergeGroup[]>(() => {
@@ -2016,6 +1980,47 @@ export default function FloorMapPage() {
       return { ...table, status };
     });
   }, [effectiveMergeGroups, floorMapDayBookings, layoutTablesInArea]);
+
+  /** Tables eligible for grid merge/split — uses day-derived status shown on the floor map. */
+  const mergeCandidateTables = useMemo(() => {
+    if (!areaId) {
+      return [];
+    }
+    return floorMapDisplayTables
+      .filter(
+        (table) =>
+          table.status !== "locked" &&
+          !isSplitCloneTable(table) &&
+          !seatedTableIdsOnFloorDay.has(table.id) &&
+          !allActiveMergedTableIds.has(table.id)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  }, [allActiveMergedTableIds, areaId, floorMapDisplayTables, seatedTableIdsOnFloorDay]);
+
+  const splitCandidateTables = useMemo(() => {
+    if (!areaId) {
+      return [];
+    }
+    return floorMapDisplayTables
+      .filter(
+        (table) =>
+          table.status !== "locked" &&
+          !isSplitCloneTable(table) &&
+          !seatedTableIdsOnFloorDay.has(table.id) &&
+          !allActiveMergedTableIds.has(table.id)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+  }, [allActiveMergedTableIds, areaId, floorMapDisplayTables, seatedTableIdsOnFloorDay]);
+
+  const mergeCandidateTableIds = useMemo(
+    () => new Set(mergeCandidateTables.map((table) => table.id)),
+    [mergeCandidateTables]
+  );
+
+  const splitCandidateTableIds = useMemo(
+    () => new Set(splitCandidateTables.map((table) => table.id)),
+    [splitCandidateTables]
+  );
 
   const detailMergeMemberOccupiedTableNames = useMemo(() => {
     if (!detailMergeGroup) {
@@ -3488,6 +3493,49 @@ export default function FloorMapPage() {
     }
   };
 
+  const splitCloneDeleteTargetName = useMemo(() => {
+    if (!splitCloneDeleteTarget) {
+      return null;
+    }
+    return state.tables.find((table) => table.id === splitCloneDeleteTarget)?.name ?? null;
+  }, [splitCloneDeleteTarget, state.tables]);
+
+  const splitCloneDeleteActiveBookings = useMemo(() => {
+    if (!splitCloneDeleteTarget) {
+      return 0;
+    }
+    return floorMapDayBookings.filter(
+      (booking) =>
+        booking.tableId === splitCloneDeleteTarget &&
+        !["completed", "cancelled", "no_show"].includes(booking.status)
+    ).length;
+  }, [floorMapDayBookings, splitCloneDeleteTarget]);
+
+  const handleDeleteSplitClone = async (cloneId: string) => {
+    if (!hasSupabase) {
+      notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
+      return;
+    }
+    setSplitCloneBusyId(cloneId);
+    try {
+      await deleteTable(cloneId);
+      await reload({ scope: "floor" });
+      notifications.show({ color: "green", message: "Đã xóa bàn tách." });
+      setSplitCloneDeleteTarget(null);
+      if (detailTable?.id === cloneId) {
+        closeDetailModal();
+      }
+      await refreshDayLayout();
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Không thể xóa tách.",
+      });
+    } finally {
+      setSplitCloneBusyId(null);
+    }
+  };
+
   const handleReleaseMergeGroup = async (groupId: string) => {
     if (!hasSupabase) {
       notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
@@ -4130,6 +4178,53 @@ export default function FloorMapPage() {
     setSplitSelectedTableId((prev) => (prev === tableId ? null : tableId));
   };
 
+  const notifyGridTableActionIneligible = (
+    table: DiningTable,
+    action: "merge" | "split"
+  ) => {
+    if (isSplitCloneTable(table)) {
+      notifications.show({
+        color: "yellow",
+        message:
+          action === "split"
+            ? "Chọn bàn gốc để tách, không chọn bàn đã tách."
+            : "Không thể gộp bàn tách — chọn bàn gốc.",
+      });
+      return;
+    }
+    if (table.status === "locked") {
+      notifications.show({
+        color: "yellow",
+        message:
+          action === "split"
+            ? "Không thể tách bàn đang khóa."
+            : "Không thể gộp bàn đang khóa.",
+      });
+      return;
+    }
+    if (seatedTableIdsOnFloorDay.has(table.id)) {
+      notifications.show({
+        color: "yellow",
+        message: `Không thể ${action === "split" ? "tách" : "gộp"} khi ${table.name} đã có khách ngồi.`,
+      });
+      return;
+    }
+    if (allActiveMergedTableIds.has(table.id)) {
+      notifications.show({
+        color: "yellow",
+        message:
+          action === "split"
+            ? "Không thể tách bàn đang thuộc cụm gộp."
+            : `${table.name} đã thuộc một cụm gộp khác.`,
+      });
+      return;
+    }
+    notifications.show({
+      color: "yellow",
+      message: "Bàn này không khả dụng.",
+    });
+  };
+
   const confirmGridTableActionSelection = () => {
     if (gridTableActionMode === "merge") {
       if (mergeSelectedTableIds.length < 2) {
@@ -4273,6 +4368,12 @@ export default function FloorMapPage() {
                   disabled={!activeAreaBranchId}
                 >
                   Danh sách bàn gộp
+                </Menu.Item>
+                <Menu.Item
+                  onClick={() => setSplitClonesListModalOpen(true)}
+                  disabled={!activeAreaBranchId}
+                >
+                  Danh sách bàn tách
                 </Menu.Item>
               </Menu.Dropdown>
             </Menu>
@@ -4515,19 +4616,26 @@ export default function FloorMapPage() {
                       : isSplitGridSelect
                         ? splitSelectedTableId === table.id
                         : false;
-                    const selectionCheckbox =
-                      isGridSelecting && isGridSelectionCandidate
-                        ? {
-                            checked: isGridSelected,
-                            onToggle: () => {
-                              if (isMergeGridSelect) {
-                                toggleGridMergeTableSelection(table.id);
-                              } else {
-                                toggleGridSplitTableSelection(table.id);
+                    const onGridSelect =
+                      isGridSelecting && !isMergeMember
+                        ? () => {
+                            if (isMergeGridSelect) {
+                              if (!mergeCandidateTableIds.has(table.id)) {
+                                notifyGridTableActionIneligible(table, "merge");
+                                return;
                               }
-                            },
+                              toggleGridMergeTableSelection(table.id);
+                              return;
+                            }
+                            if (isSplitGridSelect) {
+                              if (!splitCandidateTableIds.has(table.id)) {
+                                notifyGridTableActionIneligible(table, "split");
+                                return;
+                              }
+                              toggleGridSplitTableSelection(table.id);
+                            }
                           }
-                        : null;
+                        : undefined;
                     return (
                       <div key={table.id} className={classes.floorMapGridCell}>
                         <FloorTableBlockView
@@ -4554,7 +4662,7 @@ export default function FloorMapPage() {
                           canComplete={canComplete}
                           canLock={canLock}
                           showUnlock={showUnlock}
-                          selectionCheckbox={selectionCheckbox}
+                          onGridSelect={onGridSelect}
                           isGridSelected={isGridSelected}
                           suppressOpen={isGridSelecting}
                           onOpenTable={() => handleViewOrRegisterForTable(table)}
@@ -5582,6 +5690,81 @@ export default function FloorMapPage() {
       </Modal>
 
       <Modal
+        opened={splitClonesListModalOpen}
+        onClose={() => setSplitClonesListModalOpen(false)}
+        title="Danh sách bàn tách"
+        size="xl"
+      >
+        <SplitClonesPanel
+          key={`${areaId ?? "all-areas"}-split`}
+          embedded
+          tables={state.tables}
+          areas={state.areas}
+          branches={state.branches}
+          bookings={state.bookings}
+          filteredBranchIds={filteredBranchIds}
+          busyCloneId={splitCloneBusyId}
+          initialAreaFilter={areaId}
+          onRequestDelete={(cloneId) => {
+            setSplitCloneDeleteTarget(cloneId);
+          }}
+          onRowSelect={(clone) => {
+            const navDate = resolveSplitCloneNavigationDate(clone, floorMapSelectedDate);
+            setFloorMapSelectedDate(dayjs(navDate));
+            if (clone.areaId !== areaId) {
+              setActiveAreaId(clone.areaId);
+            }
+            setDetailMergeGroup(null);
+            const tableOnMap = state.tables.find((item) => item.id === clone.id);
+            if (tableOnMap) {
+              setDetailTable(tableOnMap);
+            }
+            setSplitClonesListModalOpen(false);
+          }}
+        />
+      </Modal>
+
+      <Modal
+        opened={splitCloneDeleteTarget !== null}
+        onClose={() => setSplitCloneDeleteTarget(null)}
+        title="Xóa bàn tách"
+        size="sm"
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Xóa tách{" "}
+            <Text component="span" fw={600}>
+              {splitCloneDeleteTargetName ?? "—"}
+            </Text>
+            ? Bàn sẽ biến mất khỏi sơ đồ trong mọi ngày.
+          </Text>
+          {splitCloneDeleteActiveBookings > 0 ? (
+            <Text size="sm" c="orange">
+              Có {splitCloneDeleteActiveBookings} booking đang giữ bàn tách này. Hoàn thành hoặc chuyển
+              booking trước khi xóa.
+            </Text>
+          ) : null}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setSplitCloneDeleteTarget(null)}>
+              Huỷ
+            </Button>
+            <Button
+              color="red"
+              loading={splitCloneBusyId === splitCloneDeleteTarget}
+              disabled={splitCloneDeleteActiveBookings > 0}
+              onClick={() => {
+                if (splitCloneDeleteTarget) {
+                  void handleDeleteSplitClone(splitCloneDeleteTarget);
+                }
+              }}
+            >
+              Xóa tách
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+
+      <Modal
         opened={mergeModalOpen}
         onClose={() => setMergeModalOpen(false)}
         title="Gộp bàn — chọn thời gian"
@@ -5647,7 +5830,7 @@ export default function FloorMapPage() {
       >
         <Stack gap="sm">
           <Text size="sm" c="dimmed">
-            Bản sao chỉ hiển thị trong khoảng ngày đã chọn và có thể nhận booking độc lập với bàn
+            Bàn tách chỉ hiển thị trong khoảng ngày đã chọn và có thể nhận booking độc lập với bàn
             gốc.
           </Text>
           {splitSelectedTableName ? (
@@ -5660,7 +5843,7 @@ export default function FloorMapPage() {
           ) : null}
           {splitSelectedTableName ? (
             <Text size="xs" c="dimmed">
-              Bản sao sẽ được đặt tên theo dạng &quot;{"{tên bàn} - n"}&quot; (n = 1, 2, 3…).
+              Bàn tách sẽ được đặt tên theo dạng &quot;{"{tên bàn} - n"}&quot; (n = 1, 2, 3…).
             </Text>
           ) : null}
           <Group grow align="flex-end">

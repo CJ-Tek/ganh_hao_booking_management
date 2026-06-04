@@ -22,6 +22,7 @@ import { type DataTableSortStatus } from "mantine-datatable";
 import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { MergeGroupsPanel } from "@/components/merge-groups/merge-groups-panel";
+import { SplitClonesPanel } from "@/components/split-clones/split-clones-panel";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { EditableNumberInput } from "@/components/editable-number-input";
 import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
@@ -54,10 +55,14 @@ function TablesPageContent() {
     deleteTables,
     updateTableStatus,
     releaseTableMergeGroup,
+    deleteTable,
+    reload,
   } = useAppContext();
   const [mainTab, setMainTab] = useState<string | null>("single");
   const [mergeGroupBusyId, setMergeGroupBusyId] = useState<string | null>(null);
   const [mergeGroupReleaseTarget, setMergeGroupReleaseTarget] = useState<string | null>(null);
+  const [splitCloneBusyId, setSplitCloneBusyId] = useState<string | null>(null);
+  const [splitCloneDeleteTarget, setSplitCloneDeleteTarget] = useState<string | null>(null);
 
   const isCompact = usePortalCompact();
   const { isBusy: isTableRowBusy, run: runTableRowAction } = useBusyId();
@@ -594,6 +599,41 @@ function TablesPageContent() {
     }
   };
 
+  const splitCloneDeleteTargetName = useMemo(() => {
+    if (!splitCloneDeleteTarget) {
+      return null;
+    }
+    return state.tables.find((table) => table.id === splitCloneDeleteTarget)?.name ?? null;
+  }, [splitCloneDeleteTarget, state.tables]);
+
+  const splitCloneDeleteActiveBookings = useMemo(() => {
+    if (!splitCloneDeleteTarget) {
+      return 0;
+    }
+    return state.bookings.filter(
+      (booking) =>
+        booking.tableId === splitCloneDeleteTarget &&
+        !["completed", "cancelled", "no_show"].includes(booking.status)
+    ).length;
+  }, [splitCloneDeleteTarget, state.bookings]);
+
+  const handleDeleteSplitClone = async (cloneId: string) => {
+    setSplitCloneBusyId(cloneId);
+    try {
+      await deleteTable(cloneId);
+      await reload({ scope: "floor" });
+      notifications.show({ color: "green", message: "Đã xóa bàn tách." });
+      setSplitCloneDeleteTarget(null);
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Không thể xóa tách.",
+      });
+    } finally {
+      setSplitCloneBusyId(null);
+    }
+  };
+
   const singleTablesPanel = (
     <Stack>
       <PortalStickyPanel>
@@ -805,6 +845,7 @@ function TablesPageContent() {
         <Tabs.List>
           <Tabs.Tab value="single">Bàn lẻ</Tabs.Tab>
           <Tabs.Tab value="merge">Bàn gộp</Tabs.Tab>
+          <Tabs.Tab value="split">Bàn tách</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="single" pt="md">
@@ -823,7 +864,59 @@ function TablesPageContent() {
             onRequestRelease={(groupId) => setMergeGroupReleaseTarget(groupId)}
           />
         </Tabs.Panel>
+
+        <Tabs.Panel value="split" pt="md">
+          <SplitClonesPanel
+            tables={state.tables}
+            areas={state.areas}
+            branches={state.branches}
+            bookings={state.bookings}
+            filteredBranchIds={filteredBranchIds}
+            busyCloneId={splitCloneBusyId}
+            onRequestDelete={(cloneId) => setSplitCloneDeleteTarget(cloneId)}
+          />
+        </Tabs.Panel>
       </Tabs>
+
+      <Modal
+        opened={splitCloneDeleteTarget !== null}
+        onClose={() => setSplitCloneDeleteTarget(null)}
+        title="Xóa bàn tách"
+        size="sm"
+      >
+        <Stack gap="md">
+          <Text size="sm">
+            Xóa tách{" "}
+            <Text component="span" fw={600}>
+              {splitCloneDeleteTargetName ?? "—"}
+            </Text>
+            ? Bàn sẽ biến mất khỏi sơ đồ trong mọi ngày.
+          </Text>
+          {splitCloneDeleteActiveBookings > 0 ? (
+            <Text size="sm" c="orange">
+              Có {splitCloneDeleteActiveBookings} booking đang giữ bàn tách này. Hoàn thành hoặc chuyển
+              booking trước khi xóa.
+            </Text>
+          ) : null}
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setSplitCloneDeleteTarget(null)}>
+              Huỷ
+            </Button>
+            <Button
+              color="red"
+              loading={splitCloneBusyId === splitCloneDeleteTarget}
+              disabled={splitCloneDeleteActiveBookings > 0}
+              onClick={() => {
+                if (splitCloneDeleteTarget) {
+                  void handleDeleteSplitClone(splitCloneDeleteTarget);
+                }
+              }}
+            >
+              Xóa tách
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
 
       <Modal
         opened={mergeGroupReleaseTarget !== null}

@@ -45,7 +45,7 @@ export interface DiningTable {
   status: TableStatus;
   positionX: number;
   positionY: number;
-  /** When set, this row is a date-bounded Tách bàn clone of another table. */
+  /** When set, this row is a date-bounded bàn tách (split) of another table. */
   splitSourceTableId?: string | null;
   /** Sequence number in the clone name `{source} - n`. */
   splitCloneNumber?: number | null;

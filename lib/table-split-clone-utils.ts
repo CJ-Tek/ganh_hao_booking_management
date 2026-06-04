@@ -1,6 +1,65 @@
 import dayjs, { type Dayjs } from "dayjs";
 import type { DiningTable } from "@/lib/types";
-import { validateMergeGroupDateRange } from "@/lib/merge-group-utils";
+import {
+  formatMergeGroupDate,
+  formatMergeGroupDateRange,
+  validateMergeGroupDateRange,
+} from "@/lib/merge-group-utils";
+
+export type SplitCloneLifecycle = "scheduled" | "active" | "expired";
+
+export function formatSplitCloneDateRange(startDate: string, endDate: string): string {
+  return formatMergeGroupDateRange(startDate, endDate);
+}
+
+/** True when the clone's end date is before the given calendar day (default: today). */
+export function isSplitCloneExpired(
+  clone: Pick<DiningTable, "splitStartDate" | "splitEndDate">,
+  date: Dayjs = dayjs()
+): boolean {
+  if (!clone.splitEndDate) {
+    return false;
+  }
+  return date.startOf("day").isAfter(clone.splitEndDate, "day");
+}
+
+export function getSplitCloneLifecycleStatus(
+  clone: Pick<DiningTable, "splitStartDate" | "splitEndDate">,
+  date: Dayjs = dayjs()
+): SplitCloneLifecycle {
+  if (!clone.splitStartDate || !clone.splitEndDate) {
+    return "active";
+  }
+  const day = date.startOf("day");
+  if (day.isBefore(clone.splitStartDate, "day")) {
+    return "scheduled";
+  }
+  if (day.isAfter(clone.splitEndDate, "day")) {
+    return "expired";
+  }
+  return "active";
+}
+
+/** Calendar day to open on Sơ đồ when jumping to a split clone. */
+export function resolveSplitCloneNavigationDate(
+  clone: Pick<DiningTable, "splitStartDate" | "splitEndDate">,
+  referenceDate: Dayjs = dayjs()
+): string {
+  if (!clone.splitStartDate || !clone.splitEndDate) {
+    return formatMergeGroupDate(referenceDate);
+  }
+  const start = dayjs(clone.splitStartDate, "YYYY-MM-DD", true).startOf("day");
+  const end = dayjs(clone.splitEndDate, "YYYY-MM-DD", true).startOf("day");
+  const ref = referenceDate.startOf("day");
+  if (!ref.isBefore(start, "day") && !ref.isAfter(end, "day")) {
+    return formatMergeGroupDate(ref);
+  }
+  const today = dayjs().startOf("day");
+  if (!today.isBefore(start, "day") && !today.isAfter(end, "day")) {
+    return formatMergeGroupDate(today);
+  }
+  return clone.splitStartDate;
+}
 
 export function isSplitCloneTable(
   table: Pick<DiningTable, "splitSourceTableId">
