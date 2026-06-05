@@ -62,7 +62,7 @@ export function FloorMapBookingToolbar({
   onOpenSplitClones,
 }: FloorMapBookingToolbarProps) {
   const rowRef = useRef<HTMLDivElement | null>(null);
-  const [visibleCount, setVisibleCount] = useState(ACTION_MIN_WIDTHS_PX.length);
+  const [visibleCount, setVisibleCount] = useState<number>(ACTION_MIN_WIDTHS_PX.length);
 
   const actions = useMemo<BookingToolbarAction[]>(
     () => [
