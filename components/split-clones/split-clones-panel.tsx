@@ -191,7 +191,7 @@ export function SplitClonesPanel({
   );
 
   const filters = (
-    <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm" mb="md">
+    <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="sm" mb="md">
       <TextInputWithVoice
         label="Tìm bàn tách"
         placeholder="Tên bàn tách, bàn gốc, khu vực..."

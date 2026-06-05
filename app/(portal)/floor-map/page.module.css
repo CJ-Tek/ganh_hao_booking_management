@@ -223,6 +223,10 @@
   align-self: stretch;
 }
 
+.pageToolbarStack {
+  width: 100%;
+}
+
 .pageAreaSelectRow {
   display: flex;
   align-items: center;

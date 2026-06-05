@@ -46,13 +46,37 @@ body {
   padding-top: 4px;
 }
 
+.portal-date-picker-modal-content {
+  width: fit-content;
+  max-width: min(100vw - 32px, 420px);
+  height: auto;
+  max-height: min(90dvh, calc(100dvh - env(safe-area-inset-bottom, 0px) - 32px));
+}
+
+.portal-date-picker-modal-body {
+  flex: 0 0 auto;
+  overflow: visible;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.portal-date-picker-modal-body > div {
+  width: fit-content;
+  max-width: 100%;
+}
+
 @media (max-width: 61.9375em) {
   .mantine-Modal-inner {
     padding: 0;
     align-items: stretch;
   }
 
-  .mantine-Modal-content:not(.portal-standard-modal-content) {
+  .mantine-Modal-inner:has(.portal-date-picker-modal-content) {
+    padding: var(--mantine-spacing-md);
+    align-items: center;
+  }
+
+  .mantine-Modal-content:not(.portal-standard-modal-content):not(.portal-date-picker-modal-content) {
     display: flex;
     flex-direction: column;
     width: 100%;
@@ -62,7 +86,8 @@ body {
     border-radius: 0;
   }
 
-  .mantine-Modal-content:not(.portal-standard-modal-content) .mantine-Modal-body {
+  .mantine-Modal-content:not(.portal-standard-modal-content):not(.portal-date-picker-modal-content)
+    .mantine-Modal-body {
     flex: 1;
     min-height: 0;
     overflow: auto;

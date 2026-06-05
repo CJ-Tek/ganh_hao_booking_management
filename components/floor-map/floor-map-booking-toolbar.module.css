@@ -1,0 +1,29 @@
+.row {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.actionBtn {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.moreBtnTarget {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+}
+
+.moreBtn {
+  width: 100%;
+  white-space: nowrap;
+}
+
+.moreBtn :global(.mantine-Button-inner) {
+  justify-content: center;
+  width: 100%;
+}

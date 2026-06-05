@@ -162,7 +162,7 @@ export function MergeGroupsPanel({
   );
 
   const filters = (
-    <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm" mb="md">
+    <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="sm" mb="md">
       <TextInputWithVoice
         label="Tìm cụm gộp"
         placeholder="Tên cụm, khu vực, bàn thành viên..."

@@ -20,3 +20,19 @@ export const portaledComboboxProps = {
 export const portaledPopoverFieldProps = {
   popoverProps: portaledOverlayProps,
 } as const;
+
+/** Applied to DatePickerInput modal dropdowns — excluded from mobile fullscreen modal CSS. */
+export const PORTAL_DATE_PICKER_MODAL_CONTENT_CLASS = "portal-date-picker-modal-content";
+
+const modalOverlayBlur = { backgroundOpacity: 0.55, blur: 4 } as const;
+
+export const portalDatePickerModalProps = {
+  centered: true,
+  fullScreen: false,
+  zIndex: PORTAL_MODAL_Z_INDEX,
+  overlayProps: modalOverlayBlur,
+  classNames: {
+    content: PORTAL_DATE_PICKER_MODAL_CONTENT_CLASS,
+    body: "portal-date-picker-modal-body",
+  },
+} as const;

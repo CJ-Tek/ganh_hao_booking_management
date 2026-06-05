@@ -25,6 +25,7 @@ import { PortalModalsProvider } from "@/components/portal-modals-provider";
 import {
   PORTAL_MODAL_POPOVER_Z_INDEX,
   PORTAL_MODAL_Z_INDEX,
+  portalDatePickerModalProps,
   portaledComboboxProps,
   portaledOverlayProps,
   portaledPopoverFieldProps,
@@ -84,7 +85,10 @@ const theme = createTheme({
       defaultProps: portaledOverlayProps,
     }),
     DatePickerInput: DatePickerInput.extend({
-      defaultProps: portaledPopoverFieldProps,
+      defaultProps: {
+        ...portaledPopoverFieldProps,
+        modalProps: portalDatePickerModalProps,
+      },
     }),
     Badge: Badge.extend({
       styles: {

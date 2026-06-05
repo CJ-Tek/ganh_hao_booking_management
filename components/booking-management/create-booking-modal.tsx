@@ -4,7 +4,6 @@ import dayjs from "dayjs";
 import {
   Alert,
   Button,
-  Modal,
   Select,
   Stack,
   Text,
@@ -16,10 +15,8 @@ import {
   type BookingCreatedNextStepPayload,
 } from "@/components/booking-management/booking-created-next-step-modal";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
-import {
-  PortalSectionCard,
-  PortalStickyAction,
-} from "@/components/portal-page";
+import { PortalSectionCard } from "@/components/portal-page";
+import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import {
   VoiceBookingAssistant,
   type VoiceBookingFieldPatch,
@@ -35,7 +32,6 @@ import {
   type BookingDuplicateInfo,
 } from "@/lib/booking-duplicate";
 import { usePortalCompact } from "@/lib/use-portal-compact";
-import { usePortalModalLayoutProps } from "@/lib/use-portal-modal-layout";
 import { type Booking } from "@/lib/types";
 import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
 
@@ -74,7 +70,6 @@ export function CreateBookingModal({
     setActiveBranchId,
   } = useAppContext();
   const isCompact = usePortalCompact();
-  const modalLayout = usePortalModalLayoutProps();
   const branchId = filteredBranchIds[0] ?? null;
 
   const [isCreating, setIsCreating] = useState(false);
@@ -337,14 +332,24 @@ export function CreateBookingModal({
 
   return (
     <>
-    <Modal
-      {...modalLayout}
+    <PortalStandardModal
       opened={opened}
       onClose={closeModal}
       closeOnClickOutside={!isCreating}
       closeOnEscape={!isCreating}
       title="Tạo booking"
       size="xl"
+      footer={
+        <Button
+          fullWidth
+          size={isCompact ? "md" : "sm"}
+          loading={isCreating}
+          disabled={isCreating}
+          onClick={() => void handleCreate()}
+        >
+          Tạo booking
+        </Button>
+      }
     >
       <PortalSectionCard>
         <Stack gap="sm">
@@ -397,20 +402,9 @@ export function CreateBookingModal({
           <Text size="sm" c="dimmed">
             Booking tạo từ đây sẽ ở trạng thái <strong>Chờ xếp bàn</strong> (trừ khi đã chọn khu/bàn).
           </Text>
-          <PortalStickyAction>
-            <Button
-              fullWidth
-              size={isCompact ? "md" : "sm"}
-              loading={isCreating}
-              disabled={isCreating}
-              onClick={() => void handleCreate()}
-            >
-              Tạo booking
-            </Button>
-          </PortalStickyAction>
         </Stack>
       </PortalSectionCard>
-    </Modal>
+    </PortalStandardModal>
     <BookingCreatedNextStepModal
       opened={createdNextStepOpened}
       onClose={() => {

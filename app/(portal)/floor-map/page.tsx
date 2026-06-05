@@ -61,6 +61,7 @@ import { useBookingManagement } from "@/components/booking-management/use-bookin
 import { MergeGroupsPanel } from "@/components/merge-groups/merge-groups-panel";
 import { SplitClonesPanel } from "@/components/split-clones/split-clones-panel";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
+import { FloorMapBookingToolbar } from "@/components/floor-map/floor-map-booking-toolbar";
 import { FloorLayoutTemplatesModal } from "@/components/floor-map/floor-layout-templates-modal";
 import { FloorMapGrid } from "@/components/floor-map/floor-map-grid";
 import { FloorTableBlockView } from "@/components/floor-map/floor-table-block-view";
@@ -4276,135 +4277,116 @@ export default function FloorMapPage() {
           : undefined
       }
     >
-      <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
-        <Group
-          gap={isCompact ? 8 : 4}
-          align="flex-end"
-          wrap="nowrap"
-          className={classes.pageAreaSelectRow}
-        >
-          {!isEmployee ? (
-            <SegmentedControl
-              value={mode}
-              color="brand"
-              onChange={(value) => {
-                const nextMode = value as CanvasMode;
-                if (nextMode === "edit") {
-                  if (editBlockedByOther) {
-                    notifications.show({
-                      color: "yellow",
-                      message: `${layoutLockHolderName ?? "Người khác"} đang chỉnh sửa sơ đồ. Chỉ xem được.`,
-                    });
-                    return;
-                  }
-                  if (!areaId) {
-                    return;
-                  }
-                  void (async () => {
-                    const acquired = await acquireFloorLayoutEditLock(areaId);
-                    if (!acquired.ok) {
+      <Stack gap="xs" className={classes.pageToolbarStack}>
+        <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
+          <Group
+            gap={isCompact ? 8 : 4}
+            align="flex-end"
+            wrap="nowrap"
+            className={classes.pageAreaSelectRow}
+          >
+            {!isEmployee ? (
+              <SegmentedControl
+                value={mode}
+                color="brand"
+                onChange={(value) => {
+                  const nextMode = value as CanvasMode;
+                  if (nextMode === "edit") {
+                    if (editBlockedByOther) {
                       notifications.show({
                         color: "yellow",
-                        message: `${acquired.holderFullName} đang chỉnh sửa sơ đồ. Thử lại sau.`,
+                        message: `${layoutLockHolderName ?? "Người khác"} đang chỉnh sửa sơ đồ. Chỉ xem được.`,
                       });
                       return;
                     }
-                    setMode("edit");
-                    setPendingPlacementTableId(null);
-                  })();
-                  return;
-                }
-                if (mode === "edit" && isLayoutDirty) {
-                  confirmDiscardLayoutEdits();
-                  return;
-                }
-                exitEditModeToView();
-              }}
-              data={[
-                { label: "View", value: "view" },
-                {
-                  label: "Edit",
-                  value: "edit",
-                  disabled: editBlockedByOther,
-                },
-              ]}
-              className={classes.pageModeControl}
-              size={isCompact ? "sm" : "md"}
+                    if (!areaId) {
+                      return;
+                    }
+                    void (async () => {
+                      const acquired = await acquireFloorLayoutEditLock(areaId);
+                      if (!acquired.ok) {
+                        notifications.show({
+                          color: "yellow",
+                          message: `${acquired.holderFullName} đang chỉnh sửa sơ đồ. Thử lại sau.`,
+                        });
+                        return;
+                      }
+                      setMode("edit");
+                      setPendingPlacementTableId(null);
+                    })();
+                    return;
+                  }
+                  if (mode === "edit" && isLayoutDirty) {
+                    confirmDiscardLayoutEdits();
+                    return;
+                  }
+                  exitEditModeToView();
+                }}
+                data={[
+                  { label: "View", value: "view" },
+                  {
+                    label: "Edit",
+                    value: "edit",
+                    disabled: editBlockedByOther,
+                  },
+                ]}
+                className={classes.pageModeControl}
+                size={isCompact ? "sm" : "md"}
+              />
+            ) : null}
+            <Select
+              value={areaId}
+              onChange={setActiveAreaId}
+              data={availableAreas.map((area) => ({
+                value: area.id,
+                label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
+              }))}
+              searchable
+              disabled={isEditMode}
+              className={classes.pageAreaSelect}
+              comboboxProps={{ withinPortal: true }}
+              size={isCompact ? "xs" : "sm"}
             />
-          ) : null}
-          <Select
-            value={areaId}
-            onChange={setActiveAreaId}
-            data={availableAreas.map((area) => ({
-              value: area.id,
-              label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
-            }))}
-            searchable
-            disabled={isEditMode}
-            className={classes.pageAreaSelect}
-            comboboxProps={{ withinPortal: true }}
-            size={isCompact ? "xs" : "sm"}
-          />
-          {!isEmployee ? (
-            <Menu shadow="md" width={220} withinPortal position="bottom-end">
-              <Menu.Target>
+            {!isEmployee && !isBranchManager ? (
+              <Group gap={isCompact ? 8 : 4} className={classes.toolbarAreaActions} wrap="nowrap">
                 <ActionIcon
                   variant="transparent"
                   size={isCompact ? "input-md" : "lg"}
                   className={classes.toolbarAreaActionBtn}
-                  aria-label="Mở menu thao tác booking"
-                  disabled={isEditMode}
+                  aria-label="Sửa khu vực"
+                  disabled={!areaId || !hasSupabase}
+                  onClick={openAreaMetadataEdit}
                 >
-                  <MoreVertical size={16} />
+                  <Pencil size={16} />
                 </ActionIcon>
-              </Menu.Target>
-              <Menu.Dropdown>
-                <Menu.Item onClick={() => setCreateBookingModalOpened(true)}>Tạo booking</Menu.Item>
-                <Menu.Item onClick={() => dayListModalRef.current?.openDayListModal()}>
-                  Danh sách booking
-                </Menu.Item>
-                <Menu.Item
-                  onClick={() => setMergeGroupsListModalOpen(true)}
-                  disabled={!activeAreaBranchId}
+                <ActionIcon
+                  variant="transparent"
+                  color="red"
+                  size={isCompact ? "input-md" : "lg"}
+                  className={classes.toolbarAreaActionBtn}
+                  aria-label="Xóa khu vực"
+                  disabled={!areaId || !hasSupabase}
+                  onClick={() => setAreaDeleteOpen(true)}
                 >
-                  Danh sách bàn gộp
-                </Menu.Item>
-                <Menu.Item
-                  onClick={() => setSplitClonesListModalOpen(true)}
-                  disabled={!activeAreaBranchId}
-                >
-                  Danh sách bàn tách
-                </Menu.Item>
-              </Menu.Dropdown>
-            </Menu>
-          ) : null}
-          {!isEmployee && !isBranchManager ? (
-            <Group gap={isCompact ? 8 : 4} className={classes.toolbarAreaActions} wrap="nowrap">
-              <ActionIcon
-                variant="transparent"
-                size={isCompact ? "input-md" : "lg"}
-                className={classes.toolbarAreaActionBtn}
-                aria-label="Sửa khu vực"
-                disabled={!areaId || !hasSupabase}
-                onClick={openAreaMetadataEdit}
-              >
-                <Pencil size={16} />
-              </ActionIcon>
-              <ActionIcon
-                variant="transparent"
-                color="red"
-                size={isCompact ? "input-md" : "lg"}
-                className={classes.toolbarAreaActionBtn}
-                aria-label="Xóa khu vực"
-                disabled={!areaId || !hasSupabase}
-                onClick={() => setAreaDeleteOpen(true)}
-              >
-                <Trash2 size={16} />
-              </ActionIcon>
-            </Group>
-          ) : null}
+                  <Trash2 size={16} />
+                </ActionIcon>
+              </Group>
+            ) : null}
+          </Group>
         </Group>
-      </Group>
+
+        {!isEmployee ? (
+          <FloorMapBookingToolbar
+            isCompact={isCompact}
+            isEditMode={isEditMode}
+            activeAreaBranchId={activeAreaBranchId}
+            onCreateBooking={() => setCreateBookingModalOpened(true)}
+            onOpenDayList={() => dayListModalRef.current?.openDayListModal()}
+            onOpenMergeGroups={() => setMergeGroupsListModalOpen(true)}
+            onOpenSplitClones={() => setSplitClonesListModalOpen(true)}
+          />
+        ) : null}
+      </Stack>
 
       {layoutLockHolderName ? (
         <Alert color="orange" variant="light" title="Sơ đồ đang được chỉnh sửa">
