@@ -280,10 +280,13 @@ export function CreateBookingModal({
     }
     if (result.ok) {
       const switchedFrom = branchId;
+      const createdForOtherBranch = Boolean(
+        switchedFrom && createBranchId && createBranchId !== switchedFrom
+      );
       const createdName = formatVietnamesePersonName(customerName);
       resetCreateForm();
       onClose();
-      if (result.bookingId) {
+      if (result.bookingId && !createdForOtherBranch) {
         setCreatedNextStep({
           bookingId: result.bookingId,
           bookingAt: dayjs(bookingAt).toISOString(),
@@ -293,17 +296,19 @@ export function CreateBookingModal({
             typeof guestCount === "number" && Number.isFinite(guestCount) && guestCount >= 1,
         });
         setCreatedNextStepOpened(true);
-      }
-      if (
-        currentUser?.role === "manager" &&
-        switchedFrom &&
-        createBranchId !== switchedFrom
+      } else if (
+        result.bookingId &&
+        createdForOtherBranch &&
+        currentUser?.role !== "manager"
       ) {
+        notifications.show({ color: "green", message: result.message });
+      }
+      if (currentUser?.role === "manager" && createdForOtherBranch) {
         notifications.show({
           color: "blue",
-          message: "Đã tạo booking ở chi nhánh khác. Nhấn để quay về chi nhánh đang vận hành.",
+          message: "Đã tạo booking ở chi nhánh khác.",
           autoClose: 6000,
-          onClick: () => setActiveBranchId(switchedFrom),
+          onClick: () => setActiveBranchId(switchedFrom!),
         });
       }
     }
