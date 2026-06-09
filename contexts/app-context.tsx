@@ -33,7 +33,7 @@ import {
   isEmployeeUser,
 } from "@/lib/employee-access";
 import { isFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
-import { mergeFloorMapSliceIntoState, reloadScopeForRealtimeTable } from "@/lib/floor-map-state-slice";
+import { mergeFloorMapSliceIntoState, reloadScopeForRealtimeTable, type FloorMapStateSlice } from "@/lib/floor-map-state-slice";
 import {
   mapRealtimeBookingRow,
   normalizeRealtimePayload,
@@ -47,6 +47,7 @@ import {
   removeBookingFromSnapshot,
 } from "@/lib/optimistic-booking-sync";
 import { clampFloorNodeSpacing } from "@/lib/floor-map-layout";
+import { SyncTombstones } from "@/lib/sync-tombstones";
 import {
   addAreaInSupabase,
   addTableToMergeGroupInSupabase,
@@ -375,6 +376,37 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     [currentUser, state.activeBranchId]
   );
 
+  const lastReloadAtRef = useRef<number>(0);
+  const reloadInFlightRef = useRef(false);
+  const reloadPendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reloadPendingSourceRef = useRef<string | undefined>(undefined);
+  const failedPatchReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tableDeleteTombstonesRef = useRef(new SyncTombstones());
+  const areaDeleteTombstonesRef = useRef(new SyncTombstones());
+  const customerDeleteTombstonesRef = useRef(new SyncTombstones());
+
+  const applyTombstonesToFloorSlice = useCallback((slice: FloorMapStateSlice): FloorMapStateSlice => {
+    tableDeleteTombstonesRef.current.reconcile(slice.tables);
+    areaDeleteTombstonesRef.current.reconcile(slice.areas);
+    return {
+      ...slice,
+      tables: tableDeleteTombstonesRef.current.filterById(slice.tables),
+      areas: areaDeleteTombstonesRef.current.filterById(slice.areas),
+    };
+  }, []);
+
+  const applyTombstonesToSnapshot = useCallback((snapshot: AppStateSnapshot): AppStateSnapshot => {
+    tableDeleteTombstonesRef.current.reconcile(snapshot.tables);
+    areaDeleteTombstonesRef.current.reconcile(snapshot.areas);
+    customerDeleteTombstonesRef.current.reconcile(snapshot.customers);
+    return {
+      ...snapshot,
+      tables: tableDeleteTombstonesRef.current.filterById(snapshot.tables),
+      areas: areaDeleteTombstonesRef.current.filterById(snapshot.areas),
+      customers: customerDeleteTombstonesRef.current.filterById(snapshot.customers),
+    };
+  }, []);
+
   const reload = useCallback(
     async (options?: { forceMaintenance?: boolean; scope?: "full" | "floor" }) => {
       const mergeActive = (
@@ -404,26 +436,22 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
 
       if (options?.scope === "floor") {
         const slice = await fetchFloorMapSlice(filteredBranchIds);
-        setState((prev) => mergeFloorMapSliceIntoState(prev, slice, filteredBranchIds));
+        const sanitized = applyTombstonesToFloorSlice(slice);
+        setState((prev) => mergeFloorMapSliceIntoState(prev, sanitized, filteredBranchIds));
         return;
       }
 
       const snapshot = await fetchSnapshot({
         forceMaintenance: options?.forceMaintenance,
       });
+      const sanitized = applyTombstonesToSnapshot(snapshot);
       setState((prev) => ({
-        ...snapshot,
-        activeBranchId: mergeActive(prev, snapshot.activeBranchId),
+        ...sanitized,
+        activeBranchId: mergeActive(prev, sanitized.activeBranchId),
       }));
     },
-    [filteredBranchIds, hasSupabase, currentUser]
+    [applyTombstonesToFloorSlice, applyTombstonesToSnapshot, filteredBranchIds, hasSupabase, currentUser]
   );
-
-  const lastReloadAtRef = useRef<number>(0);
-  const reloadInFlightRef = useRef(false);
-  const reloadPendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const reloadPendingSourceRef = useRef<string | undefined>(undefined);
-  const failedPatchReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const run = async () => {
@@ -819,6 +847,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
           if (typeof id !== "string") {
             return false;
           }
+          tableDeleteTombstonesRef.current.clear(id);
           setState((prev) => ({
             ...prev,
             tables: prev.tables.filter((item) => item.id !== id),
@@ -831,6 +860,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         const mapped = mapRealtimeTable(payload.new);
         if (!mapped) {
           return false;
+        }
+        if (tableDeleteTombstonesRef.current.has(mapped.id)) {
+          return true;
         }
         setState((prev) => {
           const existingIndex = prev.tables.findIndex((item) => item.id === mapped.id);
@@ -849,6 +881,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
           if (typeof id !== "string") {
             return false;
           }
+          areaDeleteTombstonesRef.current.clear(id);
           setState((prev) => ({
             ...prev,
             areas: prev.areas.filter((item) => item.id !== id),
@@ -861,6 +894,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         const mapped = mapRealtimeArea(payload.new);
         if (!mapped) {
           return false;
+        }
+        if (areaDeleteTombstonesRef.current.has(mapped.id)) {
+          return true;
         }
         setState((prev) => {
           const existingIndex = prev.areas.findIndex((item) => item.id === mapped.id);
@@ -1656,6 +1692,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
 
     const result = await deleteCustomersInSupabase(ids);
     if (result.ok) {
+      customerDeleteTombstonesRef.current.register(ids);
       setState((prev) => ({
         ...prev,
         customers: prev.customers.filter((customer) => !ids.includes(customer.id)),
@@ -1787,8 +1824,14 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase) {
       return;
     }
-    await deleteTableInSupabase(tableId);
-    removeTablesFromState([tableId]);
+    tableDeleteTombstonesRef.current.register([tableId]);
+    try {
+      await deleteTableInSupabase(tableId);
+      removeTablesFromState([tableId]);
+    } catch (error) {
+      tableDeleteTombstonesRef.current.clear(tableId);
+      throw error;
+    }
   };
 
   const deleteTables = async (tableIds: string[]) => {
@@ -1798,8 +1841,16 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase || tableIds.length === 0) {
       return;
     }
-    await deleteTablesInSupabase(tableIds);
-    removeTablesFromState(tableIds);
+    tableDeleteTombstonesRef.current.register(tableIds);
+    try {
+      await deleteTablesInSupabase(tableIds);
+      removeTablesFromState(tableIds);
+    } catch (error) {
+      for (const tableId of tableIds) {
+        tableDeleteTombstonesRef.current.clear(tableId);
+      }
+      throw error;
+    }
   };
 
   const updateLocalTablePosition = (tableId: string, x: number, y: number) => {
@@ -1904,9 +1955,12 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       }));
       return { ok: true, message: "Đã xóa khu vực." };
     }
+    areaDeleteTombstonesRef.current.register([areaId]);
     const result = await deleteAreaInSupabase(areaId);
     if (result.ok) {
       removeAreaFromState(areaId);
+    } else {
+      areaDeleteTombstonesRef.current.clear(areaId);
     }
     return result;
   };
