@@ -783,7 +783,6 @@ export function VoiceBookingAssistant(props: {
                     setTableId(null);
                     setMergeGroupId(null);
                   }}
-                  searchable
                   clearable
                   disabled={formDisabled || Boolean(lockAreaId)}
                 />
@@ -797,7 +796,6 @@ export function VoiceBookingAssistant(props: {
                       setMergeGroupId(null);
                     }
                   }}
-                  searchable
                   clearable
                   disabled={formDisabled || Boolean(lockTableId) || Boolean(mergeGroupId)}
                 />
@@ -814,7 +812,6 @@ export function VoiceBookingAssistant(props: {
                       setTableId(null);
                     }
                   }}
-                  searchable
                   clearable
                   disabled={formDisabled}
                 />

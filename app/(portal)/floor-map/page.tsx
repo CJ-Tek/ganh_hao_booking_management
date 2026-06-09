@@ -4329,7 +4329,6 @@ export default function FloorMapPage() {
                 value: area.id,
                 label: `${area.name} - ${state.branches.find((branch) => branch.id === area.branchId)?.name}`,
               }))}
-              searchable
               disabled={isEditMode}
               className={classes.pageAreaSelect}
               comboboxProps={{ withinPortal: true }}

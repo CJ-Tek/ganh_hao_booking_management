@@ -67,10 +67,16 @@ const theme = createTheme({
       },
     }),
     Select: Select.extend({
-      defaultProps: portaledComboboxProps,
+      defaultProps: {
+        ...portaledComboboxProps,
+        searchable: false,
+      },
     }),
     MultiSelect: MultiSelect.extend({
-      defaultProps: portaledComboboxProps,
+      defaultProps: {
+        ...portaledComboboxProps,
+        searchable: false,
+      },
     }),
     Autocomplete: Autocomplete.extend({
       defaultProps: portaledComboboxProps,

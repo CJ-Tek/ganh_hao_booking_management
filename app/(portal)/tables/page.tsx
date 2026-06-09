@@ -461,8 +461,7 @@ function TablesPageContent() {
           <Group align="end" wrap="wrap">
             <MultiSelect
               label="Chọn bàn cần xóa"
-              placeholder="Tìm theo tên bàn"
-              searchable
+              placeholder="Chọn bàn"
               data={removeOptions}
               value={removeIds}
               onChange={setRemoveIds}
