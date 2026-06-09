@@ -4,6 +4,13 @@ export const MANAGER_DOCK_Z_INDEX = 200;
 /** Mantine Modal/Drawer overlays must sit above the dock. */
 export const PORTAL_MODAL_Z_INDEX = 600;
 
+/**
+ * Mantine ModalsProvider dialogs (confirm/alert) must stack above page `<Modal>` /
+ * `PortalStandardModal` (600). Always open via `openPortalModalsConfirmModal` or
+ * `openPortalConfirmModal` — never raw `modals.openConfirmModal`.
+ */
+export const PORTAL_MODAL_CONFIRM_Z_INDEX = 650;
+
 /** Select/combobox popovers opened from modals. */
 export const PORTAL_MODAL_POPOVER_Z_INDEX = 700;
 

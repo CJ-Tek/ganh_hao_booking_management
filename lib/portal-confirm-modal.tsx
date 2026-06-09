@@ -3,6 +3,7 @@
 import { Button, Group, Stack, Text } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import type { ReactNode } from "react";
+import { PORTAL_MODAL_CONFIRM_Z_INDEX } from "@/lib/portal-z-index";
 
 export type PortalConfirmOptions = {
   title: string;
@@ -12,16 +13,26 @@ export type PortalConfirmOptions = {
   confirmColor?: string;
 };
 
+export type PortalModalsConfirmModalProps = Parameters<typeof modals.openConfirmModal>[0];
+
 function renderMessage(message: ReactNode) {
   return typeof message === "string" ? <Text size="sm">{message}</Text> : message;
+}
+
+/** Mantine confirm modal that always stacks above page `<Modal>` / `PortalStandardModal`. */
+export function openPortalModalsConfirmModal(options: PortalModalsConfirmModalProps): string {
+  return modals.openConfirmModal({
+    centered: true,
+    ...options,
+    zIndex: PORTAL_MODAL_CONFIRM_Z_INDEX,
+  });
 }
 
 /** In-app confirm dialog (replaces `window.confirm`). Resolves when the user chooses. */
 export function openPortalConfirmModal(options: PortalConfirmOptions): Promise<boolean> {
   return new Promise((resolve) => {
-    modals.openConfirmModal({
+    openPortalModalsConfirmModal({
       title: options.title,
-      centered: true,
       children: renderMessage(options.message),
       labels: {
         cancel: options.cancelLabel ?? "Hủy",
@@ -39,6 +50,7 @@ export function openPortalAlertModal(options: { title: string; message: ReactNod
   modals.open({
     title: options.title,
     centered: true,
+    zIndex: PORTAL_MODAL_CONFIRM_Z_INDEX,
     withCloseButton: true,
     closeOnClickOutside: true,
     children: (

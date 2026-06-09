@@ -1,9 +1,9 @@
 "use client";
 
 import { Stack, Text } from "@mantine/core";
-import { modals } from "@mantine/modals";
 import dayjs from "dayjs";
 import { type BookingDuplicateInfo } from "@/lib/booking-duplicate";
+import { openPortalModalsConfirmModal } from "@/lib/portal-confirm-modal";
 
 export function confirmDuplicateBookingSecond(
   duplicates: BookingDuplicateInfo[],
@@ -15,7 +15,7 @@ export function confirmDuplicateBookingSecond(
     return;
   }
   const at = dayjs(first.bookingAt);
-  modals.openConfirmModal({
+  openPortalModalsConfirmModal({
     title: "Phát hiện booking trùng theo SĐT",
     children: (
       <Stack gap={6}>

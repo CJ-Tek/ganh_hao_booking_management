@@ -18,7 +18,6 @@ import {
   Textarea,
 } from "@mantine/core";
 import { BookingDateTimeFields } from "@/components/booking-datetime-fields";
-import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -42,6 +41,7 @@ import { BookingListPaginationBar } from "@/components/booking-management/bookin
 import { BookingTablePicker } from "@/components/booking-table-picker/booking-table-picker";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
+import { openPortalModalsConfirmModal } from "@/lib/portal-confirm-modal";
 import { useAppContext } from "@/contexts/app-context";
 import {
   bookingSlotKey,
@@ -88,7 +88,7 @@ const LIST_BOOKING_PULSE_CYCLE_MS = 600;
 const LIST_BOOKING_PULSE_CYCLES = 2;
 const LIST_BOOKING_PULSE_TOTAL_MS = LIST_BOOKING_PULSE_CYCLE_MS * LIST_BOOKING_PULSE_CYCLES;
 
-/** Page `<Modal>` stacks above Mantine `modals`; portaled overlays need a higher z-index. */
+/** Page `<Modal>` z-index; confirm dialogs use `PORTAL_MODAL_CONFIRM_Z_INDEX` (650) via `openPortalModalsConfirmModal`. */
 const MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX = 600;
 const MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX = 700;
 
@@ -207,7 +207,7 @@ function BookingsPageContent() {
     const customer = state.customers.find((c) => c.id === booking.customerId);
     const name = customer?.fullName ?? "—";
     const timeStr = dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY");
-    modals.openConfirmModal({
+    openPortalModalsConfirmModal({
       title: "Xác nhận hủy booking",
       children: (
         <Text size="sm">
@@ -240,7 +240,7 @@ function BookingsPageContent() {
     const customer = state.customers.find((c) => c.id === booking.customerId);
     const name = customer?.fullName ?? "—";
     const timeStr = dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY");
-    modals.openConfirmModal({
+    openPortalModalsConfirmModal({
       title: "Xác nhận hoàn thành",
       children: (
         <Text size="sm">

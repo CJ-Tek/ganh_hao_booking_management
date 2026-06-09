@@ -23,7 +23,6 @@ import {
   Tooltip,
 } from "@mantine/core";
 import { DatePickerInput } from "@mantine/dates";
-import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -140,7 +139,7 @@ import {
   FLOOR_MAP_FOCUS_BOOKING_PARAM,
   parseFloorMapDateParam,
 } from "@/lib/floor-map-routes";
-import { openPortalConfirmModal } from "@/lib/portal-confirm-modal";
+import { openPortalConfirmModal, openPortalModalsConfirmModal } from "@/lib/portal-confirm-modal";
 import {
   applySnapshotToTablesInArea,
   floorLayoutDayKey,
@@ -534,6 +533,31 @@ export default function FloorMapPage() {
   const [isPaletteOpen, setIsPaletteOpen] = useState(true);
   const [isDatePickerDockOpen, setIsDatePickerDockOpen] = useState(true);
   const [isGridToolsDockOpen, setIsGridToolsDockOpen] = useState(false);
+  const [isSaveLayoutDockOpen, setIsSaveLayoutDockOpen] = useState(false);
+  const openDatePickerDock = () => {
+    setIsGridToolsDockOpen(false);
+    setIsSaveLayoutDockOpen(false);
+    setIsDatePickerDockOpen(true);
+  };
+  const closeDatePickerDock = () => {
+    setIsDatePickerDockOpen(false);
+  };
+  const openGridToolsDock = () => {
+    setIsDatePickerDockOpen(false);
+    setIsSaveLayoutDockOpen(false);
+    setIsGridToolsDockOpen(true);
+  };
+  const closeGridToolsDock = () => {
+    setIsGridToolsDockOpen(false);
+  };
+  const openSaveLayoutDock = () => {
+    setIsDatePickerDockOpen(false);
+    setIsGridToolsDockOpen(false);
+    setIsSaveLayoutDockOpen(true);
+  };
+  const closeSaveLayoutDock = () => {
+    setIsSaveLayoutDockOpen(false);
+  };
   const [pendingPlacementTableId, setPendingPlacementTableId] = useState<string | null>(null);
   const [isTrimmingGrid, setIsTrimmingGrid] = useState(false);
   const [layoutLockHolderName, setLayoutLockHolderName] = useState<string | null>(null);
@@ -1343,6 +1367,7 @@ export default function FloorMapPage() {
       setFiltersAccordionValue(null);
     } else {
       setIsGridToolsDockOpen(false);
+      setIsSaveLayoutDockOpen(false);
     }
   }, [isEditMode]);
   useEffect(() => {
@@ -1428,7 +1453,7 @@ export default function FloorMapPage() {
     ) {
       return;
     }
-    modals.openConfirmModal({
+    openPortalModalsConfirmModal({
       title: "Xác nhận hủy booking",
       children: (
         <Text size="sm">Hủy booking này trên bàn? Thao tác không hoàn tác.</Text>
@@ -2474,6 +2499,7 @@ export default function FloorMapPage() {
     setPendingPlacementTableId(null);
     setFiltersAccordionValue(null);
     setIsGridToolsDockOpen(false);
+    setIsSaveLayoutDockOpen(false);
     setMergeGroupDragState(null);
     if (areaId) {
       void releaseFloorLayoutEditLock(areaId);
@@ -2481,7 +2507,7 @@ export default function FloorMapPage() {
   }, [areaId, releaseFloorLayoutEditLock]);
 
   const confirmDiscardLayoutEdits = useCallback(() => {
-    modals.openConfirmModal({
+    openPortalModalsConfirmModal({
       title: "Thay đổi chưa lưu",
       centered: true,
       children: (
@@ -2820,7 +2846,7 @@ export default function FloorMapPage() {
     (booking: Booking) => {
       const customer = state.customers.find((item) => item.id === booking.customerId);
       const visitLabel = dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY");
-      modals.openConfirmModal({
+      openPortalModalsConfirmModal({
         title: "Mở Danh sách booking",
         children: (
           <Text size="sm">
@@ -3723,6 +3749,7 @@ export default function FloorMapPage() {
         setPendingPlacementTableId(null);
         setFiltersAccordionValue(null);
         setIsGridToolsDockOpen(false);
+        setIsSaveLayoutDockOpen(false);
         setActiveAreaId(null);
       }
     } finally {
@@ -5000,7 +5027,7 @@ export default function FloorMapPage() {
                       <ActionIcon
                         variant="transparent"
                         size="sm"
-                        onClick={() => setIsDatePickerDockOpen(false)}
+                        onClick={closeDatePickerDock}
                         aria-label="Ẩn ngày xem sơ đồ"
                       >
                         <ChevronUp size={14} />
@@ -5025,52 +5052,11 @@ export default function FloorMapPage() {
                   <ActionIcon
                     variant="filled"
                     size="lg"
-                    onClick={() => setIsDatePickerDockOpen(true)}
+                    onClick={openDatePickerDock}
                     aria-label="Hiện ngày xem sơ đồ"
                   >
                     <Calendar size={16} />
                   </ActionIcon>
-                ) : null}
-                {isEditMode && !isGridToolsDockOpen ? (
-                  <ActionIcon
-                    variant="filled"
-                    size="lg"
-                    onClick={() => setIsGridToolsDockOpen(true)}
-                    aria-label="Hiện công cụ lưới"
-                  >
-                    <Wrench size={16} />
-                  </ActionIcon>
-                ) : null}
-                {isEditMode ? (
-                  <Group gap={isCompact ? 8 : 6} wrap="nowrap" style={{ pointerEvents: "auto" }}>
-                    <Button
-                      size="sm"
-                      leftSection={<Save size={16} />}
-                      loading={isSavingLayout}
-                      disabled={!editLayout || !isLayoutDirty}
-                      onClick={() => void handleSaveFloorLayout()}
-                    >
-                      Lưu sơ đồ ({floorMapSelectedDate.format("DD/MM")})
-                    </Button>
-                    <Button
-                      size="sm"
-                      leftSection={<Save size={16} />}
-                      variant="light"
-                      loading={isSavingLayout}
-                      disabled={!editLayout || !isLayoutDirty}
-                      onClick={() => void handleSaveFloorLayoutAsGlobal()}
-                    >
-                      Lưu sơ đồ mặc định
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={() => setLayoutTemplatesOpen(true)}
-                      disabled={!areaId || !hasSupabase}
-                    >
-                      Mẫu sơ đồ…
-                    </Button>
-                  </Group>
                 ) : null}
                 {isEditMode && isGridToolsDockOpen ? (
                   <div className={classes.canvasGridToolsDock}>
@@ -5081,7 +5067,7 @@ export default function FloorMapPage() {
                       <ActionIcon
                         variant="transparent"
                         size="sm"
-                        onClick={() => setIsGridToolsDockOpen(false)}
+                        onClick={closeGridToolsDock}
                         aria-label="Ẩn công cụ lưới"
                       >
                         <ChevronUp size={14} />
@@ -5172,6 +5158,75 @@ export default function FloorMapPage() {
                       </Group>
                     </Stack>
                   </div>
+                ) : null}
+                {isEditMode && !isGridToolsDockOpen ? (
+                  <ActionIcon
+                    variant="filled"
+                    size="lg"
+                    onClick={openGridToolsDock}
+                    aria-label="Hiện công cụ lưới"
+                  >
+                    <Wrench size={16} />
+                  </ActionIcon>
+                ) : null}
+                {isEditMode && isSaveLayoutDockOpen ? (
+                  <div className={classes.canvasSaveLayoutDock}>
+                    <Group justify="space-between" align="center" wrap="nowrap" mb={4}>
+                      <Text size="sm" fw={600}>
+                        Lưu sơ đồ
+                      </Text>
+                      <ActionIcon
+                        variant="transparent"
+                        size="sm"
+                        onClick={closeSaveLayoutDock}
+                        aria-label="Ẩn lưu sơ đồ"
+                      >
+                        <ChevronUp size={14} />
+                      </ActionIcon>
+                    </Group>
+                    <Stack gap="xs">
+                      <Button
+                        size="sm"
+                        leftSection={<Save size={16} />}
+                        loading={isSavingLayout}
+                        disabled={!editLayout || !isLayoutDirty}
+                        onClick={() => void handleSaveFloorLayout()}
+                        fullWidth
+                      >
+                        Lưu sơ đồ ({floorMapSelectedDate.format("DD/MM")})
+                      </Button>
+                      <Button
+                        size="sm"
+                        leftSection={<Save size={16} />}
+                        variant="light"
+                        loading={isSavingLayout}
+                        disabled={!editLayout || !isLayoutDirty}
+                        onClick={() => void handleSaveFloorLayoutAsGlobal()}
+                        fullWidth
+                      >
+                        Lưu sơ đồ mặc định
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => setLayoutTemplatesOpen(true)}
+                        disabled={!areaId || !hasSupabase}
+                        fullWidth
+                      >
+                        Mẫu sơ đồ…
+                      </Button>
+                    </Stack>
+                  </div>
+                ) : null}
+                {isEditMode && !isSaveLayoutDockOpen ? (
+                  <ActionIcon
+                    variant="filled"
+                    size="lg"
+                    onClick={openSaveLayoutDock}
+                    aria-label="Hiện lưu sơ đồ"
+                  >
+                    <Save size={16} />
+                  </ActionIcon>
                 ) : null}
               </div>
             ) : null}

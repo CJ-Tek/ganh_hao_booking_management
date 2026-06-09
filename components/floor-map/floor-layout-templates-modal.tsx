@@ -7,11 +7,11 @@ import {
   Text,
   TextInput,
 } from "@mantine/core";
-import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { LayoutTemplate, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
+import { openPortalModalsConfirmModal } from "@/lib/portal-confirm-modal";
 import type { FloorLayoutSnapshot } from "@/lib/floor-layout-snapshot";
 import type { FloorLayoutTemplate } from "@/lib/supabase-store";
 
@@ -135,7 +135,7 @@ export function FloorLayoutTemplatesModal({
       return;
     }
     if (hasDayOverride) {
-      modals.openConfirmModal({
+      openPortalModalsConfirmModal({
         title: "Ghi đè sơ đồ riêng của ngày?",
         children: (
           <Text size="sm">
@@ -156,7 +156,7 @@ export function FloorLayoutTemplatesModal({
     if (!onClearDayLayout || !hasDayOverride) {
       return;
     }
-    modals.openConfirmModal({
+    openPortalModalsConfirmModal({
       title: "Xóa sơ đồ riêng?",
       children: (
         <Text size="sm">
@@ -183,7 +183,7 @@ export function FloorLayoutTemplatesModal({
   };
 
   const handleDelete = (template: FloorLayoutTemplate) => {
-    modals.openConfirmModal({
+    openPortalModalsConfirmModal({
       title: "Xóa mẫu sơ đồ?",
       children: (
         <Text size="sm">

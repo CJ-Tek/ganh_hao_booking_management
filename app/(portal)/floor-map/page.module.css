@@ -307,7 +307,8 @@
 }
 
 .canvasDateDock,
-.canvasGridToolsDock {
+.canvasGridToolsDock,
+.canvasSaveLayoutDock {
   pointer-events: auto;
   flex: 0 1 auto;
   border: 1px solid rgba(148, 163, 184, 0.35);
@@ -342,8 +343,16 @@
   overflow-y: auto;
 }
 
+.canvasSaveLayoutDock {
+  width: auto;
+  min-width: min(200px, calc(100vw - 120px));
+  max-width: min(260px, calc(100vw - 80px));
+  padding: 8px 10px;
+}
+
 :global([data-mantine-color-scheme="dark"]) .canvasDateDock,
-:global([data-mantine-color-scheme="dark"]) .canvasGridToolsDock {
+:global([data-mantine-color-scheme="dark"]) .canvasGridToolsDock,
+:global([data-mantine-color-scheme="dark"]) .canvasSaveLayoutDock {
   background: rgba(30, 36, 48, 0.92);
 }
 
@@ -562,6 +571,10 @@
   }
 
   .canvasGridToolsDock {
+    padding: 8px;
+  }
+
+  .canvasSaveLayoutDock {
     padding: 8px;
   }
 

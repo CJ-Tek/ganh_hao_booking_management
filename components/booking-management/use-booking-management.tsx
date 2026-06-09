@@ -12,7 +12,6 @@ import {
   TextInput,
 } from "@mantine/core";
 import { BookingDateTimeFields } from "@/components/booking-datetime-fields";
-import { modals } from "@mantine/modals";
 import { notifications } from "@mantine/notifications";
 import { useCallback, useMemo, useState } from "react";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
@@ -26,6 +25,7 @@ import {
   portalModalOverlayPopoverProps,
 } from "@/components/booking-management/shared";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
+import { openPortalModalsConfirmModal } from "@/lib/portal-confirm-modal";
 import { useAppContext } from "@/contexts/app-context";
 import {
   bookingSlotKey,
@@ -102,7 +102,7 @@ export function useBookingManagement() {
       const customer = state.customers.find((c) => c.id === booking.customerId);
       const name = customer?.fullName ?? "—";
       const timeStr = dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY");
-      modals.openConfirmModal({
+      openPortalModalsConfirmModal({
         title: "Xác nhận hủy booking",
         children: (
           <Text size="sm">
@@ -138,7 +138,7 @@ export function useBookingManagement() {
       const customer = state.customers.find((c) => c.id === booking.customerId);
       const name = customer?.fullName ?? "—";
       const timeStr = dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY");
-      modals.openConfirmModal({
+      openPortalModalsConfirmModal({
         title: "Xác nhận hoàn thành",
         children: (
           <Text size="sm">
