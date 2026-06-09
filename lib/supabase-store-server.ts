@@ -72,6 +72,7 @@ import {
 import {
   AppStateSnapshot,
   AppUser,
+  Area,
   Booking,
   BookingRuntimeSettings,
   BookingStatus,
@@ -234,6 +235,28 @@ function mapDiningTableFromRow(item: {
     splitCloneNumber: item.split_clone_number ?? null,
     splitStartDate: item.split_start_date ?? null,
     splitEndDate: item.split_end_date ?? null,
+  };
+}
+
+function mapAreaFromRow(item: {
+  id: string;
+  branch_id: string;
+  name: string;
+  floor_grid_columns?: number | null;
+  floor_grid_rows?: number | null;
+  floor_node_spacing?: number | null;
+}): Area {
+  return {
+    id: item.id,
+    branchId: item.branch_id,
+    name: item.name,
+    floorGridColumns:
+      typeof item.floor_grid_columns === "number" ? item.floor_grid_columns : 12,
+    floorGridRows: typeof item.floor_grid_rows === "number" ? item.floor_grid_rows : 8,
+    floorNodeSpacing:
+      typeof item.floor_node_spacing === "number"
+        ? item.floor_node_spacing
+        : FLOOR_DEFAULT_NODE_SPACING_PX,
   };
 }
 
@@ -3964,31 +3987,41 @@ export async function upsertTableInSupabase(input: {
   status: TableStatus;
   positionX: number;
   positionY: number;
-}): Promise<void> {
+}): Promise<DiningTable> {
   const client = ensureClient();
-  if (input.id) {
-    await client
-      .from("tables")
-      .update({
-        branch_id: input.branchId,
-        area_id: input.areaId,
-        name: input.name,
-        status: input.status,
-        position_x: input.positionX,
-        position_y: input.positionY,
-      })
-      .eq("id", input.id);
-    return;
-  }
-
-  await client.from("tables").insert({
+  const row = {
     branch_id: input.branchId,
     area_id: input.areaId,
     name: input.name,
     status: input.status,
     position_x: input.positionX,
     position_y: input.positionY,
-  });
+  };
+
+  if (input.id) {
+    const { data, error } = await client
+      .from("tables")
+      .update(row)
+      .eq("id", input.id)
+      .select("*")
+      .single();
+    if (error) {
+      throw new Error(error.message);
+    }
+    if (!data) {
+      throw new Error("Không tìm thấy bàn sau khi cập nhật.");
+    }
+    return mapDiningTableFromRow(data);
+  }
+
+  const { data, error } = await client.from("tables").insert(row).select("*").single();
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!data) {
+    throw new Error("Không tạo được bàn.");
+  }
+  return mapDiningTableFromRow(data);
 }
 
 export async function upsertTablesBatchInSupabase(
@@ -4001,17 +4034,18 @@ export async function upsertTablesBatchInSupabase(
     positionX: number;
     positionY: number;
   }>
-): Promise<void> {
+): Promise<DiningTable[]> {
   const client = ensureClient();
   if (inputs.length === 0) {
-    return;
+    return [];
   }
 
   const updates = inputs.filter((item) => item.id);
   const inserts = inputs.filter((item) => !item.id);
+  const results: DiningTable[] = [];
 
   for (const item of updates) {
-    await client
+    const { data, error } = await client
       .from("tables")
       .update({
         branch_id: item.branchId,
@@ -4021,11 +4055,19 @@ export async function upsertTablesBatchInSupabase(
         position_x: item.positionX,
         position_y: item.positionY,
       })
-      .eq("id", item.id as string);
+      .eq("id", item.id as string)
+      .select("*")
+      .single();
+    if (error) {
+      throw new Error(error.message);
+    }
+    if (data) {
+      results.push(mapDiningTableFromRow(data));
+    }
   }
 
   if (inserts.length > 0) {
-    await client.from("tables").insert(
+    const { data, error } = await client.from("tables").insert(
       inserts.map((item) => ({
         branch_id: item.branchId,
         area_id: item.areaId,
@@ -4034,8 +4076,16 @@ export async function upsertTablesBatchInSupabase(
         position_x: item.positionX,
         position_y: item.positionY,
       }))
-    );
+    ).select("*");
+    if (error) {
+      throw new Error(error.message);
+    }
+    for (const row of data ?? []) {
+      results.push(mapDiningTableFromRow(row));
+    }
   }
+
+  return results;
 }
 
 export async function updateTableStatusInSupabase(
@@ -4071,15 +4121,26 @@ export async function updateTablePositionInSupabase(
     .eq("id", tableId);
 }
 
-export async function addAreaInSupabase(branchId: string, name: string): Promise<void> {
+export async function addAreaInSupabase(branchId: string, name: string): Promise<Area> {
   const client = ensureClient();
-  await client.from("areas").insert({
-    branch_id: branchId,
-    name,
-    floor_grid_columns: 12,
-    floor_grid_rows: 8,
-    floor_node_spacing: FLOOR_DEFAULT_NODE_SPACING_PX,
-  });
+  const { data, error } = await client
+    .from("areas")
+    .insert({
+      branch_id: branchId,
+      name,
+      floor_grid_columns: 12,
+      floor_grid_rows: 8,
+      floor_node_spacing: FLOOR_DEFAULT_NODE_SPACING_PX,
+    })
+    .select("*")
+    .single();
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!data) {
+    throw new Error("Không tạo được khu vực.");
+  }
+  return mapAreaFromRow(data);
 }
 
 export async function updateAreaInSupabase(
@@ -4245,12 +4306,34 @@ export type SaveFloorLayoutInput = {
   tablePositions: Array<{ tableId: string; x: number; y: number }>;
 };
 
+async function tablePositionsScopedToArea(
+  client: ReturnType<typeof ensureClient>,
+  areaId: string,
+  tablePositions: Array<{ tableId: string; x: number; y: number }>
+): Promise<Array<{ tableId: string; x: number; y: number }>> {
+  const { data: areaTables, error } = await client
+    .from("tables")
+    .select("id")
+    .eq("area_id", areaId);
+  if (error) {
+    throw new Error(error.message);
+  }
+  const tableIdsInArea = new Set((areaTables ?? []).map((row) => row.id));
+  return tablePositions.filter((row) => tableIdsInArea.has(row.tableId));
+}
+
 /** Persists grid metadata and all table positions for a floor in one logical save. */
 export async function saveFloorLayoutToSupabase(
   areaId: string,
   input: SaveFloorLayoutInput,
   options?: FloorLayoutSaveOptions
 ): Promise<AreaFloorLayoutByDate | void> {
+  const client = ensureClient();
+  const scopedTablePositions = await tablePositionsScopedToArea(
+    client,
+    areaId,
+    input.tablePositions
+  );
   const layoutDate = options?.layoutDate?.trim();
   if (layoutDate) {
     return upsertAreaFloorLayoutForDateInSupabase(
@@ -4260,7 +4343,7 @@ export async function saveFloorLayoutToSupabase(
         floorGridColumns: input.floorGridColumns,
         floorGridRows: input.floorGridRows,
         floorNodeSpacing: input.floorNodeSpacing,
-        tablePositions: input.tablePositions,
+        tablePositions: scopedTablePositions,
       }),
       {
         sourceTemplateId: options?.sourceTemplateId ?? null,
@@ -4275,11 +4358,11 @@ export async function saveFloorLayoutToSupabase(
     floorGridRows: input.floorGridRows,
     floorNodeSpacing: input.floorNodeSpacing,
   });
-  if (input.tablePositions.length === 0) {
+  if (scopedTablePositions.length === 0) {
     return;
   }
   await Promise.all(
-    input.tablePositions.map((row) =>
+    scopedTablePositions.map((row) =>
       updateTablePositionInSupabase(row.tableId, row.x, row.y)
     )
   );

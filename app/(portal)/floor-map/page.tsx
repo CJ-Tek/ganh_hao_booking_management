@@ -492,7 +492,6 @@ export default function FloorMapPage() {
     currentUser,
     isLoading,
     hasSupabase,
-    saveAreaFloorGrid,
     saveFloorLayout,
     fetchAreaFloorLayoutForDate,
     deleteAreaFloorLayoutForDate,
@@ -526,9 +525,6 @@ export default function FloorMapPage() {
   const [mode, setMode] = useState<CanvasMode>("view");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [gridColumns, setGridColumns] = useState(DEFAULT_GRID_COLUMNS);
-  const [gridRows, setGridRows] = useState(DEFAULT_GRID_ROWS);
-  const [nodeSpacing, setNodeSpacing] = useState(FLOOR_DEFAULT_NODE_SPACING_PX);
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 24, y: 24 });
   const [mergeGroupDragState, setMergeGroupDragState] = useState<MergeGroupDragState | null>(
@@ -712,7 +708,6 @@ export default function FloorMapPage() {
     centerY: number;
     scale: number;
   } | null>(null);
-  const gridSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const areaIdRef = useRef<string | null>(null);
   const modeRef = useRef<CanvasMode>("view");
   const fitCanvasToViewportRef = useRef<() => void>(() => {});
@@ -759,7 +754,7 @@ export default function FloorMapPage() {
       if (!dayLayoutCacheKey) {
         return;
       }
-      setDayLayoutByKey({ [dayLayoutCacheKey]: row });
+      setDayLayoutByKey((prev) => ({ ...prev, [dayLayoutCacheKey]: row }));
     },
     [dayLayoutCacheKey]
   );
@@ -1612,25 +1607,6 @@ export default function FloorMapPage() {
   modeRef.current = mode;
 
   useEffect(() => {
-    if (!areaId || isLoading || mode !== "view" || !activeArea) {
-      return;
-    }
-    if (cachedDayLayout === undefined) {
-      return;
-    }
-    const dayOverride =
-      cachedDayLayout === null || cachedDayLayout === undefined ? null : cachedDayLayout;
-    const resolved = resolveFloorLayoutForDate({
-      area: activeArea,
-      tablesInArea: state.tables.filter((t) => t.areaId === areaId),
-      dayOverride: dayOverride ?? null,
-    });
-    setGridColumns(resolved.floorGridColumns);
-    setGridRows(resolved.floorGridRows);
-    setNodeSpacing(clampFloorNodeSpacing(resolved.floorNodeSpacing));
-  }, [activeArea, areaId, cachedDayLayout, isLoading, mode, state.tables]);
-
-  useEffect(() => {
     setFloorLayoutRealtimeReloadBlocked(mode === "edit");
     return () => setFloorLayoutRealtimeReloadBlocked(false);
   }, [mode]);
@@ -1745,23 +1721,6 @@ export default function FloorMapPage() {
     state.areas,
     state.tables,
   ]);
-
-  useEffect(() => {
-    if (!areaId || isLoading || isEditMode) {
-      return;
-    }
-    if (gridSaveTimerRef.current) {
-      clearTimeout(gridSaveTimerRef.current);
-    }
-    gridSaveTimerRef.current = setTimeout(() => {
-      void saveAreaFloorGrid(areaId, gridColumns, gridRows, nodeSpacing);
-    }, 650);
-    return () => {
-      if (gridSaveTimerRef.current) {
-        clearTimeout(gridSaveTimerRef.current);
-      }
-    };
-  }, [areaId, gridColumns, gridRows, nodeSpacing, isLoading, saveAreaFloorGrid, isEditMode]);
 
   useEffect(() => {
     if (!areaId || !hasSupabase) {
@@ -2092,9 +2051,11 @@ export default function FloorMapPage() {
       : registerTable?.status === "occupied") && registerArrivalMode === "immediate";
 
   const effectiveGridColumns =
-    isEditMode && editLayout ? editLayout.gridColumns : gridColumns;
-  const effectiveGridRows = isEditMode && editLayout ? editLayout.gridRows : gridRows;
-  const effectiveNodeSpacing = isEditMode && editLayout ? editLayout.nodeSpacing : nodeSpacing;
+    isEditMode && editLayout ? editLayout.gridColumns : resolvedLayout.floorGridColumns;
+  const effectiveGridRows =
+    isEditMode && editLayout ? editLayout.gridRows : resolvedLayout.floorGridRows;
+  const effectiveNodeSpacing =
+    isEditMode && editLayout ? editLayout.nodeSpacing : resolvedLayout.floorNodeSpacing;
 
   const rglGridConfig = useMemo(
     () =>
@@ -5131,7 +5092,7 @@ export default function FloorMapPage() {
                         <EditableNumberInput
                           label="Cột"
                           required
-                          value={editLayout?.gridColumns ?? gridColumns}
+                          value={editLayout?.gridColumns ?? resolvedLayout.floorGridColumns}
                           onChange={(value) =>
                             setEditLayout((prev) =>
                               prev
@@ -5150,7 +5111,7 @@ export default function FloorMapPage() {
                         <EditableNumberInput
                           label="Hàng"
                           required
-                          value={editLayout?.gridRows ?? gridRows}
+                          value={editLayout?.gridRows ?? resolvedLayout.floorGridRows}
                           onChange={(value) =>
                             setEditLayout((prev) =>
                               prev
@@ -5170,7 +5131,7 @@ export default function FloorMapPage() {
                       <EditableNumberInput
                         label="Khoảng cách node"
                         required
-                        value={editLayout?.nodeSpacing ?? nodeSpacing}
+                        value={editLayout?.nodeSpacing ?? resolvedLayout.floorNodeSpacing}
                         onChange={(value) =>
                           setEditLayout((prev) =>
                             prev

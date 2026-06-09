@@ -1196,6 +1196,14 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return { ok: true, message: "Đã cập nhật chi nhánh." };
     }
     const result = await updateBranchInSupabase(branchId, input);
+    if (result.ok) {
+      setState((prev) => ({
+        ...prev,
+        branches: prev.branches.map((branch) =>
+          branch.id === branchId ? { ...branch, ...input } : branch
+        ),
+      }));
+    }
     return result;
   };
 
@@ -1647,7 +1655,73 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }
 
     const result = await deleteCustomersInSupabase(ids);
+    if (result.ok) {
+      setState((prev) => ({
+        ...prev,
+        customers: prev.customers.filter((customer) => !ids.includes(customer.id)),
+      }));
+    }
     return result;
+  };
+
+  const applyTableToState = (table: DiningTable) => {
+    setState((prev) => {
+      const index = prev.tables.findIndex((item) => item.id === table.id);
+      if (index === -1) {
+        return { ...prev, tables: [...prev.tables, table] };
+      }
+      const tables = [...prev.tables];
+      tables[index] = table;
+      return { ...prev, tables };
+    });
+  };
+
+  const applyTablesToState = (tables: DiningTable[]) => {
+    if (tables.length === 0) {
+      return;
+    }
+    setState((prev) => {
+      let nextTables = [...prev.tables];
+      for (const table of tables) {
+        const index = nextTables.findIndex((item) => item.id === table.id);
+        if (index === -1) {
+          nextTables.push(table);
+        } else {
+          nextTables[index] = table;
+        }
+      }
+      return { ...prev, tables: nextTables };
+    });
+  };
+
+  const removeTablesFromState = (tableIds: readonly string[]) => {
+    if (tableIds.length === 0) {
+      return;
+    }
+    const remove = new Set(tableIds);
+    setState((prev) => ({
+      ...prev,
+      tables: prev.tables.filter((table) => !remove.has(table.id)),
+    }));
+  };
+
+  const applyAreaToState = (area: Area) => {
+    setState((prev) => {
+      const index = prev.areas.findIndex((item) => item.id === area.id);
+      if (index === -1) {
+        return { ...prev, areas: [...prev.areas, area] };
+      }
+      const areas = [...prev.areas];
+      areas[index] = area;
+      return { ...prev, areas };
+    });
+  };
+
+  const removeAreaFromState = (areaId: string) => {
+    setState((prev) => ({
+      ...prev,
+      areas: prev.areas.filter((area) => area.id !== areaId),
+    }));
   };
 
   const upsertTable = async (table: Omit<DiningTable, "id"> & { id?: string }) => {
@@ -1657,7 +1731,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase) {
       return;
     }
-    await upsertTableInSupabase(table);
+    const saved = await upsertTableInSupabase(table);
+    applyTableToState(saved);
   };
 
   const upsertTablesBatch = async (tables: Array<Omit<DiningTable, "id"> & { id?: string }>) => {
@@ -1667,7 +1742,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase || tables.length === 0) {
       return;
     }
-    await upsertTablesBatchInSupabase(tables);
+    const saved = await upsertTablesBatchInSupabase(tables);
+    applyTablesToState(saved);
   };
 
   const updateTableStatus = async (tableId: string, status: TableStatus) => {
@@ -1712,6 +1788,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return;
     }
     await deleteTableInSupabase(tableId);
+    removeTablesFromState([tableId]);
   };
 
   const deleteTables = async (tableIds: string[]) => {
@@ -1722,6 +1799,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return;
     }
     await deleteTablesInSupabase(tableIds);
+    removeTablesFromState(tableIds);
   };
 
   const updateLocalTablePosition = (tableId: string, x: number, y: number) => {
@@ -1751,7 +1829,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase) {
       return;
     }
-    await addAreaInSupabase(branchId, name);
+    const saved = await addAreaInSupabase(branchId, name);
+    applyAreaToState(saved);
   };
 
   const updateArea = async (
@@ -1799,6 +1878,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       // that specific case to keep everyone consistent.
       if (input.branchId !== undefined) {
         await reload({ scope: "floor" });
+      } else {
+        applyLocal();
       }
     }
     return result;
@@ -1824,6 +1905,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return { ok: true, message: "Đã xóa khu vực." };
     }
     const result = await deleteAreaInSupabase(areaId);
+    if (result.ok) {
+      removeAreaFromState(areaId);
+    }
     return result;
   };
 

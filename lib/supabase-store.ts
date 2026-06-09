@@ -3,10 +3,12 @@ import { callStore } from "./store-client";
 import type {
   AppStateSnapshot,
   AppUser,
+  Area,
   Booking,
   BookingRuntimeSettings,
   BookingStatus,
   Customer,
+  DiningTable,
   Role,
   TableBlockState,
   TableMergeGroup,
@@ -221,14 +223,14 @@ export async function runBookingMaintenanceInSupabase(): Promise<Result> {
 
 export async function upsertTableInSupabase(
   input: Parameters<typeof import("./supabase-store-server").upsertTableInSupabase>[0]
-): Promise<void> {
-  await callStore("upsertTable", input);
+): Promise<DiningTable> {
+  return callStore<DiningTable>("upsertTable", input);
 }
 
 export async function upsertTablesBatchInSupabase(
   tables: Parameters<typeof import("./supabase-store-server").upsertTablesBatchInSupabase>[0]
-): Promise<void> {
-  await callStore("upsertTablesBatch", tables);
+): Promise<DiningTable[]> {
+  return callStore<DiningTable[]>("upsertTablesBatch", tables);
 }
 
 export async function updateTableStatusInSupabase(
@@ -254,8 +256,8 @@ export async function updateTablePositionInSupabase(
   await callStore("updateTablePosition", { tableId, x, y });
 }
 
-export async function addAreaInSupabase(branchId: string, name: string): Promise<void> {
-  await callStore("addArea", { branchId, name });
+export async function addAreaInSupabase(branchId: string, name: string): Promise<Area> {
+  return callStore<Area>("addArea", { branchId, name });
 }
 
 export async function updateAreaInSupabase(

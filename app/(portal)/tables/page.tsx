@@ -19,7 +19,7 @@ import {
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
 import { type DataTableSortStatus } from "mantine-datatable";
-import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { MergeGroupsPanel } from "@/components/merge-groups/merge-groups-panel";
 import { SplitClonesPanel } from "@/components/split-clones/split-clones-panel";
@@ -30,12 +30,8 @@ import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { FLOOR_TABLE_PALETTE_SENTINEL } from "@/lib/floor-map-layout";
-import { bookingCardBusyProps, bookingRowBusyStyle } from "@/lib/busy-row-style";
-import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type DiningTable, TableStatus } from "@/lib/types";
-
-type BatchCountGroup = { count: number };
 
 function branchScopeKey(branchIds: string[]) {
   return [...branchIds].sort().join("|") || "none";
@@ -53,10 +49,8 @@ function TablesPageContent() {
     upsertTable,
     upsertTablesBatch,
     deleteTables,
-    updateTableStatus,
     releaseTableMergeGroup,
     deleteTable,
-    reload,
   } = useAppContext();
   const [mainTab, setMainTab] = useState<string | null>("single");
   const [mergeGroupBusyId, setMergeGroupBusyId] = useState<string | null>(null);
@@ -65,7 +59,6 @@ function TablesPageContent() {
   const [splitCloneDeleteTarget, setSplitCloneDeleteTarget] = useState<string | null>(null);
 
   const isCompact = usePortalCompact();
-  const { isBusy: isTableRowBusy, run: runTableRowAction } = useBusyId();
   const [isAddingSingle, setIsAddingSingle] = useState(false);
   const [isBatchAdding, setIsBatchAdding] = useState(false);
   const [isBatchRemoving, setIsBatchRemoving] = useState(false);
@@ -81,11 +74,7 @@ function TablesPageContent() {
   const [singleName, setSingleName] = useState("");
   const [batchPrefix, setBatchPrefix] = useState("Bàn");
   const [batchStart, setBatchStart] = useState<number>(1);
-  const [batchGroups, setBatchGroups] = useState<BatchCountGroup[]>([
-    { count: 4 },
-    { count: 3 },
-    { count: 2 },
-  ]);
+  const [batchCount, setBatchCount] = useState<number>(5);
 
   const [removeIds, setRemoveIds] = useState<string[]>([]);
   const [removeCount, setRemoveCount] = useState<number>(24);
@@ -115,15 +104,10 @@ function TablesPageContent() {
     [branchId, state.areas]
   );
 
-  const batchPlan = useMemo(() => {
-    const groups = batchGroups
-      .map((g) => ({
-        count: Math.max(0, Math.floor(Number(g.count) || 0)),
-      }))
-      .filter((g) => g.count > 0);
-    const tableCount = groups.reduce((s, g) => s + g.count, 0);
-    return { groups, tableCount };
-  }, [batchGroups]);
+  const batchTableCount = useMemo(
+    () => Math.max(0, Math.floor(Number(batchCount) || 0)),
+    [batchCount]
+  );
 
   const baseRecords = useMemo(
     () =>
@@ -229,15 +213,14 @@ function TablesPageContent() {
       return;
     }
     const start = Math.max(1, Number(batchStart || 1));
-    const { groups, tableCount } = batchPlan;
-    if (groups.length === 0) {
+    const tableCount = batchTableCount;
+    if (tableCount === 0) {
       notifications.show({
         color: "red",
-        message: "Thêm ít nhất một nhóm với số bàn > 0.",
+        message: "Nhập số bàn lớn hơn 0.",
       });
       return;
     }
-    let nextNum = start;
     const payload: Array<{
       branchId: string;
       areaId: string;
@@ -246,18 +229,15 @@ function TablesPageContent() {
       positionX: number;
       positionY: number;
     }> = [];
-    for (const g of groups) {
-      for (let i = 0; i < g.count; i++) {
-        payload.push({
-          branchId,
-          areaId,
-          name: `${batchPrefix.trim()} ${nextNum}`,
-          status: "available",
-          positionX: FLOOR_TABLE_PALETTE_SENTINEL,
-          positionY: FLOOR_TABLE_PALETTE_SENTINEL,
-        });
-        nextNum++;
-      }
+    for (let i = 0; i < tableCount; i++) {
+      payload.push({
+        branchId,
+        areaId,
+        name: `${batchPrefix.trim()} ${start + i}`,
+        status: "available",
+        positionX: FLOOR_TABLE_PALETTE_SENTINEL,
+        positionY: FLOOR_TABLE_PALETTE_SENTINEL,
+      });
     }
     setIsBatchAdding(true);
     try {
@@ -313,19 +293,6 @@ function TablesPageContent() {
     }
   };
 
-  const handleTableStatusChange = async (tableId: string, status: TableStatus) => {
-    await runTableRowAction(tableId, async () => {
-      try {
-        await updateTableStatus(tableId, status);
-      } catch (error) {
-        notifications.show({
-          color: "red",
-          message: error instanceof Error ? error.message : "Không thể cập nhật trạng thái.",
-        });
-      }
-    });
-  };
-
   const tableCards = (
     <Stack gap="sm">
       {sortedRecords.length > 0 ? (
@@ -347,17 +314,8 @@ function TablesPageContent() {
           Không có bàn phù hợp.
         </Text>
       ) : (
-        pagedRecords.map((row) => {
-          const cardBusy = bookingCardBusyProps(isTableRowBusy(row.id));
-          return (
-          <Card
-            key={row.id}
-            withBorder
-            radius="md"
-            padding="md"
-            className={cardBusy.className}
-            style={cardBusy.style}
-          >
+        pagedRecords.map((row) => (
+          <Card key={row.id} withBorder radius="md" padding="md">
             <Stack gap="sm">
               <Group justify="space-between" align="flex-start" wrap="nowrap">
                 <div style={{ minWidth: 0 }}>
@@ -375,24 +333,9 @@ function TablesPageContent() {
               <Text size="xs" c="dimmed">
                 {branchNameById[row.branchId]}
               </Text>
-              <SimpleGrid cols={2} spacing="xs">
-                {(["available", "hold", "occupied", "locked"] as TableStatus[]).map((status) => (
-                  <Button
-                    key={status}
-                    size="compact-sm"
-                    variant={row.status === status ? "filled" : "light"}
-                    disabled={isTableRowBusy(row.id) || row.status === status}
-                    loading={isTableRowBusy(row.id)}
-                    onClick={() => void handleTableStatusChange(row.id, status)}
-                  >
-                    {tableStatusLabel[status]}
-                  </Button>
-                ))}
-              </SimpleGrid>
             </Stack>
           </Card>
-        );
-        })
+        ))
       )}
       {sortedRecords.length > pageSize ? (
         <Group justify="center" gap="xs" mt="xs">
@@ -449,7 +392,7 @@ function TablesPageContent() {
 
       <Tabs.Panel value="batch-add" pt="md">
         <Stack gap="md">
-          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm">
             <TextInput
               label="Tiền tố tên bàn"
               value={batchPrefix}
@@ -463,68 +406,27 @@ function TablesPageContent() {
               onChange={(value) => setBatchStart(value ?? 1)}
               size={isCompact ? "md" : "sm"}
             />
+            <EditableNumberInput
+              label="Số bàn"
+              required
+              min={1}
+              value={batchCount}
+              onChange={(value) => setBatchCount(value ?? 1)}
+              size={isCompact ? "md" : "sm"}
+            />
           </SimpleGrid>
-          <div>
-            <Text size="sm" fw={600}>
-              Nhóm bàn
-            </Text>
-            <Text size="xs" c="dimmed">
-              Mỗi dòng: số bàn cần thêm. Tên bàn tăng dần theo thứ tự nhóm.
-            </Text>
-          </div>
-          <Stack gap="xs">
-            {batchGroups.map((row, index) => (
-              <Group key={index} align="flex-end" wrap="nowrap" gap="sm">
-                <EditableNumberInput
-                  label={index === 0 ? "Số bàn" : undefined}
-                  placeholder="0"
-                  required
-                  min={0}
-                  value={row.count}
-                  onChange={(value) =>
-                    setBatchGroups((prev) =>
-                      prev.map((g, i) =>
-                        i === index ? { ...g, count: value ?? 0 } : g
-                      )
-                    )
-                  }
-                  style={{ flex: 1 }}
-                  size={isCompact ? "md" : "sm"}
-                />
-                <ActionIcon
-                  variant="light"
-                  color="red"
-                  aria-label="Xóa nhóm"
-                  disabled={batchGroups.length <= 1}
-                  size={isCompact ? "lg" : "md"}
-                  onClick={() =>
-                    setBatchGroups((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)))
-                  }
-                >
-                  <Trash2 size={18} />
-                </ActionIcon>
-              </Group>
-            ))}
-          </Stack>
-          <Button
-            variant="light"
-            leftSection={<Plus size={18} />}
-            size={isCompact ? "md" : "sm"}
-            onClick={() => setBatchGroups((prev) => [...prev, { count: 1 }])}
-          >
-            Thêm nhóm
-          </Button>
-          {batchPlan.tableCount > 0 ? (
+          {batchTableCount > 0 ? (
             <Text size="sm" c="dimmed">
-              Tổng dự kiến: {batchPlan.tableCount} bàn.
+              Tổng dự kiến: {batchTableCount} bàn ({batchPrefix.trim()} {batchStart}–
+              {batchStart + batchTableCount - 1}).
             </Text>
           ) : (
             <Text size="sm" c="dimmed">
-              Nhập ít nhất một dòng có số bàn lớn hơn 0.
+              Nhập số bàn lớn hơn 0.
             </Text>
           )}
           <Button
-            disabled={batchPlan.tableCount === 0 || isBatchAdding}
+            disabled={batchTableCount === 0 || isBatchAdding}
             loading={isBatchAdding}
             size={isCompact ? "md" : "sm"}
             onClick={() => void handleBatchAdd()}
@@ -621,7 +523,6 @@ function TablesPageContent() {
     setSplitCloneBusyId(cloneId);
     try {
       await deleteTable(cloneId);
-      await reload({ scope: "floor" });
       notifications.show({ color: "green", message: "Đã xóa bàn tách." });
       setSplitCloneDeleteTarget(null);
     } catch (error) {
@@ -777,7 +678,6 @@ function TablesPageContent() {
               recordsPerPage={pageSize}
               minHeight={260}
               idAccessor="id"
-              rowStyle={(row) => bookingRowBusyStyle(isTableRowBusy(row.id))}
               selectedRecords={selectedRows}
               onSelectedRecordsChange={setSelectedRows}
               noRecordsText="Không có bàn phù hợp với bộ lọc hiện tại."
@@ -803,26 +703,6 @@ function TablesPageContent() {
                     <Badge color={tableStatusColor[row.status]} variant="light">
                       {tableStatusLabel[row.status]}
                     </Badge>
-                  ),
-                },
-                {
-                  accessor: "actions",
-                  title: "Cập nhật nhanh",
-                  render: (row) => (
-                    <Group gap={6} wrap="wrap">
-                      {(["available", "hold", "occupied", "locked"] as TableStatus[]).map((status) => (
-                        <Button
-                          key={status}
-                          size="compact-xs"
-                          variant={row.status === status ? "filled" : "light"}
-                          disabled={isTableRowBusy(row.id) || row.status === status}
-                          loading={isTableRowBusy(row.id)}
-                          onClick={() => void handleTableStatusChange(row.id, status)}
-                        >
-                          {tableStatusLabel[status]}
-                        </Button>
-                      ))}
-                    </Group>
                   ),
                 },
               ]}
