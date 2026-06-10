@@ -1,0 +1,20 @@
+.banner {
+  padding: 10px 12px;
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-brand-0);
+  border: 1px solid var(--mantine-color-brand-2);
+  border-left: 4px solid var(--mantine-color-brand-6);
+}
+
+.name {
+  flex-shrink: 0;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.time {
+  flex-shrink: 0;
+  white-space: nowrap;
+}

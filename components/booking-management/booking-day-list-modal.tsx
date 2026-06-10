@@ -114,8 +114,7 @@ export const BookingDayListModal = forwardRef<
 
   const handleDayBookingRowClick = useCallback(
     (booking: Booking) => {
-      setOpened(false);
-      setFocusBookingId(null);
+      setFocusBookingId(booking.id);
       onDayBookingRowClick?.(booking);
     },
     [onDayBookingRowClick]

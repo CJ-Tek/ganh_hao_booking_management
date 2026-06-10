@@ -65,18 +65,34 @@ body {
   max-width: 100%;
 }
 
+.portal-minimal-modal-content {
+  width: fit-content;
+  max-width: min(100vw - 32px, 480px);
+  height: auto;
+  max-height: min(90dvh, calc(100dvh - env(safe-area-inset-bottom, 0px) - 32px));
+}
+
+.portal-minimal-modal-body {
+  flex: 0 0 auto;
+  overflow: visible;
+  max-width: 100%;
+}
+
 @media (max-width: 61.9375em) {
   .mantine-Modal-inner {
     padding: 0;
     align-items: stretch;
   }
 
-  .mantine-Modal-inner:has(.portal-date-picker-modal-content) {
+  .mantine-Modal-inner:has(.portal-date-picker-modal-content),
+  .mantine-Modal-inner:has(.portal-minimal-modal-content) {
     padding: var(--mantine-spacing-md);
     align-items: center;
   }
 
-  .mantine-Modal-content:not(.portal-standard-modal-content):not(.portal-date-picker-modal-content) {
+  .mantine-Modal-content:not(.portal-standard-modal-content):not(.portal-date-picker-modal-content):not(
+      .portal-minimal-modal-content
+    ) {
     display: flex;
     flex-direction: column;
     width: 100%;
@@ -86,7 +102,9 @@ body {
     border-radius: 0;
   }
 
-  .mantine-Modal-content:not(.portal-standard-modal-content):not(.portal-date-picker-modal-content)
+  .mantine-Modal-content:not(.portal-standard-modal-content):not(.portal-date-picker-modal-content):not(
+      .portal-minimal-modal-content
+  )
     .mantine-Modal-body {
     flex: 1;
     min-height: 0;

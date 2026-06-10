@@ -14,6 +14,8 @@ import {
 import { BookingDateTimeFields } from "@/components/booking-datetime-fields";
 import { notifications } from "@mantine/notifications";
 import { useCallback, useMemo, useState } from "react";
+import { BookingModalContextBanner } from "@/components/booking-management/booking-modal-context-banner";
+import { EditBookingModalTitle } from "@/components/booking-management/edit-booking-modal-title";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
 import { BookingTablePicker } from "@/components/booking-table-picker/booking-table-picker";
@@ -621,20 +623,23 @@ export function useBookingManagement() {
       <Modal
         opened={editBooking != null}
         onClose={closeEditBookingModal}
-        title="Chỉnh booking"
+        title={
+          editBooking ? (
+            <EditBookingModalTitle
+              customerName={
+                state.customers.find((item) => item.id === editBooking.customerId)?.fullName ?? "—"
+              }
+            />
+          ) : (
+            "Chỉnh booking"
+          )
+        }
         size="xl"
         centered
         zIndex={MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX}
       >
         {editBooking ? (
           <Stack gap="sm">
-            <Text size="sm" c="dimmed">
-              Khách{" "}
-              <strong>
-                {state.customers.find((item) => item.id === editBooking.customerId)?.fullName ??
-                  "—"}
-              </strong>
-            </Text>
             <BookingDateTimeFields
               value={editBookingAt}
               onChange={setEditBookingAt}
@@ -740,11 +745,13 @@ export function useBookingManagement() {
           overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
         >
           <Stack gap="sm">
-            <Text size="sm" c="dimmed">
-              {state.customers.find((item) => item.id === assignFormBooking.customerId)?.fullName ??
-                "—"}{" "}
-              · {dayjs(assignFormBooking.bookingAt).format("HH:mm DD/MM/YYYY")}
-            </Text>
+            <BookingModalContextBanner
+              customerName={
+                state.customers.find((item) => item.id === assignFormBooking.customerId)?.fullName ??
+                "—"
+              }
+              bookingAt={assignFormBooking.bookingAt}
+            />
             <GuestCountNumberInput
               label="Số khách"
               description={

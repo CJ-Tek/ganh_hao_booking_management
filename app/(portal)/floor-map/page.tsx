@@ -98,6 +98,7 @@ import {
   type CSSProperties,
 } from "react";
 import { PortalSectionCard } from "@/components/portal-page";
+import { PortalMinimalModal } from "@/components/portal-minimal-modal/portal-minimal-modal";
 import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
@@ -5721,7 +5722,7 @@ export default function FloorMapPage() {
         />
       </Modal>
 
-      <Modal
+      <PortalMinimalModal
         opened={splitCloneDeleteTarget !== null}
         onClose={() => setSplitCloneDeleteTarget(null)}
         title="Xóa bàn tách"
@@ -5759,7 +5760,7 @@ export default function FloorMapPage() {
             </Button>
           </Group>
         </Stack>
-      </Modal>
+      </PortalMinimalModal>
 
       <Modal
         opened={mergeModalOpen}
@@ -5915,7 +5916,7 @@ export default function FloorMapPage() {
         </Stack>
       </Modal>
 
-      <Modal
+      <PortalMinimalModal
         opened={areaDeleteOpen}
         onClose={() => setAreaDeleteOpen(false)}
         title="Xóa khu vực"
@@ -5935,7 +5936,7 @@ export default function FloorMapPage() {
             </Button>
           </Group>
         </Stack>
-      </Modal>
+      </PortalMinimalModal>
 
       <MergeGroupDetailModal
         groupId={openedMergeGroupId}
@@ -6032,7 +6033,7 @@ export default function FloorMapPage() {
         }}
       />
 
-      <Modal
+      <PortalMinimalModal
         opened={releaseMergeGroupId !== null}
         onClose={() => setReleaseMergeGroupId(null)}
         title="Bỏ gộp bàn"
@@ -6061,7 +6062,7 @@ export default function FloorMapPage() {
             </Button>
           </Group>
         </Stack>
-      </Modal>
+      </PortalMinimalModal>
 
       {!isEmployee ? (
         <BookingDayListModal

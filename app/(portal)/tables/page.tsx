@@ -24,6 +24,7 @@ import { useCallback, useMemo, useState } from "react";
 import { MergeGroupsPanel } from "@/components/merge-groups/merge-groups-panel";
 import { SplitClonesPanel } from "@/components/split-clones/split-clones-panel";
 import { PortalDataTable } from "@/components/portal-data-table";
+import { PortalMinimalModal } from "@/components/portal-minimal-modal/portal-minimal-modal";
 import { EditableNumberInput } from "@/components/editable-number-input";
 import { PortalPageTitle, PortalSectionCard, PortalStickyPanel } from "@/components/portal-page";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
@@ -757,7 +758,7 @@ function TablesPageContent() {
         </Tabs.Panel>
       </Tabs>
 
-      <Modal
+      <PortalMinimalModal
         opened={splitCloneDeleteTarget !== null}
         onClose={() => setSplitCloneDeleteTarget(null)}
         title="Xóa bàn tách"
@@ -795,9 +796,9 @@ function TablesPageContent() {
             </Button>
           </Group>
         </Stack>
-      </Modal>
+      </PortalMinimalModal>
 
-      <Modal
+      <PortalMinimalModal
         opened={mergeGroupReleaseTarget !== null}
         onClose={() => setMergeGroupReleaseTarget(null)}
         title="Bỏ gộp bàn"
@@ -826,7 +827,7 @@ function TablesPageContent() {
             </Button>
           </Group>
         </Stack>
-      </Modal>
+      </PortalMinimalModal>
     </Stack>
   );
 }

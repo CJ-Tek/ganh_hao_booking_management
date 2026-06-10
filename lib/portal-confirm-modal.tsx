@@ -3,7 +3,7 @@
 import { Button, Group, Stack, Text } from "@mantine/core";
 import { modals } from "@mantine/modals";
 import type { ReactNode } from "react";
-import { PORTAL_MODAL_CONFIRM_Z_INDEX } from "@/lib/portal-z-index";
+import { PORTAL_MODAL_CONFIRM_Z_INDEX, portalConfirmModalProps } from "@/lib/portal-z-index";
 
 export type PortalConfirmOptions = {
   title: string;
@@ -19,13 +19,26 @@ function renderMessage(message: ReactNode) {
   return typeof message === "string" ? <Text size="sm">{message}</Text> : message;
 }
 
-/** Mantine confirm modal that always stacks above page `<Modal>` / `PortalStandardModal`. */
-export function openPortalModalsConfirmModal(options: PortalModalsConfirmModalProps): string {
-  return modals.openConfirmModal({
-    centered: true,
+function mergePortalConfirmModalProps(
+  options: PortalModalsConfirmModalProps
+): PortalModalsConfirmModalProps {
+  return {
+    ...portalConfirmModalProps,
     ...options,
     zIndex: PORTAL_MODAL_CONFIRM_Z_INDEX,
-  });
+    classNames: {
+      ...portalConfirmModalProps.classNames,
+      ...options.classNames,
+      content: [portalConfirmModalProps.classNames?.content, options.classNames?.content]
+        .filter(Boolean)
+        .join(" "),
+    },
+  };
+}
+
+/** Mantine confirm modal that always stacks above page `<Modal>` / `PortalStandardModal`. */
+export function openPortalModalsConfirmModal(options: PortalModalsConfirmModalProps): string {
+  return modals.openConfirmModal(mergePortalConfirmModalProps(options));
 }
 
 /** In-app confirm dialog (replaces `window.confirm`). Resolves when the user chooses. */
@@ -48,8 +61,8 @@ export function openPortalConfirmModal(options: PortalConfirmOptions): Promise<b
 /** In-app alert dialog (replaces `window.alert`). */
 export function openPortalAlertModal(options: { title: string; message: ReactNode }) {
   modals.open({
+    ...portalConfirmModalProps,
     title: options.title,
-    centered: true,
     zIndex: PORTAL_MODAL_CONFIRM_Z_INDEX,
     withCloseButton: true,
     closeOnClickOutside: true,

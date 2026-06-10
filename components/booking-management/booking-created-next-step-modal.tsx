@@ -1,7 +1,8 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Button, Modal, Stack, Text } from "@mantine/core";
+import { Button, Stack, Text } from "@mantine/core";
+import { PortalMinimalModal } from "@/components/portal-minimal-modal/portal-minimal-modal";
 import { useRouter } from "next/navigation";
 import { useAppContext } from "@/contexts/app-context";
 import { isGuestCountSpecified } from "@/lib/booking-meta";
@@ -85,13 +86,7 @@ export function BookingCreatedNextStepModal({
   };
 
   return (
-    <Modal
-      opened={opened}
-      onClose={onClose}
-      title="Đã tạo booking"
-      size="sm"
-      centered
-    >
+    <PortalMinimalModal opened={opened} onClose={onClose} title="Đã tạo booking" size="sm">
       <Stack gap="md">
         <Text size="sm">
           {extraMessage ? (
@@ -133,6 +128,6 @@ export function BookingCreatedNextStepModal({
           Đóng
         </Button>
       </Stack>
-    </Modal>
+    </PortalMinimalModal>
   );
 }

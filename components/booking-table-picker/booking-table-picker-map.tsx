@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Group, Layer, Rect, Stage, Text } from "react-konva";
 import {
+  PICKER_MERGE_LABEL_FONT_SIZE,
   PICKER_TABLE_FONT_SIZE,
   PICKER_TABLE_HEIGHT_PX,
   PICKER_TABLE_WIDTH_PX,
+  PICKER_TEXT_INSET_PX,
   type BookingTablePickerLayoutModel,
   type PickerPlacedTable,
 } from "@/lib/booking-table-picker-layout";
@@ -20,7 +22,7 @@ import {
 import type { MergeGroupBbox } from "@/lib/floor-map-merge-bbox";
 import type { TableStatus } from "@/lib/types";
 
-const FIT_PADDING = 24;
+const FIT_PADDING = 6;
 const MAP_MIN_HEIGHT_PX = 280;
 const MAP_MAX_HEIGHT_PX = 520;
 
@@ -182,9 +184,10 @@ export function BookingTablePickerMap(props: BookingTablePickerMapProps) {
           />
           <Text
             text={table.name}
-            width={PICKER_TABLE_WIDTH_PX - 8}
-            x={4}
-            y={PICKER_TABLE_HEIGHT_PX / 2 - PICKER_TABLE_FONT_SIZE / 2}
+            width={PICKER_TABLE_WIDTH_PX - PICKER_TEXT_INSET_PX * 2}
+            height={PICKER_TABLE_HEIGHT_PX}
+            x={PICKER_TEXT_INSET_PX}
+            y={0}
             fontSize={PICKER_TABLE_FONT_SIZE}
             fontStyle="bold"
             fill={style.label}
@@ -331,13 +334,15 @@ function renderMergeBbox(
       />
       <Text
         text={bbox.mergedName}
-        x={6}
-        y={bbox.headerHeight / 2 - 6}
-        width={bbox.width - 12}
-        fontSize={13}
+        x={PICKER_TEXT_INSET_PX}
+        y={0}
+        width={bbox.width - PICKER_TEXT_INSET_PX * 2}
+        height={bbox.headerHeight}
+        fontSize={PICKER_MERGE_LABEL_FONT_SIZE}
         fontStyle="bold"
         fill={style.label}
         align="center"
+        verticalAlign="middle"
         ellipsis
         listening={false}
       />

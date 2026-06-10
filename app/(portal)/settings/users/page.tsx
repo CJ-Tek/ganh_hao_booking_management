@@ -20,6 +20,7 @@ import { type DataTableSortStatus } from "mantine-datatable";
 import { Pencil, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
+import { PortalMinimalModal } from "@/components/portal-minimal-modal/portal-minimal-modal";
 import { PortalPageTitle, PortalSectionCard, PortalStickyAction } from "@/components/portal-page";
 import { RouteGuard } from "@/components/route-guard";
 import { useAppContext } from "@/contexts/app-context";
@@ -424,7 +425,7 @@ export default function UserManagementPage() {
           </Stack>
         </Modal>
 
-        <Modal
+        <PortalMinimalModal
           opened={deleteTarget !== null}
           onClose={() => {
             if (!deleteLoading) {
@@ -459,7 +460,7 @@ export default function UserManagementPage() {
               </Button>
             </Group>
           </Stack>
-        </Modal>
+        </PortalMinimalModal>
       </Stack>
     </RouteGuard>
   );

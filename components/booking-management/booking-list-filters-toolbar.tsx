@@ -24,6 +24,7 @@ export function BookingListTableAssignFilter(props: {
       size={size}
       w={width}
       miw={typeof width === "number" ? width : undefined}
+      style={{ flexShrink: 0 }}
     />
   );
 }
@@ -32,20 +33,24 @@ export function BookingListFiltersToolbar(props: {
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
   searchPlaceholder: string;
-  filtersOpen: boolean;
-  onFiltersOpenChange: (open: boolean) => void;
-  collapseFilters: ReactNode;
+  /** Shown on the same row as search (e.g. Loại khách). */
+  inlineFilters?: ReactNode;
+  filtersOpen?: boolean;
+  onFiltersOpenChange?: (open: boolean) => void;
+  collapseFilters?: ReactNode;
 }) {
   const {
     searchQuery,
     onSearchQueryChange,
     searchPlaceholder,
-    filtersOpen,
+    inlineFilters,
+    filtersOpen = false,
     onFiltersOpenChange,
     collapseFilters,
   } = props;
 
   const isCompact = usePortalCompact();
+  const hasCollapseFilters = collapseFilters != null;
 
   return (
     <Stack gap="sm">
@@ -56,24 +61,29 @@ export function BookingListFiltersToolbar(props: {
           onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
           size="md"
           voiceIconSize="md"
-          style={{ flex: 1, minWidth: 0 }}
+          style={{ flex: 1, minWidth: isCompact ? "12rem" : 0 }}
         />
-        <Button
-          variant="default"
-          size="md"
-          aria-expanded={filtersOpen}
-          onClick={() => onFiltersOpenChange(!filtersOpen)}
-          rightSection={filtersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          style={isCompact ? { flex: "1 1 auto", minWidth: "7.5rem" } : undefined}
-        >
-          {filtersOpen ? "Ẩn bộ lọc" : "Bộ lọc"}
-        </Button>
+        {inlineFilters}
+        {hasCollapseFilters ? (
+          <Button
+            variant="default"
+            size="md"
+            aria-expanded={filtersOpen}
+            onClick={() => onFiltersOpenChange?.(!filtersOpen)}
+            rightSection={filtersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            style={isCompact ? { flex: "1 1 auto", minWidth: "7.5rem" } : undefined}
+          >
+            {filtersOpen ? "Ẩn bộ lọc" : "Bộ lọc"}
+          </Button>
+        ) : null}
       </Group>
-      <Collapse expanded={filtersOpen}>
-        <Stack gap="sm" pt="xs">
-          {collapseFilters}
-        </Stack>
-      </Collapse>
+      {hasCollapseFilters ? (
+        <Collapse expanded={filtersOpen}>
+          <Stack gap="sm" pt="xs">
+            {collapseFilters}
+          </Stack>
+        </Collapse>
+      ) : null}
     </Stack>
   );
 }

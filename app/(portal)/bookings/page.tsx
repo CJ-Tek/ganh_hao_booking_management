@@ -26,6 +26,8 @@ import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingOrderDetailModal } from "@/components/booking-management/booking-order-detail-modal";
+import { BookingModalContextBanner } from "@/components/booking-management/booking-modal-context-banner";
+import { EditBookingModalTitle } from "@/components/booking-management/edit-booking-modal-title";
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
 import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
 import { BookingListDesktopSection } from "@/components/booking-management/booking-list-desktop-section";
@@ -157,8 +159,6 @@ function BookingsPageContent() {
   const [isEditSaving, setIsEditSaving] = useState(false);
   const [mobileDetailBooking, setMobileDetailBooking] = useState<Booking | null>(null);
   const [mobileDetailSource, setMobileDetailSource] = useState<"list" | "today">("list");
-  const [listMobileFiltersOpen, setListMobileFiltersOpen] = useState(false);
-  const [todayMobileFiltersOpen, setTodayMobileFiltersOpen] = useState(false);
   const [listFocusBookingId, setListFocusBookingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [listStatusFilter, setListStatusFilter] = useState<BookingStatus | null>(
@@ -1287,30 +1287,6 @@ function BookingsPageContent() {
   const bookingsSearchPlaceholder =
     "Tìm theo khách, SĐT, giờ đến, giờ check-in, khu, bàn, trạng thái...";
 
-  const listFiltersToolbar = (
-    <BookingListFiltersToolbar
-      searchQuery={searchQuery}
-      onSearchQueryChange={(value) => {
-        setSearchQuery(value);
-        setPage(1);
-      }}
-      searchPlaceholder={bookingsSearchPlaceholder}
-      filtersOpen={listMobileFiltersOpen}
-      onFiltersOpenChange={setListMobileFiltersOpen}
-      collapseFilters={
-        <BookingListTableAssignFilter
-          value={listTableAssignFilter}
-          onChange={(value) => {
-            setListTableAssignFilter(value);
-            setPage(1);
-          }}
-          data={tableAssignFilterOptions}
-          size="md"
-        />
-      }
-    />
-  );
-
   const listTableAssignFilterControl = (
     <BookingListTableAssignFilter
       value={listTableAssignFilter}
@@ -1319,8 +1295,20 @@ function BookingsPageContent() {
         setPage(1);
       }}
       data={tableAssignFilterOptions}
-      size="sm"
+      size={isCompact ? "md" : "sm"}
       width={168}
+    />
+  );
+
+  const listFiltersToolbar = (
+    <BookingListFiltersToolbar
+      searchQuery={searchQuery}
+      onSearchQueryChange={(value) => {
+        setSearchQuery(value);
+        setPage(1);
+      }}
+      searchPlaceholder={bookingsSearchPlaceholder}
+      inlineFilters={listTableAssignFilterControl}
     />
   );
 
@@ -1536,34 +1524,7 @@ function BookingsPageContent() {
     />
   );
 
-  const todayFiltersToolbar = (
-    <BookingListFiltersToolbar
-      searchQuery={todaySearchQuery}
-      onSearchQueryChange={(value) => {
-        setTodaySearchQuery(value);
-        setTodayPage(1);
-      }}
-      searchPlaceholder={todaySearchPlaceholder}
-      filtersOpen={todayMobileFiltersOpen}
-      onFiltersOpenChange={setTodayMobileFiltersOpen}
-      collapseFilters={
-        <Select
-          label="Loại khách"
-          placeholder="Tất cả"
-          clearable
-          data={todayGuestTypeFilterOptions}
-          value={todayGuestTypeFilter}
-          onChange={(value) => {
-            setTodayGuestTypeFilter(value);
-            setTodayPage(1);
-          }}
-          size="md"
-        />
-      }
-    />
-  );
-
-  const todayDesktopFilters = (
+  const todayGuestTypeFilterControl = (
     <Select
       label="Loại khách"
       placeholder="Tất cả"
@@ -1574,11 +1535,26 @@ function BookingsPageContent() {
         setTodayGuestTypeFilter(value);
         setTodayPage(1);
       }}
-      size="sm"
-      w={148}
+      size={isCompact ? "md" : "sm"}
+      w={isCompact ? 148 : 148}
       miw={148}
+      style={{ flexShrink: 0 }}
     />
   );
+
+  const todayFiltersToolbar = (
+    <BookingListFiltersToolbar
+      searchQuery={todaySearchQuery}
+      onSearchQueryChange={(value) => {
+        setTodaySearchQuery(value);
+        setTodayPage(1);
+      }}
+      searchPlaceholder={todaySearchPlaceholder}
+      inlineFilters={todayGuestTypeFilterControl}
+    />
+  );
+
+  const todayDesktopFilters = todayGuestTypeFilterControl;
 
   const todayPaginationBar = (
     <BookingListPaginationBar
@@ -1979,20 +1955,23 @@ function BookingsPageContent() {
       <Modal
         opened={editBooking != null}
         onClose={closeEditBookingModal}
-        title="Chỉnh booking"
+        title={
+          editBooking ? (
+            <EditBookingModalTitle
+              customerName={
+                state.customers.find((item) => item.id === editBooking.customerId)?.fullName ?? "—"
+              }
+            />
+          ) : (
+            "Chỉnh booking"
+          )
+        }
         size="xl"
         centered
         zIndex={MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX}
       >
         {editBooking ? (
           <Stack gap="sm">
-            <Text size="sm" c="dimmed">
-              Khách{" "}
-              <strong>
-                {state.customers.find((item) => item.id === editBooking.customerId)?.fullName ??
-                  "—"}
-              </strong>
-            </Text>
             <BookingDateTimeFields
               value={editBookingAt}
               onChange={setEditBookingAt}
@@ -2101,10 +2080,13 @@ function BookingsPageContent() {
           overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
         >
           <Stack gap="sm">
-            <Text size="sm" c="dimmed">
-              {state.customers.find((item) => item.id === assignFormBooking.customerId)?.fullName ?? "—"} ·{" "}
-              {dayjs(assignFormBooking.bookingAt).format("HH:mm DD/MM/YYYY")}
-            </Text>
+            <BookingModalContextBanner
+              customerName={
+                state.customers.find((item) => item.id === assignFormBooking.customerId)?.fullName ??
+                "—"
+              }
+              bookingAt={assignFormBooking.bookingAt}
+            />
             <GuestCountNumberInput
               label="Số khách"
               description={

@@ -27,14 +27,15 @@ import {
 import { DatePickerInput } from "@mantine/dates";
 import { useMediaQuery } from "@mantine/hooks";
 
-import { useRouter } from "next/navigation";
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from "react";
 
 import {
   BookingDayListModal,
   type BookingDayListModalHandle,
 } from "@/components/booking-management/booking-day-list-modal";
+import { BookingOrderDetailModal } from "@/components/booking-management/booking-order-detail-modal";
 import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
+import { useBookingManagement } from "@/components/booking-management/use-booking-management";
 import { BookingStatusFilterChips } from "@/components/booking-management/booking-status-filter-chips";
 
 import { PortalPageTitle, PortalSectionCard, PortalStickyHeader } from "@/components/portal-page";
@@ -73,7 +74,7 @@ export const BookingCalendarPanel = forwardRef<
     onSelectedDateChange?: (date: dayjs.Dayjs) => void;
     /** When false, parent renders "Danh sách booking" (e.g. floor-map toolbar). Default true for select-day-only. */
     showDayListButton?: boolean;
-    /** Row click in day-list modal; default navigates to /bookings?tab=list&focusBooking=… */
+    /** Row click in day-list modal; default opens booking detail in place. */
     onDayBookingRowClick?: (booking: Booking) => void;
     /** Omit section card + intro copy when parent wraps the panel (e.g. floor-map accordion). */
     embedded?: boolean;
@@ -93,8 +94,6 @@ export const BookingCalendarPanel = forwardRef<
     embedded = false,
     showCreateBookingButton: showCreateBookingButtonProp,
   } = props;
-
-  const router = useRouter();
 
   const { state, filteredBranchIds, currentUser } = useAppContext();
   const isEmployee = currentUser?.role === "employee";
@@ -119,6 +118,17 @@ export const BookingCalendarPanel = forwardRef<
 
   const [statusFilter, setStatusFilter] = useState<CalendarStatusFilter>("pending");
   const [createBookingModalOpened, setCreateBookingModalOpened] = useState(false);
+  const [dayListDetailBooking, setDayListDetailBooking] = useState<Booking | null>(null);
+  const {
+    bookingManagementModals,
+    isBookingRowBusy,
+    openEditBookingModal,
+    openAssignOptions,
+    setChangeTableBooking,
+    runCheckIn,
+    openCompleteBookingConfirm,
+    openCancelBookingConfirm,
+  } = useBookingManagement();
 
   const today = dayjs();
 
@@ -314,13 +324,9 @@ export const BookingCalendarPanel = forwardRef<
         onDayBookingRowClick(booking);
         return;
       }
-      const params = new URLSearchParams({
-        tab: "list",
-        focusBooking: booking.id,
-      });
-      router.push(`/bookings?${params.toString()}`);
+      setDayListDetailBooking(booking);
     },
-    [onDayBookingRowClick, router]
+    [onDayBookingRowClick]
   );
 
   const openDayListModalForBooking = useCallback(
@@ -596,6 +602,36 @@ export const BookingCalendarPanel = forwardRef<
           }}
         />
       ) : null}
+
+      <BookingOrderDetailModal
+        booking={dayListDetailBooking}
+        opened={dayListDetailBooking != null}
+        onClose={() => setDayListDetailBooking(null)}
+        source="list"
+        isBookingRowBusy={isBookingRowBusy}
+        onEdit={(booking) => {
+          setDayListDetailBooking(null);
+          openEditBookingModal(booking);
+        }}
+        onChangeTable={(booking) => {
+          setDayListDetailBooking(null);
+          setChangeTableBooking(booking);
+        }}
+        onAssign={(booking) => {
+          setDayListDetailBooking(null);
+          openAssignOptions(booking);
+        }}
+        onCheckIn={(id) => void runCheckIn(id)}
+        onComplete={(booking) => {
+          setDayListDetailBooking(null);
+          openCompleteBookingConfirm(booking);
+        }}
+        onCancel={(booking) => {
+          setDayListDetailBooking(null);
+          openCancelBookingConfirm(booking);
+        }}
+      />
+      {bookingManagementModals}
 
     </Stack>
   );

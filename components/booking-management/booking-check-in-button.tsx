@@ -1,14 +1,17 @@
 "use client";
 
 import { Button, Tooltip } from "@mantine/core";
+import type { CSSProperties } from "react";
 
 export function BookingCheckInButton(props: {
   size: "compact-xs" | "sm";
   disabled: boolean;
   loading?: boolean;
   onCheckIn: () => void;
+  style?: CSSProperties;
+  fullWidth?: boolean;
 }) {
-  const { size, disabled, loading = false, onCheckIn } = props;
+  const { size, disabled, loading = false, onCheckIn, style, fullWidth = false } = props;
   const btn = (
     <Button
       size={size}
@@ -17,6 +20,8 @@ export function BookingCheckInButton(props: {
       onClick={() => void onCheckIn()}
       disabled={disabled || loading}
       loading={loading}
+      style={style}
+      fullWidth={fullWidth}
     >
       Check-in
     </Button>
@@ -26,7 +31,7 @@ export function BookingCheckInButton(props: {
   }
   return (
     <Tooltip label="Chỉ check-in khi booking đã xác nhận." withArrow>
-      <span style={{ display: "inline-flex" }}>{btn}</span>
+      <span style={{ display: "inline-flex", minWidth: 0, ...style }}>{btn}</span>
     </Tooltip>
   );
 }

@@ -1,0 +1,189 @@
+.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+}
+
+.handle {
+  width: 40px;
+  height: 4px;
+  margin: 2px auto 4px;
+  border-radius: 999px;
+  background: var(--mantine-color-gray-4);
+  flex-shrink: 0;
+}
+
+.hero {
+  border-radius: var(--mantine-radius-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-left-width: 4px;
+  padding: 14px 16px;
+  background: var(--mantine-color-body);
+}
+
+.heroTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.heroTime {
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.heroDate {
+  margin-top: 4px;
+}
+
+.factGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.factCell {
+  min-width: 0;
+  padding: 10px 8px;
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-gray-0);
+  border: 1px solid var(--mantine-color-gray-2);
+}
+
+.factLabel {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mantine-color-dimmed);
+  line-height: 1.2;
+}
+
+.factValue {
+  display: block;
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 600;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.detailsCard {
+  border-radius: var(--mantine-radius-md);
+  border: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-gray-0);
+  padding: 4px 0;
+}
+
+.detailRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.detailRow + .detailRow {
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+.detailLabel {
+  flex-shrink: 0;
+  font-size: var(--mantine-font-size-sm);
+  color: var(--mantine-color-dimmed);
+}
+
+.detailValue {
+  min-width: 0;
+  flex: 1;
+  text-align: right;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.noteBox {
+  border-radius: var(--mantine-radius-md);
+  border: 1px dashed var(--mantine-color-default-border);
+  background: var(--mantine-color-yellow-0);
+  padding: 12px 14px;
+}
+
+.noteLabel {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--mantine-color-dimmed);
+}
+
+.actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-top: auto;
+  padding-top: 12px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(
+    to top,
+    var(--mantine-color-body) 78%,
+    color-mix(in srgb, var(--mantine-color-body) 88%, transparent)
+  );
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+.actions :global(.booking-row-actions-drawer) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: stretch;
+}
+
+.actions :global(.booking-row-actions-drawer .mantine-Button-root) {
+  width: 100%;
+  min-height: 44px;
+  height: 100%;
+}
+
+.actions :global(.booking-row-actions-drawer > span) {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+}
+
+.actions :global(.booking-row-actions-drawer > span .mantine-Button-root) {
+  flex: 1;
+}
+
+.actions :global(.booking-row-actions-drawer-span) {
+  grid-column: 1 / -1;
+}
+
+.drawerContent {
+  height: auto !important;
+  max-height: min(88dvh, calc(100dvh - env(safe-area-inset-top, 0px) - 12px)) !important;
+  border-top-left-radius: var(--mantine-radius-lg) !important;
+  border-top-right-radius: var(--mantine-radius-lg) !important;
+}
+
+.drawerBody {
+  display: flex;
+  flex-direction: column;
+  padding-top: 8px !important;
+  padding-bottom: 0 !important;
+  overflow: auto;
+}
+
+.drawerHeader {
+  padding-bottom: 8px !important;
+}
+
+.drawerTitle {
+  font-size: var(--mantine-font-size-lg) !important;
+  font-weight: 700 !important;
+  line-height: 1.25 !important;
+}

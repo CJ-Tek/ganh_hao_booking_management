@@ -1,22 +1,11 @@
 "use client";
 
 import { ModalsProvider } from "@mantine/modals";
-import { PORTAL_MODAL_CONFIRM_Z_INDEX } from "@/lib/portal-z-index";
-import { usePortalModalLayoutProps } from "@/lib/use-portal-modal-layout";
-
-const modalOverlayBlur = { backgroundOpacity: 0.55, blur: 4 } as const;
+import { portalConfirmModalProps } from "@/lib/portal-z-index";
 
 export function PortalModalsProvider({ children }: { children: React.ReactNode }) {
-  const modalLayout = usePortalModalLayoutProps();
-
   return (
-    <ModalsProvider
-      modalProps={{
-        ...modalLayout,
-        overlayProps: modalOverlayBlur,
-        zIndex: PORTAL_MODAL_CONFIRM_Z_INDEX,
-      }}
-    >
+    <ModalsProvider modalProps={portalConfirmModalProps}>
       {children}
     </ModalsProvider>
   );

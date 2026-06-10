@@ -31,7 +31,9 @@ export const PICKER_TABLE_HEIGHT_PX = 56;
 export const PICKER_COL_GAP_PX = 14;
 export const PICKER_ROW_GAP_PX = 14;
 export const PICKER_STACK_OFFSET_PX = 10;
-export const PICKER_TABLE_FONT_SIZE = 14;
+export const PICKER_TABLE_FONT_SIZE = 35;
+export const PICKER_MERGE_LABEL_FONT_SIZE = 17;
+export const PICKER_TEXT_INSET_PX = 2;
 
 function pickerCompactCenterPx(
   compactCol: number,
@@ -99,7 +101,7 @@ export type BookingTablePickerLayoutModel = {
   dayBookings: Booking[];
 };
 
-const PICKER_BOUNDS_PAD_PX = 16;
+const PICKER_BOUNDS_PAD_PX = 6;
 
 export function computePickerContentBounds(input: {
   placedTables: readonly PickerPlacedTable[];

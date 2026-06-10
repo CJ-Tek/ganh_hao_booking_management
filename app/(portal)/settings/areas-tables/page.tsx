@@ -18,6 +18,7 @@ import { type DataTableSortStatus } from "mantine-datatable";
 import { Pencil, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
+import { PortalMinimalModal } from "@/components/portal-minimal-modal/portal-minimal-modal";
 import {
   PortalPageTitle,
   PortalSectionCard,
@@ -424,7 +425,7 @@ export default function AreasTablesSettingsPage() {
         </Stack>
       </Modal>
 
-      <Modal
+      <PortalMinimalModal
         opened={deleteTarget != null}
         onClose={() => setDeleteTarget(null)}
         title="Xóa khu vực"
@@ -444,7 +445,7 @@ export default function AreasTablesSettingsPage() {
             </Button>
           </Group>
         </Stack>
-      </Modal>
+      </PortalMinimalModal>
     </Stack>
   );
 }

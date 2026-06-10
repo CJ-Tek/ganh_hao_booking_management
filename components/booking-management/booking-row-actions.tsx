@@ -9,6 +9,8 @@ export function BookingRowActions(props: {
   booking: Booking;
   busy?: boolean;
   size?: "compact-xs" | "sm";
+  /** Drawer sheet: grid actions; Check-in/Hủy (or Hoàn thành) share one row. */
+  layout?: "inline" | "drawer";
   /** When false, hides the edit control (e.g. Booking hôm nay — edit lives in Danh sách booking). */
   showEdit?: boolean;
   onEdit: (booking: Booking) => void;
@@ -22,6 +24,7 @@ export function BookingRowActions(props: {
     booking,
     busy = false,
     size = "compact-xs",
+    layout = "inline",
     showEdit = true,
     onEdit,
     onChangeTable,
@@ -39,67 +42,106 @@ export function BookingRowActions(props: {
     return null;
   }
 
+  const editAction =
+    showEdit && canEditBookingOrder(booking) ? (
+      <Button size={size} variant="default" disabled={busy} onClick={() => onEdit(booking)}>
+        Sửa
+      </Button>
+    ) : null;
+
+  const changeTableAction =
+    canChangeBookingTable(booking) && onChangeTable ? (
+      <Button
+        size={size}
+        variant="light"
+        color="blue"
+        disabled={busy}
+        onClick={() => onChangeTable(booking)}
+      >
+        Đổi bàn
+      </Button>
+    ) : null;
+
+  const assignAction =
+    booking.status === "pending" ? (
+      <Button
+        size={size}
+        variant="filled"
+        color="blue"
+        disabled={busy}
+        onClick={() => onAssign(booking)}
+      >
+        Gán vào bàn
+      </Button>
+    ) : null;
+
+  const checkInAction = (
+    <BookingCheckInButton
+      size={size}
+      disabled={booking.status !== "confirmed"}
+      loading={busy}
+      onCheckIn={() => onCheckIn(booking.id)}
+      fullWidth={layout === "drawer"}
+    />
+  );
+
+  const completeAction =
+    booking.status === "checked_in" || booking.status === "seated" ? (
+      <Button
+        size={size}
+        variant="filled"
+        color="green"
+        disabled={busy}
+        fullWidth={layout === "drawer"}
+        onClick={() => onComplete(booking)}
+      >
+        Hoàn thành
+      </Button>
+    ) : null;
+
+  const cancelAction =
+    booking.status === "checked_in" || booking.status === "seated" ? null : (
+      <Button
+        size={size}
+        variant={layout === "drawer" ? "filled" : "default"}
+        color="red"
+        disabled={busy}
+        fullWidth={layout === "drawer"}
+        onClick={() => onCancel(booking)}
+      >
+        Hủy
+      </Button>
+    );
+
+  const utilityActions = (
+    <>
+      {editAction}
+      {changeTableAction}
+      {assignAction}
+    </>
+  );
+
+  if (layout === "drawer") {
+    return (
+      <div className="booking-row-actions-drawer">
+        {utilityActions}
+        {completeAction ? (
+          <div className="booking-row-actions-drawer-span">{completeAction}</div>
+        ) : (
+          <>
+            {checkInAction}
+            {cancelAction}
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <Group gap={6} wrap="wrap">
-      {showEdit && canEditBookingOrder(booking) ? (
-        <Button
-          size={size}
-          variant="default"
-          disabled={busy}
-          onClick={() => onEdit(booking)}
-        >
-          Sửa
-        </Button>
-      ) : null}
-      {canChangeBookingTable(booking) && onChangeTable ? (
-        <Button
-          size={size}
-          variant="light"
-          color="blue"
-          disabled={busy}
-          onClick={() => onChangeTable(booking)}
-        >
-          Đổi bàn
-        </Button>
-      ) : null}
-      {booking.status === "pending" ? (
-        <Button
-          size={size}
-          variant="filled"
-          color="blue"
-          disabled={busy}
-          onClick={() => onAssign(booking)}
-        >
-          Gán vào bàn
-        </Button>
-      ) : null}
-      <BookingCheckInButton
-        size={size}
-        disabled={booking.status !== "confirmed"}
-        loading={busy}
-        onCheckIn={() => onCheckIn(booking.id)}
-      />
-      {booking.status === "checked_in" || booking.status === "seated" ? (
-        <Button
-          size={size}
-          variant="filled"
-          color="green"
-          disabled={busy}
-          onClick={() => onComplete(booking)}
-        >
-          Hoàn thành
-        </Button>
-      ) : (
-        <Button
-          size={size}
-          variant="default"
-          color="red"
-          disabled={busy}
-          onClick={() => onCancel(booking)}
-        >
-          Hủy
-        </Button>
-      )}
+      {utilityActions}
+      {checkInAction}
+      {completeAction ?? cancelAction}
     </Group>
   );
 }
