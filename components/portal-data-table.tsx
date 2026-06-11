@@ -243,27 +243,36 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
     ...dataTableProps,
   } as DataTableWithColumnsProps<T>;
 
+  const searchInput = !hideSearch ? (
+    <TextInputWithVoice
+      label={searchLabel}
+      placeholder={searchPlaceholder}
+      value={searchQuery}
+      onChange={(event) => {
+        setSearchQuery(event.currentTarget.value);
+        setPage(1);
+        setMobilePage(1);
+      }}
+      size="sm"
+      style={isCompact ? { width: "100%" } : { flex: "1 1 12rem", minWidth: 0 }}
+      voiceIconSize="sm"
+    />
+  ) : null;
+
   return (
     <Stack gap="sm">
       {showToolbar ? (
-        <Group align="flex-end" wrap="wrap" gap="sm">
-          {!hideSearch ? (
-            <TextInputWithVoice
-              label={searchLabel}
-              placeholder={searchPlaceholder}
-              value={searchQuery}
-              onChange={(event) => {
-                setSearchQuery(event.currentTarget.value);
-                setPage(1);
-                setMobilePage(1);
-              }}
-              size="sm"
-              style={{ flex: "1 1 12rem", minWidth: 0 }}
-              voiceIconSize="sm"
-            />
-          ) : null}
-          {filters}
-        </Group>
+        isCompact ? (
+          <Stack gap="sm" w="100%">
+            {searchInput}
+            {filters}
+          </Stack>
+        ) : (
+          <Group align="flex-end" wrap="wrap" gap="sm">
+            {searchInput}
+            {filters}
+          </Group>
+        )
       ) : null}
       {isCompact && mobileCardRender ? (
         <Stack gap="xs">

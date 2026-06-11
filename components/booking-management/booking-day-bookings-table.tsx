@@ -1,7 +1,7 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Badge, Group, Stack, Text } from "@mantine/core";
+import { Badge, Stack, Text } from "@mantine/core";
 import { BookingStatusFilterChips } from "@/components/booking-management/booking-status-filter-chips";
 import { useBookingListTimeSort } from "@/components/booking-management/booking-list-filters-toolbar";
 import { PortalListSectionDesktop } from "@/components/portal-list/portal-list-section-desktop";
@@ -84,12 +84,6 @@ export function BookingDayBookingsTable(props: {
     />
   );
 
-  const tableFilters = (
-    <Group gap="sm" wrap="wrap" align="flex-end">
-      {timeSortFilters}
-    </Group>
-  );
-
   const table = (
     <PortalDataTable<Booking>
       records={records}
@@ -98,7 +92,7 @@ export function BookingDayBookingsTable(props: {
       sortStatus={sortStatus}
       onSortStatusChange={setSortStatus}
       defaultSort={defaultSort}
-      filters={tableFilters}
+      filters={timeSortFilters}
       searchPlaceholder="Khách, bàn, trạng thái, ghi chú..."
       noRecordsText="Không có booking trong ngày đã chọn."
       minHeight={260}
