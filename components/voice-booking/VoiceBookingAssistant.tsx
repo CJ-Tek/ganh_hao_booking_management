@@ -18,7 +18,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookingTablePicker } from "@/components/booking-table-picker/booking-table-picker";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
-import { BOOKING_GUEST_TYPE_OPTIONS, type BookingArrivalIntent } from "@/lib/booking-meta";
+import {
+  BOOKING_GUEST_TYPE_OPTIONS,
+  WALK_IN_CUSTOMER_NAME,
+  type BookingArrivalIntent,
+} from "@/lib/booking-meta";
 import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import { normalizeGuestTypeHint } from "@/lib/voice-booking/guest-type";
 import { matchAreaId, matchTableId, type AreaLite, type TableLite } from "@/lib/voice-booking/match";
@@ -555,7 +559,12 @@ export function VoiceBookingAssistant(props: {
       notifications.show({ color: "red", title: "Thiếu giờ", message: "Chọn ngày/giờ." });
       return;
     }
-    if (!customerName.trim()) {
+    const resolvedCustomerName = customerName.trim()
+      ? formatVietnamesePersonName(customerName)
+      : showArrivalModeRadios && arrivalMode === "immediate"
+        ? WALK_IN_CUSTOMER_NAME
+        : "";
+    if (!resolvedCustomerName) {
       notifications.show({ color: "red", title: "Thiếu tên", message: "Nhập tên khách." });
       return;
     }
@@ -572,7 +581,7 @@ export function VoiceBookingAssistant(props: {
 
     const runCreate = async (allowDuplicate?: boolean) => {
       const result = await onCreateBooking({
-        customerName: formatVietnamesePersonName(customerName),
+        customerName: resolvedCustomerName,
         customerPhone: phoneNorm || undefined,
         branchId: branch.id,
         areaId: areaId ?? undefined,
@@ -698,8 +707,16 @@ export function VoiceBookingAssistant(props: {
 
           <Group grow align="flex-start">
             <TextInput
-              label="Tên khách"
-              placeholder="Nguyễn Văn A"
+              label={
+                showArrivalModeRadios && arrivalMode === "immediate"
+                  ? "Tên khách (tuỳ chọn)"
+                  : "Tên khách"
+              }
+              placeholder={
+                showArrivalModeRadios && arrivalMode === "immediate"
+                  ? `Để trống → ${WALK_IN_CUSTOMER_NAME}`
+                  : "Nguyễn Văn A"
+              }
               value={customerName}
               onChange={(e) => setCustomerName(e.currentTarget.value)}
               onBlur={() => setCustomerName((v) => formatVietnamesePersonName(v))}

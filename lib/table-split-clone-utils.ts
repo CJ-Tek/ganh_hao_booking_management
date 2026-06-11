@@ -114,7 +114,29 @@ export function pickNextSplitCloneNumber(
   return candidate;
 }
 
-/** Find the nearest free grid cell adjacent to the source table. */
+const SPLIT_CLONE_NEIGHBOR_OFFSETS: ReadonlyArray<{ dc: number; dr: number }> = [
+  { dc: -1, dr: 0 },
+  { dc: 1, dr: 0 },
+  { dc: 0, dr: -1 },
+  { dc: 0, dr: 1 },
+  { dc: -1, dr: -1 },
+  { dc: 1, dr: -1 },
+  { dc: -1, dr: 1 },
+  { dc: 1, dr: 1 },
+];
+
+function splitCloneNeighborPriority(dc: number, dr: number): number {
+  const index = SPLIT_CLONE_NEIGHBOR_OFFSETS.findIndex(
+    (offset) => offset.dc === dc && offset.dr === dr
+  );
+  return index >= 0 ? index : SPLIT_CLONE_NEIGHBOR_OFFSETS.length;
+}
+
+/**
+ * Place a split clone beside its source table.
+ * When any immediate neighbor is free: left → right → top → below → corners.
+ * When all eight neighbors are taken: the globally nearest free grid cell.
+ */
 export function findAdjacentFreeGridCell(input: {
   sourceCol: number;
   sourceRow: number;
@@ -123,32 +145,54 @@ export function findAdjacentFreeGridCell(input: {
   gridRows: number;
 }): { col: number; row: number } | null {
   const { sourceCol, sourceRow, occupiedCells, gridColumns, gridRows } = input;
-  const deltas: Array<{ col: number; row: number }> = [];
-  for (let radius = 1; radius <= Math.max(gridColumns, gridRows); radius += 1) {
-    for (let dc = -radius; dc <= radius; dc += 1) {
-      for (let dr = -radius; dr <= radius; dr += 1) {
-        if (Math.abs(dc) !== radius && Math.abs(dr) !== radius) {
-          continue;
-        }
-        deltas.push({ col: sourceCol + dc, row: sourceRow + dr });
+
+  const isFree = (col: number, row: number): boolean => {
+    if (col < 0 || col >= gridColumns || row < 0 || row >= gridRows) {
+      return false;
+    }
+    return !occupiedCells.has(`${col}-${row}`);
+  };
+
+  for (const { dc, dr } of SPLIT_CLONE_NEIGHBOR_OFFSETS) {
+    const col = sourceCol + dc;
+    const row = sourceRow + dr;
+    if (isFree(col, row)) {
+      return { col, row };
+    }
+  }
+
+  let nearest: { col: number; row: number } | null = null;
+  let nearestChebyshev = Number.POSITIVE_INFINITY;
+  let nearestManhattan = Number.POSITIVE_INFINITY;
+  let nearestPriority = Number.POSITIVE_INFINITY;
+
+  for (let row = 0; row < gridRows; row += 1) {
+    for (let col = 0; col < gridColumns; col += 1) {
+      if (!isFree(col, row)) {
+        continue;
+      }
+      const dc = col - sourceCol;
+      const dr = row - sourceRow;
+      const chebyshev = Math.max(Math.abs(dc), Math.abs(dr));
+      const manhattan = Math.abs(dc) + Math.abs(dr);
+      const priority = splitCloneNeighborPriority(dc, dr);
+
+      if (
+        chebyshev < nearestChebyshev ||
+        (chebyshev === nearestChebyshev && manhattan < nearestManhattan) ||
+        (chebyshev === nearestChebyshev &&
+          manhattan === nearestManhattan &&
+          priority < nearestPriority)
+      ) {
+        nearest = { col, row };
+        nearestChebyshev = chebyshev;
+        nearestManhattan = manhattan;
+        nearestPriority = priority;
       }
     }
   }
-  for (const delta of deltas) {
-    if (
-      delta.col < 0 ||
-      delta.col >= gridColumns ||
-      delta.row < 0 ||
-      delta.row >= gridRows
-    ) {
-      continue;
-    }
-    const key = `${delta.col}-${delta.row}`;
-    if (!occupiedCells.has(key)) {
-      return delta;
-    }
-  }
-  return null;
+
+  return nearest;
 }
 
 export function buildOccupiedGridCells(

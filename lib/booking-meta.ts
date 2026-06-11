@@ -41,6 +41,9 @@ export function isImmediateBookingArrival(
 
 export type BookingArrivalIntent = "hold" | "immediate";
 
+/** Default customer name when Ngồi ngay has no guest name. */
+export const WALK_IN_CUSTOMER_NAME = "Vãng lai";
+
 /** Whether create-booking should auto-seat (Ngồi ngay). Giữ chỗ never seats. */
 export function shouldAutoSeatOnCreate(
   bookingAtIso: string,

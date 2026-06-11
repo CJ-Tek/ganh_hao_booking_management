@@ -196,6 +196,7 @@ import {
   pickPrimaryBookingOnMergeGroup,
   pickPrimaryBookingOnTable,
   tableHasActiveBookingOnFloorDay,
+  WALK_IN_CUSTOMER_NAME,
 } from "@/lib/booking-meta";
 import {
   formatMergeGroupDate,
@@ -3134,7 +3135,15 @@ export default function FloorMapPage() {
     const registerTarget = registerMergeGroup ?? registerTable;
     const { customerName, customerPhone, guestCount, bookingAt, note, guestType } =
       registerVoiceFields;
-    if (!registerTarget || !customerName.trim()) {
+    if (!registerTarget) {
+      return;
+    }
+    const resolvedCustomerName = customerName.trim()
+      ? formatVietnamesePersonName(customerName.trim())
+      : registerArrivalMode === "immediate"
+        ? WALK_IN_CUSTOMER_NAME
+        : "";
+    if (!resolvedCustomerName) {
       notifications.show({
         color: "red",
         message: "Vui lòng nhập tên khách.",
@@ -3230,7 +3239,7 @@ export default function FloorMapPage() {
     const arrivalIntent = registerArrivalMode === "immediate" ? "immediate" : "hold";
     const runCreate = async (allowDuplicate?: boolean) => {
       const result = await createBooking({
-        customerName: formatVietnamesePersonName(customerName.trim()),
+        customerName: resolvedCustomerName,
         customerPhone: normalizedRegisterPhone || undefined,
         branchId: registerTarget.branchId,
         areaId: registerTarget.areaId,
@@ -3261,7 +3270,7 @@ export default function FloorMapPage() {
           setRegisterCreatedNextStep({
             bookingId: result.bookingId,
             bookingAt: bookingAtIso,
-            customerName: formatVietnamesePersonName(customerName.trim()),
+            customerName: resolvedCustomerName,
             message: result.message,
           });
           setRegisterCreatedNextStepOpened(true);
