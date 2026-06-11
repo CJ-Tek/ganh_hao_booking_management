@@ -5869,7 +5869,7 @@ export default function FloorMapPage() {
         </Stack>
       </PortalMinimalModal>
 
-      <Modal
+      <PortalMinimalModal
         opened={mergeModalOpen}
         onClose={() => setMergeModalOpen(false)}
         title="Gộp bàn — chọn thời gian"
@@ -5925,9 +5925,9 @@ export default function FloorMapPage() {
             </Button>
           </Group>
         </Stack>
-      </Modal>
+      </PortalMinimalModal>
 
-      <Modal
+      <PortalMinimalModal
         opened={splitModalOpen}
         onClose={() => setSplitModalOpen(false)}
         title="Tách bàn — chọn thời gian"
@@ -5992,7 +5992,7 @@ export default function FloorMapPage() {
             </Button>
           </Group>
         </Stack>
-      </Modal>
+      </PortalMinimalModal>
 
       <Modal
         opened={areaEditOpen}
