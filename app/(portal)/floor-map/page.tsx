@@ -38,6 +38,7 @@ import {
   RotateCcw,
   Pencil,
   Save,
+  ScanSearch,
   Search,
   Trash2,
   Wrench,
@@ -97,6 +98,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
+import { PortalAdvanceSearchModal } from "@/components/portal-advance-search/portal-advance-search-modal";
 import { PortalSectionCard } from "@/components/portal-page";
 import { PortalMinimalModal } from "@/components/portal-minimal-modal/portal-minimal-modal";
 import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
@@ -116,6 +118,11 @@ import {
   FLOOR_TABLE_BLOCK_WIDTH_PX,
   FLOOR_TABLE_PALETTE_SENTINEL,
 } from "@/lib/floor-map-layout";
+import {
+  buildPortalAdvanceSearchResults,
+  type PortalAdvanceSearchResult,
+  type PortalAdvanceSearchSection,
+} from "@/lib/portal-advance-search";
 import {
   buildFloorMapRglGridConfig,
   floorMapTablesToRglLayout,
@@ -517,8 +524,6 @@ export default function FloorMapPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isCompact = usePortalCompact();
-  const reserveManagerDock =
-    (currentUser?.role === "manager" || currentUser?.role === "employee") && isCompact;
   const isEmployee = currentUser?.role === "employee";
   const isBranchManager = currentUser?.role === "manager";
   const [activeAreaId, setActiveAreaId] = useState<string | null>(null);
@@ -531,6 +536,7 @@ export default function FloorMapPage() {
     null
   );
   const [filtersAccordionValue, setFiltersAccordionValue] = useState<string | null>(null);
+  const [advanceSearchOpen, setAdvanceSearchOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(true);
   const [isDatePickerDockOpen, setIsDatePickerDockOpen] = useState(true);
   const [isGridToolsDockOpen, setIsGridToolsDockOpen] = useState(false);
@@ -1059,6 +1065,55 @@ export default function FloorMapPage() {
   }, [filteredBranchIds, loadedDayBookings, selectedLayoutDate, state.bookings]);
 
   const bookingsForFloorTableDisplay = floorMapDayBookings;
+
+  const advanceSearchSections = useMemo((): PortalAdvanceSearchSection[] => {
+    if (isEmployee) {
+      return ["floor-map"];
+    }
+    return ["floor-map", "bookings", "customers", "tables"];
+  }, [isEmployee]);
+
+  const advanceSearchResults = useMemo(
+    () =>
+      buildPortalAdvanceSearchResults({
+        snapshot: state,
+        filteredBranchIds,
+        sections: advanceSearchSections,
+        floorMapContext: {
+          selectedDate: floorMapSelectedDate,
+          dayBookings: floorMapDayBookings,
+        },
+      }),
+    [
+      advanceSearchSections,
+      filteredBranchIds,
+      floorMapDayBookings,
+      floorMapSelectedDate,
+      state,
+    ]
+  );
+
+  const handleAdvanceSearchSelect = useCallback(
+    (result: PortalAdvanceSearchResult) => {
+      setAdvanceSearchOpen(false);
+      if (result.section === "floor-map" && result.floorMapTableId) {
+        const table = state.tables.find((item) => item.id === result.floorMapTableId);
+        if (!table) {
+          return;
+        }
+        if (result.floorMapAreaId) {
+          setActiveAreaId(result.floorMapAreaId);
+        }
+        setSearch(table.name);
+        setStatusFilter("all");
+        setFiltersAccordionValue("search");
+        setDetailTable(table);
+        return;
+      }
+      router.push(result.href);
+    },
+    [router, state.tables]
+  );
 
   const activeBookingForDetail = useMemo((): Booking | null => {
     if (detailMergeGroup) {
@@ -4255,17 +4310,7 @@ export default function FloorMapPage() {
   }, [splitSelectedTableId, state.tables]);
 
   return (
-    <Stack
-      className={classes.pageRoot}
-      style={
-        reserveManagerDock
-          ? ({
-              ["--manager-dock-reserve" as string]:
-                "calc(72px + env(safe-area-inset-bottom, 0px))",
-            } as CSSProperties)
-          : undefined
-      }
-    >
+    <Stack className={classes.pageRoot}>
       <Stack gap="xs" className={classes.pageToolbarStack}>
         <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
           <Group
@@ -4400,14 +4445,27 @@ export default function FloorMapPage() {
           <Accordion.Item value="search">
             <Accordion.Control icon={<Search size={16} />}>Tìm bàn & lọc</Accordion.Control>
             <Accordion.Panel>
-              <Group gap="sm" grow wrap="nowrap" align="center">
-                <TextInputWithVoice
-                  label="Tìm bàn"
-                  placeholder="Tên bàn, khách, SĐT, giờ đặt, giờ check-in…"
-                  value={search}
-                  onChange={(event) => setSearch(event.currentTarget.value)}
-                  size="sm"
-                />
+              <Group gap="sm" grow wrap="nowrap" align="flex-end">
+                <Group gap="xs" wrap="nowrap" align="flex-end" style={{ flex: 1, minWidth: 0 }}>
+                  <TextInputWithVoice
+                    label="Tìm bàn"
+                    placeholder="Tên bàn, khách, SĐT, giờ đặt, giờ check-in…"
+                    value={search}
+                    onChange={(event) => setSearch(event.currentTarget.value)}
+                    size="sm"
+                    style={{ flex: 1, minWidth: 0 }}
+                  />
+                  <Button
+                    variant="default"
+                    size="sm"
+                    leftSection={isCompact ? undefined : <ScanSearch size={16} />}
+                    onClick={() => setAdvanceSearchOpen(true)}
+                    aria-label="Tìm kiếm nâng cao"
+                    style={{ flexShrink: 0 }}
+                  >
+                    {isCompact ? <ScanSearch size={16} /> : "Nâng cao"}
+                  </Button>
+                </Group>
                 <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
                   <Text size="sm" fw={500}>
                     Lọc trạng thái
@@ -6004,6 +6062,13 @@ export default function FloorMapPage() {
         applyTemplate={applyFloorLayoutTemplateToDate}
         onClearDayLayout={clearDayLayoutOverride}
         onApplied={() => void refreshDayLayout()}
+      />
+
+      <PortalAdvanceSearchModal
+        opened={advanceSearchOpen}
+        onClose={() => setAdvanceSearchOpen(false)}
+        results={advanceSearchResults}
+        onSelect={handleAdvanceSearchSelect}
       />
 
       <CreateBookingModal

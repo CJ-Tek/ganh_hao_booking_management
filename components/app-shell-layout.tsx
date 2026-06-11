@@ -24,7 +24,9 @@ import {
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
 import { useBusyId } from "@/lib/use-busy-id";
+import { MANAGER_DOCK_RESERVE_CSS } from "@/lib/portal-layout";
 import { MANAGER_DOCK_Z_INDEX } from "@/lib/portal-z-index";
+import type { CSSProperties } from "react";
 import {
   Bell,
   CalendarDays,
@@ -604,9 +606,12 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
       <AppShell.Main
         id="portal-main-content"
         tabIndex={-1}
-        pb={
+        pb={showManagerDock ? MANAGER_DOCK_RESERVE_CSS : undefined}
+        style={
           showManagerDock
-            ? "calc(66px + env(safe-area-inset-bottom, 0px))"
+            ? ({
+                ["--manager-dock-reserve" as string]: MANAGER_DOCK_RESERVE_CSS,
+              } as CSSProperties)
             : undefined
         }
       >

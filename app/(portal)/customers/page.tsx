@@ -5,7 +5,9 @@ import { Button, Drawer, Group, Stack, Text } from "@mantine/core";
 import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { Phone } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PORTAL_SEARCH_QUERY_PARAM } from "@/lib/portal-advance-search";
 import { BookingListFiltersToolbar } from "@/components/booking-management/booking-list-filters-toolbar";
 import { BookingListPaginationBar } from "@/components/booking-management/booking-list-pagination";
 import {
@@ -44,6 +46,8 @@ function applyCustomerBookingFilter(rows: CustomerListRow[], filter: CustomerBoo
 export default function CustomersPage() {
   const { state, filteredBranchIds, deleteCustomers } = useAppContext();
   const isCompact = usePortalCompact();
+  const searchParams = useSearchParams();
+  const consumedSearchFromUrlRef = useRef<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<CustomerBookingFilter>("all");
   const [listPage, setListPage] = useState(1);
@@ -52,6 +56,16 @@ export default function CustomersPage() {
   const [drawerBookingPage, setDrawerBookingPage] = useState(1);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerListRow | null>(null);
   const [selectedCustomers, setSelectedCustomers] = useState<CustomerListRow[]>([]);
+
+  useEffect(() => {
+    const queryFromUrl = searchParams.get(PORTAL_SEARCH_QUERY_PARAM);
+    if (!queryFromUrl || consumedSearchFromUrlRef.current === queryFromUrl) {
+      return;
+    }
+    consumedSearchFromUrlRef.current = queryFromUrl;
+    setQuery(queryFromUrl);
+    setListPage(1);
+  }, [searchParams]);
 
   const customerRows = useMemo<CustomerListRow[]>(
     () =>

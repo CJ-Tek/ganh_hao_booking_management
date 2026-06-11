@@ -20,7 +20,9 @@ import {
 import { notifications } from "@mantine/notifications";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PORTAL_SEARCH_QUERY_PARAM } from "@/lib/portal-advance-search";
 import { MergeGroupsPanel } from "@/components/merge-groups/merge-groups-panel";
 import { SplitClonesPanel } from "@/components/split-clones/split-clones-panel";
 import { PortalDataTable } from "@/components/portal-data-table";
@@ -53,6 +55,8 @@ function TablesPageContent() {
     releaseTableMergeGroup,
     deleteTable,
   } = useAppContext();
+  const searchParams = useSearchParams();
+  const consumedSearchFromUrlRef = useRef<string | null>(null);
   const [mainTab, setMainTab] = useState<string | null>("single");
   const [mergeGroupBusyId, setMergeGroupBusyId] = useState<string | null>(null);
   const [mergeGroupReleaseTarget, setMergeGroupReleaseTarget] = useState<string | null>(null);
@@ -82,6 +86,16 @@ function TablesPageContent() {
   const [removePrefix, setRemovePrefix] = useState("");
 
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    const queryFromUrl = searchParams.get(PORTAL_SEARCH_QUERY_PARAM);
+    if (!queryFromUrl || consumedSearchFromUrlRef.current === queryFromUrl) {
+      return;
+    }
+    consumedSearchFromUrlRef.current = queryFromUrl;
+    setSearch(queryFromUrl);
+    setPage(1);
+  }, [searchParams]);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedRows, setSelectedRows] = useState<DiningTable[]>([]);
   const [page, setPage] = useState(1);
