@@ -77,7 +77,7 @@ import {
   isPlausibleVietnamPhone,
   normalizeVietnamPhone,
 } from "@/lib/booking-duplicate";
-import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
+import { finalizeCustomerName } from "@/lib/voice-booking/format";
 
 const emptyRegisterVoiceFields = (): VoiceBookingFormFields => ({
   customerName: "",
@@ -3138,11 +3138,10 @@ export default function FloorMapPage() {
     if (!registerTarget) {
       return;
     }
-    const resolvedCustomerName = customerName.trim()
-      ? formatVietnamesePersonName(customerName.trim())
-      : registerArrivalMode === "immediate"
-        ? WALK_IN_CUSTOMER_NAME
-        : "";
+    const finalizedCustomerName = finalizeCustomerName(customerName);
+    const resolvedCustomerName =
+      finalizedCustomerName ||
+      (registerArrivalMode === "immediate" ? WALK_IN_CUSTOMER_NAME : "");
     if (!resolvedCustomerName) {
       notifications.show({
         color: "red",

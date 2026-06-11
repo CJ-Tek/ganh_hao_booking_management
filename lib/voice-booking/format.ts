@@ -1,26 +1,16 @@
-function capitalizeToken(token: string) {
-  if (!token) return token;
-  if (token.length === 1) return token.toUpperCase();
-  return token[0]!.toLocaleUpperCase("vi") + token.slice(1).toLocaleLowerCase("vi");
-}
+/** Letters (incl. Vietnamese), spaces, hyphen, comma, period. */
+const CUSTOMER_NAME_DISALLOWED = /[^\p{L}\s\-,.]/gu;
 
 /**
- * Format Vietnamese person name into Title Case.
- * - trims and collapses whitespace
- * - capitalizes each word, preserves diacritics
- * - supports hyphenated tokens (e.g. "anh-tuan" -> "Anh-Tuan")
+ * Keep only allowed customer-name characters while preserving user casing.
+ * Allowed: letters, spaces, `-`, `,`, `.`
  */
-export function formatVietnamesePersonName(input: string) {
-  const s = input.trim().replace(/\s+/g, " ");
-  if (!s) return "";
-  return s
-    .split(" ")
-    .map((word) =>
-      word
-        .split("-")
-        .map((t) => capitalizeToken(t))
-        .join("-")
-    )
-    .join(" ");
+export function sanitizeCustomerName(input: string): string {
+  return input.replace(CUSTOMER_NAME_DISALLOWED, "");
+}
+
+/** Sanitize, collapse whitespace, and trim edges. */
+export function finalizeCustomerName(input: string): string {
+  return sanitizeCustomerName(input).replace(/\s+/g, " ").trim();
 }
 

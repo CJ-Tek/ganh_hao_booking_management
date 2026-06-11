@@ -33,7 +33,7 @@ import {
 } from "@/lib/booking-duplicate";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
-import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
+import { finalizeCustomerName } from "@/lib/voice-booking/format";
 
 export type CreateBookingModalProps = {
   opened: boolean;
@@ -239,7 +239,7 @@ export function CreateBookingModal({
     let result;
     try {
       result = await createBooking({
-        customerName: formatVietnamesePersonName(customerName),
+        customerName: finalizeCustomerName(customerName),
         customerPhone: normalizedCustomerPhone || undefined,
         branchId: createBranchId,
         areaId: areaId ?? undefined,
@@ -283,7 +283,7 @@ export function CreateBookingModal({
       const createdForOtherBranch = Boolean(
         switchedFrom && createBranchId && createBranchId !== switchedFrom
       );
-      const createdName = formatVietnamesePersonName(customerName);
+      const createdName = finalizeCustomerName(customerName);
       resetCreateForm();
       onClose();
       if (result.bookingId && !createdForOtherBranch) {

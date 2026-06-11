@@ -26,7 +26,7 @@ import {
 import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import { normalizeGuestTypeHint } from "@/lib/voice-booking/guest-type";
 import { matchAreaId, matchTableId, type AreaLite, type TableLite } from "@/lib/voice-booking/match";
-import { formatVietnamesePersonName } from "@/lib/voice-booking/format";
+import { finalizeCustomerName, sanitizeCustomerName } from "@/lib/voice-booking/format";
 import { warmUpMicrophoneForSpeech } from "@/lib/voice-booking/mic-warmup";
 import { tableStatusLabel } from "@/lib/display";
 import { usePortalModalLayoutProps } from "@/lib/use-portal-modal-layout";
@@ -480,7 +480,7 @@ export function VoiceBookingAssistant(props: {
 
   const applyParsedDraft = (data: Extract<VoiceBookingResponse, { draft: unknown }>) => {
     const d = data.draft;
-    if (d.customerName) setCustomerName(formatVietnamesePersonName(d.customerName));
+    if (d.customerName) setCustomerName(finalizeCustomerName(d.customerName));
     if (d.customerPhone) setCustomerPhone(d.customerPhone);
     if (typeof d.guestCount === "number" && Number.isFinite(d.guestCount)) setGuestCount(d.guestCount);
     if (d.bookingAtLocal) setBookingAt(d.bookingAtLocal);
@@ -559,11 +559,10 @@ export function VoiceBookingAssistant(props: {
       notifications.show({ color: "red", title: "Thiếu giờ", message: "Chọn ngày/giờ." });
       return;
     }
-    const resolvedCustomerName = customerName.trim()
-      ? formatVietnamesePersonName(customerName)
-      : showArrivalModeRadios && arrivalMode === "immediate"
-        ? WALK_IN_CUSTOMER_NAME
-        : "";
+    const finalizedCustomerName = finalizeCustomerName(customerName);
+    const resolvedCustomerName =
+      finalizedCustomerName ||
+      (showArrivalModeRadios && arrivalMode === "immediate" ? WALK_IN_CUSTOMER_NAME : "");
     if (!resolvedCustomerName) {
       notifications.show({ color: "red", title: "Thiếu tên", message: "Nhập tên khách." });
       return;
@@ -718,8 +717,8 @@ export function VoiceBookingAssistant(props: {
                   : "Nguyễn Văn A"
               }
               value={customerName}
-              onChange={(e) => setCustomerName(e.currentTarget.value)}
-              onBlur={() => setCustomerName((v) => formatVietnamesePersonName(v))}
+              onChange={(e) => setCustomerName(sanitizeCustomerName(e.currentTarget.value))}
+              onBlur={() => setCustomerName((v) => finalizeCustomerName(v))}
               disabled={formDisabled}
             />
             <TextInput
