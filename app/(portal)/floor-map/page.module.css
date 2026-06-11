@@ -45,8 +45,19 @@
   overflow: hidden;
   cursor: grab;
   touch-action: none;
+}
+
+.canvasViewportEdit {
   background-image: radial-gradient(circle at 1px 1px, #cbd5e1 1px, transparent 0);
   background-size: 16px 16px;
+}
+
+.canvasViewportView {
+  background: #f8fafc;
+}
+
+:global([data-mantine-color-scheme="dark"]) .canvasViewportView {
+  background: var(--mantine-color-dark-7);
 }
 
 .canvasViewport:active {

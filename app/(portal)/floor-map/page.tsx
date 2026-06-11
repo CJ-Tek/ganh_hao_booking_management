@@ -4469,7 +4469,7 @@ export default function FloorMapPage() {
         >
           <div
             ref={viewportRef}
-            className={classes.canvasViewport}
+            className={`${classes.canvasViewport} ${isEditMode ? classes.canvasViewportEdit : classes.canvasViewportView}`}
             onPointerDown={handleViewportPointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handleViewportPointerUp}

@@ -10,7 +10,6 @@ import {
   Drawer,
   Group,
   Modal,
-  Select,
   Stack,
   Tabs,
   Text,
@@ -33,7 +32,7 @@ import { BookingCompactCard } from "@/components/booking-management/booking-comp
 import { BookingListDesktopSection } from "@/components/booking-management/booking-list-desktop-section";
 import {
   BookingListFiltersToolbar,
-  BookingListTableAssignFilter,
+  BookingListTimeSortFilters,
 } from "@/components/booking-management/booking-list-filters-toolbar";
 import {
   BookingListMobileEmptyState,
@@ -66,7 +65,6 @@ import {
   bookingAreaTableSortKey,
   formatBookingAreaTable,
   formatTodayBookingAreaTable,
-  isBookingTableAssigned,
   getAssignableCandidateTables,
   getReceptionBookingStatus,
   inferGuestTypeLabel,
@@ -74,6 +72,8 @@ import {
   isSyntheticPhoneValue,
   getAssignableMergeGroups,
   hasAssignableSlotConflictAtMergeGroup,
+  resolveBookingArrivalTime,
+  resolveBookingCreatedAt,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
 import { bookingCardBusyProps, bookingListRowStyle } from "@/lib/busy-row-style";
@@ -164,9 +164,6 @@ function BookingsPageContent() {
   const [listStatusFilter, setListStatusFilter] = useState<BookingStatus | null>(
     defaultBookingStatusFilter
   );
-  const [listTableAssignFilter, setListTableAssignFilter] = useState<
-    "all" | "assigned" | "unassigned"
-  >("all");
   const [assignFormBooking, setAssignFormBooking] = useState<Booking | null>(null);
   const [assignManualGuestCount, setAssignManualGuestCount] = useState<number | undefined>(undefined);
   const [assignAreaId, setAssignAreaId] = useState<string | null>(null);
@@ -191,11 +188,9 @@ function BookingsPageContent() {
   const [todayStatusFilter, setTodayStatusFilter] = useState<BookingStatus | null>(
     defaultBookingStatusFilter
   );
-  const [todayGuestTypeFilter, setTodayGuestTypeFilter] = useState<string | null>(null);
-
   const [todaySortStatus, setTodaySortStatus] = useState<DataTableSortStatus<Booking>>({
-    columnAccessor: "bookingAt",
-    direction: "asc",
+    columnAccessor: "createdAt",
+    direction: "desc",
   });
   const [todayPage, setTodayPage] = useState(1);
   const TODAY_DESKTOP_PAGE_SIZE_OPTIONS = [8, 12, 16, 24, 32] as const;
@@ -436,15 +431,6 @@ function BookingsPageContent() {
     state.tables,
   ]);
 
-  const tableAssignFilterOptions = useMemo(
-    () => [
-      { value: "all", label: "Tất cả" },
-      { value: "assigned", label: "Đã gán bàn" },
-      { value: "unassigned", label: "Chưa gán bàn" },
-    ],
-    []
-  );
-
   const pipelineFilteredBookings = useMemo(() => {
     return branchBookings.filter((booking) => {
       if (listStatusFilter === null) {
@@ -454,16 +440,9 @@ function BookingsPageContent() {
       } else if (booking.status !== listStatusFilter) {
         return false;
       }
-      const hasTable = isBookingTableAssigned(booking);
-      if (listTableAssignFilter === "assigned" && !hasTable) {
-        return false;
-      }
-      if (listTableAssignFilter === "unassigned" && hasTable) {
-        return false;
-      }
       return true;
     });
-  }, [branchBookings, listStatusFilter, listTableAssignFilter]);
+  }, [branchBookings, listStatusFilter]);
 
   /** Use booking.branchId — not filteredBranchIds[0] — so areas/tables match the booking's chi nhánh. */
   const getCandidateTables = (booking: Booking) =>
@@ -940,7 +919,13 @@ function BookingsPageContent() {
         if (acc === "checkedInAt") {
           return booking.checkedInAt ? dayjs(booking.checkedInAt).valueOf() : 0;
         }
-        return dayjs(booking.bookingAt).valueOf();
+        if (acc === "createdAt") {
+          return dayjs(resolveBookingCreatedAt(booking)).valueOf();
+        }
+        if (acc === "bookingAt") {
+          return dayjs(resolveBookingArrivalTime(booking)).valueOf();
+        }
+        return dayjs(resolveBookingArrivalTime(booking)).valueOf();
       };
       return [...records].sort((a, b) => {
         const left = getValue(a);
@@ -1008,29 +993,14 @@ function BookingsPageContent() {
     [receptionThresholds]
   );
 
-  const todayGuestTypeFilterOptions = useMemo(() => {
-    const labels = new Set(todayBookings.map((booking) => getTodayGuestTypeLabel(booking)));
-    return [...labels]
-      .sort((a, b) => a.localeCompare(b, "vi"))
-      .map((label) => ({ value: label, label }));
-  }, [getTodayGuestTypeLabel, todayBookings]);
-
   const todayPipelineFilteredBookings = useMemo(() => {
     return todayBookings.filter((booking) => {
       if (todayStatusFilter && booking.status !== todayStatusFilter) {
         return false;
       }
-      if (todayGuestTypeFilter && getTodayGuestTypeLabel(booking) !== todayGuestTypeFilter) {
-        return false;
-      }
       return true;
     });
-  }, [
-    getTodayGuestTypeLabel,
-    todayBookings,
-    todayGuestTypeFilter,
-    todayStatusFilter,
-  ]);
+  }, [todayBookings, todayStatusFilter]);
 
   const todaySearchPlaceholder =
     "Tìm theo khách, SĐT, giờ, loại khách, khu, bàn, trạng thái, người nhận, ghi chú...";
@@ -1048,6 +1018,8 @@ function BookingsPageContent() {
         displayCustomerPhone(customer?.phone),
         dayjs(booking.bookingAt).format("HH:mm"),
         dayjs(booking.bookingAt).format("DD/MM/YYYY HH:mm"),
+        dayjs(resolveBookingCreatedAt(booking)).format("HH:mm"),
+        dayjs(resolveBookingCreatedAt(booking)).format("DD/MM/YYYY HH:mm"),
         String(booking.guestCount),
         formatTodayBookingAreaTable(booking, bookingAreaTableLookup),
         getTodayGuestTypeLabel(booking),
@@ -1079,6 +1051,8 @@ function BookingsPageContent() {
         displayCustomerPhone(customer?.phone),
         dayjs(booking.bookingAt).format("HH:mm"),
         dayjs(booking.bookingAt).format("DD/MM/YYYY HH:mm"),
+        dayjs(resolveBookingCreatedAt(booking)).format("HH:mm"),
+        dayjs(resolveBookingCreatedAt(booking)).format("DD/MM/YYYY HH:mm"),
         String(booking.guestCount),
         formatTodayBookingAreaTable(booking, bookingAreaTableLookup),
         getTodayGuestTypeLabel(booking),
@@ -1091,11 +1065,10 @@ function BookingsPageContent() {
         .toLowerCase();
     },
     [
+      bookingAreaTableLookup,
       getTodayGuestTypeLabel,
       getTodayReceptionStatusLabel,
-      state.areas,
       state.customers,
-      state.tables,
       state.users,
     ]
   );
@@ -1125,7 +1098,13 @@ function BookingsPageContent() {
         if (acc === "status") {
           return getTodayReceptionStatusLabel(booking);
         }
-        return dayjs(booking.bookingAt).valueOf();
+        if (acc === "createdAt") {
+          return dayjs(resolveBookingCreatedAt(booking)).valueOf();
+        }
+        if (acc === "bookingAt") {
+          return dayjs(resolveBookingArrivalTime(booking)).valueOf();
+        }
+        return dayjs(resolveBookingCreatedAt(booking)).valueOf();
       };
       return [...records].sort((a, b) => {
         const left = getValue(a);
@@ -1207,7 +1186,6 @@ function BookingsPageContent() {
     (booking: Booking) => {
       const customer = state.customers.find((item) => item.id === booking.customerId);
       setListStatusFilter(booking.status === "completed" ? "completed" : null);
-      setListTableAssignFilter("all");
       setSearchQuery(customer?.fullName ?? "");
       setListFocusBookingId(booking.id);
       setActiveTab("list");
@@ -1287,18 +1265,24 @@ function BookingsPageContent() {
   const bookingsSearchPlaceholder =
     "Tìm theo khách, SĐT, giờ đến, giờ check-in, khu, bàn, trạng thái...";
 
-  const listTableAssignFilterControl = (
-    <BookingListTableAssignFilter
-      value={listTableAssignFilter}
-      onChange={(value) => {
-        setListTableAssignFilter(value);
+  const listDefaultSort = useMemo<DataTableSortStatus<Booking>>(
+    () => ({ columnAccessor: "bookingAt", direction: "desc" }),
+    []
+  );
+
+  const listTimeSortFilters = (
+    <BookingListTimeSortFilters
+      sortStatus={sortStatus}
+      fallbackSort={listDefaultSort}
+      onSortStatusChange={(next) => {
+        setSortStatus(next);
         setPage(1);
       }}
-      data={tableAssignFilterOptions}
       size={isCompact ? "md" : "sm"}
-      width={168}
     />
   );
+
+  const listInlineFilters = listTimeSortFilters;
 
   const listFiltersToolbar = (
     <BookingListFiltersToolbar
@@ -1308,7 +1292,7 @@ function BookingsPageContent() {
         setPage(1);
       }}
       searchPlaceholder={bookingsSearchPlaceholder}
-      inlineFilters={listTableAssignFilterControl}
+      inlineFilters={listInlineFilters}
     />
   );
 
@@ -1392,9 +1376,9 @@ function BookingsPageContent() {
           setPage(1);
         }}
         recordsPerPageOptions={[...DESKTOP_BOOKINGS_PAGE_SIZE_OPTIONS]}
-        defaultSort={{ columnAccessor: "bookingAt", direction: "desc" }}
+        defaultSort={listDefaultSort}
         searchPlaceholder={bookingsSearchPlaceholder}
-        filters={listTableAssignFilterControl}
+        filters={listInlineFilters}
         minHeight={260}
         pinLastColumn
         onRowClick={({ record }) => {
@@ -1407,10 +1391,18 @@ function BookingsPageContent() {
         noRecordsText="Chưa có booking nào cho bộ lọc hiện tại."
         columns={[
           {
-            accessor: "bookingAt",
-            title: "Giờ đặt",
+            accessor: "createdAt",
+            title: "Tạo lúc",
             sortable: true,
-            render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+            render: (booking) =>
+              dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
+          },
+          {
+            accessor: "bookingAt",
+            title: "Giờ đến",
+            sortable: true,
+            render: (booking) =>
+              dayjs(resolveBookingArrivalTime(booking)).format("HH:mm DD/MM/YYYY"),
           },
           {
             accessor: "checkedInAt",
@@ -1524,23 +1516,24 @@ function BookingsPageContent() {
     />
   );
 
-  const todayGuestTypeFilterControl = (
-    <Select
-      label="Loại khách"
-      placeholder="Tất cả"
-      clearable
-      data={todayGuestTypeFilterOptions}
-      value={todayGuestTypeFilter}
-      onChange={(value) => {
-        setTodayGuestTypeFilter(value);
+  const todayDefaultSort = useMemo<DataTableSortStatus<Booking>>(
+    () => ({ columnAccessor: "createdAt", direction: "desc" }),
+    []
+  );
+
+  const todayTimeSortFilters = (
+    <BookingListTimeSortFilters
+      sortStatus={todaySortStatus}
+      fallbackSort={todayDefaultSort}
+      onSortStatusChange={(next) => {
+        setTodaySortStatus(next);
         setTodayPage(1);
       }}
       size={isCompact ? "md" : "sm"}
-      w={isCompact ? 148 : 148}
-      miw={148}
-      style={{ flexShrink: 0 }}
     />
   );
+
+  const todayInlineFilters = todayTimeSortFilters;
 
   const todayFiltersToolbar = (
     <BookingListFiltersToolbar
@@ -1550,11 +1543,11 @@ function BookingsPageContent() {
         setTodayPage(1);
       }}
       searchPlaceholder={todaySearchPlaceholder}
-      inlineFilters={todayGuestTypeFilterControl}
+      inlineFilters={todayInlineFilters}
     />
   );
 
-  const todayDesktopFilters = todayGuestTypeFilterControl;
+  const todayDesktopFilters = todayInlineFilters;
 
   const todayPaginationBar = (
     <BookingListPaginationBar
@@ -1624,7 +1617,7 @@ function BookingsPageContent() {
           setTodayPage(1);
         }}
         recordsPerPageOptions={[...TODAY_DESKTOP_PAGE_SIZE_OPTIONS]}
-        defaultSort={{ columnAccessor: "bookingAt", direction: "asc" }}
+        defaultSort={todayDefaultSort}
         searchPlaceholder={todaySearchPlaceholder}
         filters={todayDesktopFilters}
         minHeight={260}
@@ -1647,10 +1640,17 @@ function BookingsPageContent() {
         }
         columns={[
           {
-            accessor: "bookingAt",
-            title: "Giờ",
+            accessor: "createdAt",
+            title: "Tạo lúc",
             sortable: true,
-            render: (booking) => dayjs(booking.bookingAt).format("HH:mm"),
+            render: (booking) =>
+              dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
+          },
+          {
+            accessor: "bookingAt",
+            title: "Giờ đến",
+            sortable: true,
+            render: (booking) => dayjs(resolveBookingArrivalTime(booking)).format("HH:mm"),
           },
           {
             accessor: "customerId",

@@ -52,6 +52,7 @@ export function mapRealtimeBookingRow(row: RealtimeRow): Booking | null {
   const checkedInAt = row.checked_in_at;
   const noShowMarkedAt = row.no_show_marked_at;
   const note = row.note;
+  const createdAtRaw = row.created_at;
   const createdByUserId = row.created_by_user_id;
   const lastEditedAt = row.last_edited_at;
   const lastEditedByUserId = row.last_edited_by_user_id;
@@ -95,6 +96,9 @@ export function mapRealtimeBookingRow(row: RealtimeRow): Booking | null {
   if (lastEditedByUserId !== null && typeof lastEditedByUserId !== "string") {
     return null;
   }
+  if (createdAtRaw !== null && typeof createdAtRaw !== "string") {
+    return null;
+  }
 
   return {
     id,
@@ -110,6 +114,7 @@ export function mapRealtimeBookingRow(row: RealtimeRow): Booking | null {
     checkedInAt: checkedInAt ?? undefined,
     noShowMarkedAt: noShowMarkedAt ?? undefined,
     note: note ?? undefined,
+    createdAt: createdAtRaw ?? startTime,
     createdByUserId,
     lastEditedAt: lastEditedAt ?? undefined,
     lastEditedByUserId: lastEditedByUserId ?? undefined,

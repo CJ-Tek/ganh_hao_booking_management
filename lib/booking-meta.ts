@@ -11,6 +11,22 @@ import {
   type TableStatus,
 } from "@/lib/types";
 
+/** Order creation time; falls back to start time for legacy rows. */
+export function resolveBookingCreatedAt(booking: Booking): string {
+  return booking.createdAt ?? booking.startTime;
+}
+
+/** Guest scheduled arrival / slot start — never order creation time. */
+export function resolveBookingArrivalTime(
+  booking: Pick<Booking, "startTime" | "bookingAt">
+): string {
+  const start = booking.startTime?.trim();
+  if (start) {
+    return start;
+  }
+  return booking.bookingAt;
+}
+
 const UNKNOWN_GUEST_TAG = "[[guest_count_unknown]]";
 const GUEST_TYPE_TAG_PATTERN = /\[\[guest_type:([^\]]+)\]\]/;
 const SYNTHETIC_PHONE_PREFIX = "__no_phone__:";

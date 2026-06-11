@@ -2,7 +2,6 @@
 
 import dayjs from "dayjs";
 import { Button, Group, Stack, Text } from "@mantine/core";
-import { type DataTableSortStatus } from "mantine-datatable";
 import { Map } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useState } from "react";
@@ -10,7 +9,11 @@ import { buildFloorMapHref } from "@/lib/floor-map-routes";
 import { BookingDayBookingsTable } from "@/components/booking-management/booking-day-bookings-table";
 import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import { useAppContext } from "@/contexts/app-context";
-import { bookingAreaTableSortKey } from "@/lib/booking-meta";
+import {
+  bookingAreaTableSortKey,
+  resolveBookingArrivalTime,
+  resolveBookingCreatedAt,
+} from "@/lib/booking-meta";
 import { bookingStatusLabel, defaultBookingStatusFilter } from "@/lib/display";
 import { type Booking, type BookingStatus } from "@/lib/types";
 
@@ -42,17 +45,16 @@ export const BookingDayListModal = forwardRef<
   const [focusBookingId, setFocusBookingId] = useState<string | null>(null);
 
   const filteredBookings = useMemo(
-    () =>
-      state.bookings
-        .filter((booking) => filteredBranchIds.includes(booking.branchId))
-        .sort((a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf()),
+    () => state.bookings.filter((booking) => filteredBranchIds.includes(booking.branchId)),
     [filteredBranchIds, state.bookings]
   );
 
   const selectedDayBookings = useMemo(
     () =>
       filteredBookings
-        .filter((booking) => dayjs(booking.bookingAt).isSame(selectedDate, "day"))
+        .filter((booking) =>
+          dayjs(resolveBookingArrivalTime(booking)).isSame(selectedDate, "day")
+        )
         .filter((booking) => !dayTableStatusFilter || booking.status === dayTableStatusFilter),
     [dayTableStatusFilter, filteredBookings, selectedDate]
   );
@@ -66,33 +68,6 @@ export const BookingDayListModal = forwardRef<
     [state.areas, state.mergeGroups, state.tables]
   );
 
-  const sortDayBookings = useCallback(
-    (records: Booking[], sortStatus: DataTableSortStatus<Booking>) => {
-      const getValue = (booking: Booking) => {
-        if (sortStatus.columnAccessor === "customerId") {
-          return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
-        }
-        if (sortStatus.columnAccessor === "areaTable") {
-          return bookingAreaTableSortKey(booking, bookingAreaTableLookup);
-        }
-        if (sortStatus.columnAccessor === "status") {
-          return bookingStatusLabel[booking.status];
-        }
-        return dayjs(booking.bookingAt).valueOf();
-      };
-      return [...records].sort((a, b) => {
-        const left = getValue(a);
-        const right = getValue(b);
-        const compare =
-          typeof left === "number" && typeof right === "number"
-            ? left - right
-            : String(left).localeCompare(String(right), "vi");
-        return sortStatus.direction === "asc" ? compare : -compare;
-      });
-    },
-    [bookingAreaTableLookup, state.customers]
-  );
-
   const getDayBookingSearchValue = useCallback(
     (booking: Booking) => {
       const customer = state.customers.find((item) => item.id === booking.customerId);
@@ -102,7 +77,8 @@ export const BookingDayListModal = forwardRef<
         customer?.phone,
         location,
         bookingStatusLabel[booking.status],
-        dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+        dayjs(resolveBookingArrivalTime(booking)).format("HH:mm DD/MM/YYYY"),
+        dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
         booking.note,
       ]
         .filter(Boolean)
@@ -209,7 +185,6 @@ export const BookingDayListModal = forwardRef<
         records={selectedDayBookings}
         statusFilter={dayTableStatusFilter}
         onStatusFilterChange={setDayTableStatusFilter}
-        sortRecords={sortDayBookings}
         getRecordSearchValue={getDayBookingSearchValue}
         onRowClick={handleDayBookingRowClick}
         focusBookingId={focusBookingId}

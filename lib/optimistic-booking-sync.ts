@@ -186,6 +186,7 @@ export function buildOptimisticBookingFromCreate(
     checkedInAt: autoSeat ? dayjs().toISOString() : undefined,
     status: autoSeat ? "seated" : "confirmed",
     note: input.note,
+    createdAt: dayjs().toISOString(),
     createdByUserId,
   };
 }

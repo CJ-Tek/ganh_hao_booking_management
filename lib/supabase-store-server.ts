@@ -841,6 +841,7 @@ export async function fetchSnapshot(options?: {
       checkedInAt: item.checked_in_at ?? undefined,
       noShowMarkedAt: item.no_show_marked_at ?? undefined,
       note: item.note ?? undefined,
+      createdAt: item.created_at ?? item.start_time ?? item.booking_at,
       createdByUserId: item.created_by_user_id,
       lastEditedAt: item.last_edited_at ?? undefined,
       lastEditedByUserId: item.last_edited_by_user_id ?? undefined,
@@ -1082,6 +1083,10 @@ function mapBookingRowFromSupabase(item: Record<string, unknown>): Booking {
     checkedInAt: (item.checked_in_at as string | null) ?? undefined,
     noShowMarkedAt: (item.no_show_marked_at as string | null) ?? undefined,
     note: (item.note as string | null) ?? undefined,
+    createdAt:
+      (item.created_at as string | null | undefined) ??
+      (item.start_time as string | null) ??
+      (item.booking_at as string),
     createdByUserId: item.created_by_user_id as string,
     lastEditedAt: (item.last_edited_at as string | null) ?? undefined,
     lastEditedByUserId: (item.last_edited_by_user_id as string | null) ?? undefined,
@@ -2469,6 +2474,10 @@ export async function getTableBlockStateInSupabase(input: {
     checkedInAt: (item.checked_in_at as string | null) ?? undefined,
     noShowMarkedAt: (item.no_show_marked_at as string | null) ?? undefined,
     note: (item.note as string | null) ?? undefined,
+    createdAt:
+      (item.created_at as string | null | undefined) ??
+      (item.start_time as string | null) ??
+      (item.booking_at as string),
     createdByUserId: item.created_by_user_id as string,
     lastEditedAt: (item.last_edited_at as string | null) ?? undefined,
     lastEditedByUserId: (item.last_edited_by_user_id as string | null) ?? undefined,

@@ -185,6 +185,7 @@ export type Database = {
           booking_at: string
           branch_id: string
           checked_in_at: string | null
+          created_at: string
           created_by_user_id: string
           customer_id: string
           end_time: string
@@ -204,6 +205,7 @@ export type Database = {
           booking_at: string
           branch_id: string
           checked_in_at?: string | null
+          created_at?: string
           created_by_user_id: string
           customer_id: string
           end_time: string
@@ -223,6 +225,7 @@ export type Database = {
           booking_at?: string
           branch_id?: string
           checked_in_at?: string | null
+          created_at?: string
           created_by_user_id?: string
           customer_id?: string
           end_time?: string

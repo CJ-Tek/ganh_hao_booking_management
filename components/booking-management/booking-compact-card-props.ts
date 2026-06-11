@@ -6,6 +6,8 @@ import {
   formatTodayBookingAreaTable,
   getReceptionBookingStatus,
   isGuestCountSpecified,
+  resolveBookingArrivalTime,
+  resolveBookingCreatedAt,
   stripUnknownGuestTag,
   type BookingAreaTableLookup,
   type ReceptionThresholdSettings,
@@ -42,7 +44,10 @@ export function getBookingCompactCardProps(props: {
     ? { bold: String(booking.guestCount), normal: " khách" }
     : { bold: "", normal: "Chưa rõ số khách" };
 
-  const createdBy = { name: creatorName };
+  const createdBy = {
+    name: creatorName,
+    time: dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
+  };
 
   const metaSegments: BookingSummaryMetaSegment[] =
     variant === "today"
@@ -54,7 +59,7 @@ export function getBookingCompactCardProps(props: {
           },
         ]
       : [
-          { text: dayjs(booking.bookingAt).format("DD/MM/YYYY") },
+          { text: dayjs(resolveBookingArrivalTime(booking)).format("DD/MM/YYYY") },
           {
             text: formatBookingAreaTable(booking, bookingAreaTableLookup, {
               tableNamePrefix: true,
@@ -94,7 +99,7 @@ export function getBookingCompactCardProps(props: {
         };
 
   return {
-    timeLabel: dayjs(booking.bookingAt).format("HH:mm"),
+    timeLabel: dayjs(resolveBookingArrivalTime(booking)).format("HH:mm"),
     title: customerName,
     titleSuffix,
     createdBy,

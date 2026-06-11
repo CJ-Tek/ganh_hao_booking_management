@@ -18,8 +18,8 @@ export type BookingSummaryCompactCardProps = {
   /** Shown beside the title (e.g. guest count — only `bold` is emphasized). */
   titleSuffix?: { bold: string; normal: string };
   badge: { label: string; color: string };
-  /** Creator on the meta row: bold name + " tạo đơn". */
-  createdBy?: { name: string } | null;
+  /** Creator on the meta row: bold name + " tạo đơn lúc [time]". */
+  createdBy?: { name: string; time?: string } | null;
   /** Optional second line under assignee: [name] cập nhật lúc [time]. */
   updatedLabel?: { name: string; time: string } | null;
   metaSegments: BookingSummaryMetaSegment[];
@@ -155,6 +155,15 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
                       {createdBy.name}
                     </Text>{" "}
                     tạo đơn
+                    {createdBy.time ? (
+                      <>
+                        {" "}
+                        lúc{" "}
+                        <Text component="span" fw={700}>
+                          {createdBy.time}
+                        </Text>
+                      </>
+                    ) : null}
                   </Text>
                   {updatedLabel ? (
                     <Text

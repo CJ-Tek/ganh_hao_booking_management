@@ -109,7 +109,7 @@ export function FloorMapGrid(props: FloorMapGridProps) {
         height: gridConfig.height,
       }}
     >
-      <FloorMapGridDots gridConfig={gridConfig} />
+      {isEditMode ? <FloorMapGridDots gridConfig={gridConfig} /> : null}
       <ReactGridLayout
         width={gridConfig.width}
         layout={layout}

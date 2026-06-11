@@ -3,7 +3,7 @@
 import dayjs from "dayjs";
 import { Alert, Badge, Checkbox, Group, Stack, Text } from "@mantine/core";
 import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
-import { type DataTableSortStatus } from "mantine-datatable";
+import { useBookingListTimeSort } from "@/components/booking-management/booking-list-filters-toolbar";
 import { useCallback, useMemo } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { useAppContext } from "@/contexts/app-context";
@@ -12,7 +12,13 @@ import {
   displayCustomerPhone,
   pickNonOverlappingBookingsForMergeGroup,
   pickNonOverlappingBookingsForTable,
+  resolveBookingArrivalTime,
+  resolveBookingCreatedAt,
 } from "@/lib/booking-meta";
+import {
+  bookingListDefaultCreatedSort,
+  sortBookingsForDataTable,
+} from "@/lib/booking-list-sort";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import { type Booking, type TableMergeGroup } from "@/lib/types";
 
@@ -35,6 +41,9 @@ export function RegisterPendingAssignTable(props: {
     disabled,
   } = props;
   const { state } = useAppContext();
+  const { sortStatus, setSortStatus, defaultSort, timeSortFilters } = useBookingListTimeSort(
+    bookingListDefaultCreatedSort
+  );
 
   const bookingAreaTableLookup = useMemo(
     () => ({
@@ -77,6 +86,7 @@ export function RegisterPendingAssignTable(props: {
         : "";
       return [
         dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+        dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
         customer?.fullName,
         displayCustomerPhone(customer?.phone),
         booking.guestCount,
@@ -92,37 +102,18 @@ export function RegisterPendingAssignTable(props: {
   );
 
   const sortRecords = useCallback(
-    (rows: Booking[], sortStatus: DataTableSortStatus<Booking>) => {
-      const getValue = (booking: Booking) => {
-        if (sortStatus.columnAccessor === "customerId") {
-          return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
-        }
-        if (sortStatus.columnAccessor === "areaTable") {
+    (rows: Booking[], nextSortStatus: typeof sortStatus) =>
+      sortBookingsForDataTable(rows, nextSortStatus, {
+        customers: state.customers,
+        getAreaTableSortKey: (booking) => {
           if (!booking.areaId && !booking.tableId) {
             return "";
           }
           const area = state.areas.find((item) => item.id === booking.areaId)?.name ?? "";
           const table = state.tables.find((item) => item.id === booking.tableId)?.name ?? "";
           return `${area} ${table}`;
-        }
-        if (sortStatus.columnAccessor === "guestCount") {
-          return booking.guestCount;
-        }
-        if (sortStatus.columnAccessor === "status") {
-          return bookingStatusLabel[booking.status];
-        }
-        return dayjs(booking.bookingAt).valueOf();
-      };
-      return [...rows].sort((left, right) => {
-        const leftValue = getValue(left);
-        const rightValue = getValue(right);
-        const compare =
-          typeof leftValue === "number" && typeof rightValue === "number"
-            ? leftValue - rightValue
-            : String(leftValue).localeCompare(String(rightValue), "vi");
-        return sortStatus.direction === "asc" ? compare : -compare;
-      });
-    },
+        },
+      }),
     [state.areas, state.customers, state.tables]
   );
 
@@ -180,7 +171,10 @@ export function RegisterPendingAssignTable(props: {
         idAccessor="id"
         getRecordSearchValue={getRecordSearchValue}
         sortRecords={sortRecords}
-        defaultSort={{ columnAccessor: "bookingAt", direction: "asc" }}
+        sortStatus={sortStatus}
+        onSortStatusChange={setSortStatus}
+        defaultSort={defaultSort}
+        filters={timeSortFilters}
         searchPlaceholder="Khách, SĐT, giờ đặt, khu vực..."
         noRecordsText="Không có booking chờ trong phạm vi chi nhánh hiện tại."
         minHeight={220}
@@ -268,10 +262,18 @@ export function RegisterPendingAssignTable(props: {
         }}
         columns={[
           {
-            accessor: "bookingAt",
-            title: "Giờ đặt",
+            accessor: "createdAt",
+            title: "Tạo lúc",
             sortable: true,
-            render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+            render: (booking) =>
+              dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
+          },
+          {
+            accessor: "bookingAt",
+            title: "Giờ đến",
+            sortable: true,
+            render: (booking) =>
+              dayjs(resolveBookingArrivalTime(booking)).format("HH:mm DD/MM/YYYY"),
           },
           {
             accessor: "customerId",

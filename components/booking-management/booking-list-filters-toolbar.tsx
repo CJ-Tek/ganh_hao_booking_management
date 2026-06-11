@@ -1,10 +1,134 @@
 "use client";
 
 import { Button, Collapse, Group, Select, Stack } from "@mantine/core";
+import { type DataTableSortStatus } from "mantine-datatable";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { ReactNode } from "react";
+import { useState } from "react";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
+import { type Booking } from "@/lib/types";
 import { usePortalCompact } from "@/lib/use-portal-compact";
+
+const ARRIVAL_SORT_DATA = [
+  { value: "asc", label: "Sớm → Muộn" },
+  { value: "desc", label: "Muộn → Sớm" },
+] as const;
+
+const CREATED_SORT_DATA = [
+  { value: "desc", label: "Mới → Cũ" },
+  { value: "asc", label: "Cũ → Mới" },
+] as const;
+
+type SortDirection = "asc" | "desc";
+
+function isSortDirection(value: string | null): value is SortDirection {
+  return value === "asc" || value === "desc";
+}
+
+export function BookingListTimeSortFilters<T>(props: {
+  sortStatus: DataTableSortStatus<T>;
+  onSortStatusChange: (status: DataTableSortStatus<T>) => void;
+  fallbackSort: DataTableSortStatus<T>;
+  size?: "sm" | "md";
+}) {
+  const { sortStatus, onSortStatusChange, fallbackSort, size = "sm" } = props;
+  const isCompact = usePortalCompact();
+  const columnAccessor = sortStatus.columnAccessor as string;
+  const selectStyle = isCompact
+    ? { flex: "1 1 0", minWidth: 0 }
+    : { flexShrink: 0 };
+  const selectWidth = isCompact ? undefined : 148;
+
+  const applyArrivalSort = (direction: SortDirection | null) => {
+    if (direction) {
+      onSortStatusChange({
+        columnAccessor: "bookingAt" as DataTableSortStatus<T>["columnAccessor"],
+        direction,
+      });
+      return;
+    }
+    if (columnAccessor === "bookingAt") {
+      onSortStatusChange(fallbackSort);
+    }
+  };
+
+  const applyCreatedSort = (direction: SortDirection | null) => {
+    if (direction) {
+      onSortStatusChange({
+        columnAccessor: "createdAt" as DataTableSortStatus<T>["columnAccessor"],
+        direction,
+      });
+      return;
+    }
+    if (columnAccessor === "createdAt") {
+      onSortStatusChange(fallbackSort);
+    }
+  };
+
+  const selects = (
+    <>
+      <Select
+        label="Giờ đến"
+        placeholder="Sắp xếp"
+        clearable
+        data={[...ARRIVAL_SORT_DATA]}
+        value={columnAccessor === "bookingAt" ? sortStatus.direction : null}
+        onChange={(value) => applyArrivalSort(isSortDirection(value) ? value : null)}
+        size={size}
+        w={selectWidth}
+        miw={isCompact ? 0 : 148}
+        style={selectStyle}
+      />
+      <Select
+        label="Tạo đơn"
+        placeholder="Sắp xếp"
+        clearable
+        data={[...CREATED_SORT_DATA]}
+        value={columnAccessor === "createdAt" ? sortStatus.direction : null}
+        onChange={(value) => applyCreatedSort(isSortDirection(value) ? value : null)}
+        size={size}
+        w={selectWidth}
+        miw={isCompact ? 0 : 148}
+        style={selectStyle}
+      />
+    </>
+  );
+
+  return (
+    <Group
+      gap="sm"
+      wrap="nowrap"
+      align="flex-end"
+      w={isCompact ? "100%" : undefined}
+      grow={isCompact}
+    >
+      {selects}
+    </Group>
+  );
+}
+
+export function useBookingListTimeSort(
+  defaultSort: DataTableSortStatus<Booking>,
+  size: "sm" | "md" = "sm"
+) {
+  const [sortStatus, setSortStatus] = useState(defaultSort);
+
+  const timeSortFilters = (
+    <BookingListTimeSortFilters
+      sortStatus={sortStatus}
+      fallbackSort={defaultSort}
+      onSortStatusChange={setSortStatus}
+      size={size}
+    />
+  );
+
+  return {
+    sortStatus,
+    setSortStatus,
+    defaultSort,
+    timeSortFilters,
+  };
+}
 
 export function BookingListTableAssignFilter(props: {
   value: "all" | "assigned" | "unassigned";
@@ -54,29 +178,54 @@ export function BookingListFiltersToolbar(props: {
 
   return (
     <Stack gap="sm">
-      <Group align="flex-end" gap="sm" wrap={isCompact ? "wrap" : "nowrap"}>
-        <TextInputWithVoice
-          placeholder={searchPlaceholder}
-          value={searchQuery}
-          onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
-          size="md"
-          voiceIconSize="md"
-          style={{ flex: 1, minWidth: isCompact ? "12rem" : 0 }}
-        />
-        {inlineFilters}
-        {hasCollapseFilters ? (
-          <Button
-            variant="default"
+      {isCompact ? (
+        <Stack gap="sm" w="100%">
+          <TextInputWithVoice
+            placeholder={searchPlaceholder}
+            value={searchQuery}
+            onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
             size="md"
-            aria-expanded={filtersOpen}
-            onClick={() => onFiltersOpenChange?.(!filtersOpen)}
-            rightSection={filtersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            style={isCompact ? { flex: "1 1 auto", minWidth: "7.5rem" } : undefined}
-          >
-            {filtersOpen ? "Ẩn bộ lọc" : "Bộ lọc"}
-          </Button>
-        ) : null}
-      </Group>
+            voiceIconSize="md"
+            style={{ width: "100%" }}
+          />
+          {inlineFilters}
+          {hasCollapseFilters ? (
+            <Button
+              variant="default"
+              size="md"
+              aria-expanded={filtersOpen}
+              onClick={() => onFiltersOpenChange?.(!filtersOpen)}
+              rightSection={filtersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              fullWidth
+            >
+              {filtersOpen ? "Ẩn bộ lọc" : "Bộ lọc"}
+            </Button>
+          ) : null}
+        </Stack>
+      ) : (
+        <Group align="flex-end" gap="sm" wrap="nowrap">
+          <TextInputWithVoice
+            placeholder={searchPlaceholder}
+            value={searchQuery}
+            onChange={(event) => onSearchQueryChange(event.currentTarget.value)}
+            size="md"
+            voiceIconSize="md"
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          {inlineFilters}
+          {hasCollapseFilters ? (
+            <Button
+              variant="default"
+              size="md"
+              aria-expanded={filtersOpen}
+              onClick={() => onFiltersOpenChange?.(!filtersOpen)}
+              rightSection={filtersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            >
+              {filtersOpen ? "Ẩn bộ lọc" : "Bộ lọc"}
+            </Button>
+          ) : null}
+        </Group>
+      )}
       {hasCollapseFilters ? (
         <Collapse expanded={filtersOpen}>
           <Stack gap="sm" pt="xs">

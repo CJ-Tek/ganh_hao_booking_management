@@ -79,6 +79,8 @@ export interface Booking {
   checkedInAt?: string | null;
   noShowMarkedAt?: string | null;
   note?: string;
+  /** When the booking order was first created (distinct from guest arrival time). */
+  createdAt?: string;
   createdByUserId: string;
   /** Set when an order edit is saved (time, guest count, phone). */
   lastEditedAt?: string | null;

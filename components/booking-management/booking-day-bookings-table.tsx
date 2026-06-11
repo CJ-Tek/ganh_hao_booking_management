@@ -1,9 +1,9 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Badge, Stack, Text } from "@mantine/core";
+import { Badge, Group, Stack, Text } from "@mantine/core";
 import { BookingStatusFilterChips } from "@/components/booking-management/booking-status-filter-chips";
-import { type DataTableSortStatus } from "mantine-datatable";
+import { useBookingListTimeSort } from "@/components/booking-management/booking-list-filters-toolbar";
 import { PortalListSectionDesktop } from "@/components/portal-list/portal-list-section-desktop";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { useAppContext } from "@/contexts/app-context";
@@ -18,9 +18,15 @@ import {
   displayCustomerPhone,
   formatBookingAreaTable,
   isGuestCountSpecified,
+  resolveBookingArrivalTime,
+  resolveBookingCreatedAt,
 } from "@/lib/booking-meta";
+import {
+  bookingListDefaultCreatedSort,
+  sortBookingsForDataTable,
+} from "@/lib/booking-list-sort";
 import { type Booking, type BookingStatus } from "@/lib/types";
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 
 const DAY_LIST_BOOKING_PULSE_CYCLE_MS = 600;
 const DAY_LIST_BOOKING_PULSE_CYCLES = 2;
@@ -32,7 +38,6 @@ export function BookingDayBookingsTable(props: {
   records: Booking[];
   statusFilter: BookingStatus | null;
   onStatusFilterChange: (value: BookingStatus | null) => void;
-  sortRecords: (records: Booking[], sortStatus: DataTableSortStatus<Booking>) => Booking[];
   getRecordSearchValue: (booking: Booking) => string;
   onRowClick: (booking: Booking) => void;
   focusBookingId?: string | null;
@@ -44,12 +49,14 @@ export function BookingDayBookingsTable(props: {
     records,
     statusFilter,
     onStatusFilterChange,
-    sortRecords,
     getRecordSearchValue,
     onRowClick,
     focusBookingId = null,
   } = props;
   const { state } = useAppContext();
+  const { sortStatus, setSortStatus, defaultSort, timeSortFilters } = useBookingListTimeSort(
+    bookingListDefaultCreatedSort
+  );
 
   const bookingAreaTableLookup = useMemo(
     () => ({
@@ -60,7 +67,16 @@ export function BookingDayBookingsTable(props: {
     [state.areas, state.mergeGroups, state.tables]
   );
 
-  const filters = (
+  const sortRecords = useCallback(
+    (rows: Booking[], nextSortStatus: typeof sortStatus) =>
+      sortBookingsForDataTable(rows, nextSortStatus, {
+        customers: state.customers,
+        bookingAreaTableLookup,
+      }),
+    [bookingAreaTableLookup, state.customers]
+  );
+
+  const statusFilters = (
     <BookingStatusFilterChips
       value={statusFilter}
       onChange={onStatusFilterChange}
@@ -68,12 +84,21 @@ export function BookingDayBookingsTable(props: {
     />
   );
 
+  const tableFilters = (
+    <Group gap="sm" wrap="wrap" align="flex-end">
+      {timeSortFilters}
+    </Group>
+  );
+
   const table = (
     <PortalDataTable<Booking>
       records={records}
       getRecordSearchValue={getRecordSearchValue}
       sortRecords={sortRecords}
-      defaultSort={{ columnAccessor: "bookingAt", direction: "asc" }}
+      sortStatus={sortStatus}
+      onSortStatusChange={setSortStatus}
+      defaultSort={defaultSort}
+      filters={tableFilters}
       searchPlaceholder="Khách, bàn, trạng thái, ghi chú..."
       noRecordsText="Không có booking trong ngày đã chọn."
       minHeight={260}
@@ -123,10 +148,18 @@ export function BookingDayBookingsTable(props: {
       }}
       columns={[
         {
-          accessor: "bookingAt",
-          title: "Giờ đặt",
+          accessor: "createdAt",
+          title: "Tạo lúc",
           sortable: true,
-          render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+          render: (booking) =>
+            dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
+        },
+        {
+          accessor: "bookingAt",
+          title: "Giờ đến",
+          sortable: true,
+          render: (booking) =>
+            dayjs(resolveBookingArrivalTime(booking)).format("HH:mm DD/MM/YYYY"),
         },
         {
           accessor: "checkedInAt",
@@ -193,7 +226,7 @@ export function BookingDayBookingsTable(props: {
   if (!wrapInSectionCard) {
     return (
       <Stack gap="sm">
-        {filters}
+        {statusFilters}
         {table}
       </Stack>
     );
@@ -203,7 +236,7 @@ export function BookingDayBookingsTable(props: {
     <PortalListSectionDesktop
       title={title ?? "Danh sách booking"}
       showTitle={showTitle}
-      headerFilters={filters}
+      headerFilters={statusFilters}
     >
       {table}
     </PortalListSectionDesktop>

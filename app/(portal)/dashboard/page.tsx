@@ -13,8 +13,8 @@ import {
   Title,
 } from "@mantine/core";
 import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
+import { useBookingListTimeSort } from "@/components/booking-management/booking-list-filters-toolbar";
 import { BookingListPaginationBar } from "@/components/booking-management/booking-list-pagination";
-import { type DataTableSortStatus } from "mantine-datatable";
 import { useCallback, useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PortalDataTable } from "@/components/portal-data-table";
@@ -27,8 +27,14 @@ import {
   displayCustomerPhone,
   formatBookingAreaTable,
   isGuestCountSpecified,
+  resolveBookingArrivalTime,
+  resolveBookingCreatedAt,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
+import {
+  bookingListDefaultCreatedSort,
+  sortBookingsForDataTable,
+} from "@/lib/booking-list-sort";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
 
@@ -51,6 +57,9 @@ export default function DashboardPage() {
   const [mobilePage, setMobilePage] = useState(1);
   const [mobilePageSize, setMobilePageSize] = useState(8);
   const [mobileQuery, setMobileQuery] = useState("");
+  const { sortStatus, setSortStatus, defaultSort, timeSortFilters } = useBookingListTimeSort(
+    bookingListDefaultCreatedSort
+  );
 
   const branchBookings = useMemo(
     () => state.bookings.filter((item) => filteredBranchIds.includes(item.branchId)),
@@ -123,39 +132,12 @@ export default function DashboardPage() {
   );
 
   const sortHistoryBookings = useCallback(
-    (records: Booking[], sortStatus: DataTableSortStatus<Booking>) => {
-      const getValue = (booking: Booking) => {
-        const acc = sortStatus.columnAccessor as string;
-        if (acc === "customerId") {
-          return state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "";
-        }
-        if (acc === "guestCount") {
-          return booking.guestCount;
-        }
-        if (acc === "areaTable") {
-          return bookingAreaTableSortKey(booking, bookingAreaTableLookup);
-        }
-        if (acc === "note") {
-          return stripUnknownGuestTag(booking.note) ?? "";
-        }
-        if (acc === "createdByUserId") {
-          return state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "";
-        }
-        if (acc === "status") {
-          return bookingStatusLabel[booking.status];
-        }
-        return dayjs(booking.bookingAt).valueOf();
-      };
-      return [...records].sort((a, b) => {
-        const left = getValue(a);
-        const right = getValue(b);
-        const compare =
-          typeof left === "number" && typeof right === "number"
-            ? left - right
-            : String(left).localeCompare(String(right), "vi");
-        return sortStatus.direction === "asc" ? compare : -compare;
-      });
-    },
+    (records: Booking[], nextSortStatus: typeof sortStatus) =>
+      sortBookingsForDataTable(records, nextSortStatus, {
+        customers: state.customers,
+        users: state.users,
+        bookingAreaTableLookup,
+      }),
     [bookingAreaTableLookup, state.customers, state.users]
   );
 
@@ -172,6 +154,7 @@ export default function DashboardPage() {
         bookingStatusLabel[booking.status],
         stripUnknownGuestTag(booking.note),
         dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+        dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
         isGuestCountSpecified(booking) ? String(booking.guestCount) : "",
       ]
         .filter(Boolean)
@@ -318,16 +301,27 @@ export default function DashboardPage() {
           records={branchBookings}
           getRecordSearchValue={getHistorySearchValue}
           sortRecords={sortHistoryBookings}
-          defaultSort={{ columnAccessor: "bookingAt", direction: "desc" }}
+          sortStatus={sortStatus}
+          onSortStatusChange={setSortStatus}
+          defaultSort={defaultSort}
+          filters={timeSortFilters}
           defaultRecordsPerPage={8}
           searchPlaceholder="Khách, bàn, người tạo, ghi chú..."
           noRecordsText="Chưa có booking nào."
           columns={[
             {
-              accessor: "bookingAt",
-              title: "Giờ đặt",
+              accessor: "createdAt",
+              title: "Tạo lúc",
               sortable: true,
-              render: (booking) => dayjs(booking.bookingAt).format("HH:mm DD/MM/YYYY"),
+              render: (booking) =>
+                dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
+            },
+            {
+              accessor: "bookingAt",
+              title: "Giờ đến",
+              sortable: true,
+              render: (booking) =>
+                dayjs(resolveBookingArrivalTime(booking)).format("HH:mm DD/MM/YYYY"),
             },
             {
               accessor: "customerId",
