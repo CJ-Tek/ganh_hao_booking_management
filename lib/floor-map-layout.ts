@@ -23,6 +23,9 @@ export const FLOOR_TABLE_BLOCK_EDIT_HEIGHT_PX = 52;
 /** Booking peek block: customer + reservation time (px). */
 export const FLOOR_TABLE_BLOCK_BOOKING_PEEK_HEIGHT_PX = 54;
 
+/** Available (Trống) view card min-height on the floor map (px). */
+export const FLOOR_TABLE_BLOCK_AVAILABLE_EMPTY_HEIGHT_PX = 92;
+
 /** Extra peek line when seated / checked-in shows check-in time (px). */
 export const FLOOR_TABLE_BLOCK_CHECKIN_PEEK_HEIGHT_PX = 18;
 
@@ -33,12 +36,22 @@ export type EstimateFloorTableBlockHeightInput = {
   showBookingPeek?: boolean;
   showCheckInLine?: boolean;
   showSplitCloneAvailability?: boolean;
+  /** Taller Trống card when there is no booking peek. */
+  expandForAvailableEmpty?: boolean;
 };
 
 /** Mirrors {@link FloorTableBlockView} vertical layout for merge-group bbox math. */
 export function estimateFloorTableBlockHeightPx(
   input: EstimateFloorTableBlockHeightInput = {}
 ): number {
+  if (input.expandForAvailableEmpty && !input.showBookingPeek) {
+    let height = FLOOR_TABLE_BLOCK_AVAILABLE_EMPTY_HEIGHT_PX;
+    if (input.showSplitCloneAvailability) {
+      height += FLOOR_TABLE_BLOCK_SPLIT_CLONE_PEEK_HEIGHT_PX;
+    }
+    return height;
+  }
+
   let height = FLOOR_TABLE_BLOCK_COMPACT_HEIGHT_PX;
   if (input.showBookingPeek) {
     height += FLOOR_TABLE_BLOCK_BOOKING_PEEK_HEIGHT_PX;

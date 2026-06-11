@@ -23,6 +23,7 @@ import {
   Tooltip,
 } from "@mantine/core";
 import { DatePickerInput } from "@mantine/dates";
+import { useDebouncedValue } from "@mantine/hooks";
 import { notifications } from "@mantine/notifications";
 import dayjs from "dayjs";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -529,6 +530,7 @@ export default function FloorMapPage() {
   const [activeAreaId, setActiveAreaId] = useState<string | null>(null);
   const [mode, setMode] = useState<CanvasMode>("view");
   const [search, setSearch] = useState("");
+  const [debouncedSearch] = useDebouncedValue(search, 300);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 24, y: 24 });
@@ -1107,7 +1109,6 @@ export default function FloorMapPage() {
         setSearch(table.name);
         setStatusFilter("all");
         setFiltersAccordionValue("search");
-        setDetailTable(table);
         return;
       }
       router.push(result.href);
@@ -2236,6 +2237,15 @@ export default function FloorMapPage() {
     [effectiveGridColumns, effectiveGridRows, visibleTables]
   );
 
+  const placedTableFocusKey = useMemo(
+    () =>
+      placedTables
+        .map((table) => table.id)
+        .sort()
+        .join("|"),
+    [placedTables]
+  );
+
   const basePositionMap = useMemo(() => {
     const grouped = new Map<string, DiningTable[]>();
     for (const table of placedTables) {
@@ -2375,6 +2385,7 @@ export default function FloorMapPage() {
                 isSplitCloneTable(table) &&
                 Boolean(table.splitStartDate && table.splitEndDate) &&
                 isSplitCloneEffectiveOnDate(table, floorMapSelectedDate),
+              expandForAvailableEmpty: table.status === "available" && !showBookingPeek,
             });
         const halfH = tableHeight / 2;
         bboxTableById.set(tableId, {
@@ -3682,6 +3693,35 @@ export default function FloorMapPage() {
   useEffect(() => {
     fitCanvasToViewportRef.current = fitCanvasToViewport;
   }, [fitCanvasToViewport]);
+
+  const prevHadTableFilterRef = useRef(false);
+
+  useEffect(() => {
+    if (isEditMode || mode !== "view") {
+      return;
+    }
+    const keyword = debouncedSearch.trim();
+    const hasActiveFilter = keyword.length > 0 || statusFilter !== "all";
+    const hadFilter = prevHadTableFilterRef.current;
+    prevHadTableFilterRef.current = hasActiveFilter;
+
+    if (hasActiveFilter) {
+      if (placedTables.length === 0) {
+        return;
+      }
+      const frame = requestAnimationFrame(() => {
+        fitCanvasToViewportRef.current();
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+
+    if (hadFilter) {
+      const frame = requestAnimationFrame(() => {
+        fitCanvasToViewportRef.current();
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [debouncedSearch, isEditMode, mode, placedTableFocusKey, placedTables.length, statusFilter]);
 
   const trimRedundantGrid = useCallback(() => {
     if (!editLayout) {

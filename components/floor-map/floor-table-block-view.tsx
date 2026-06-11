@@ -8,6 +8,7 @@ import { bookingRowBusyStyle } from "@/lib/busy-row-style";
 import { isGuestCountSpecified } from "@/lib/booking-meta";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { formatMergeGroupDateRange } from "@/lib/merge-group-utils";
+import { FLOOR_TABLE_BLOCK_AVAILABLE_EMPTY_HEIGHT_PX } from "@/lib/floor-map-layout";
 import { isSplitCloneTable } from "@/lib/table-split-clone-utils";
 import type { Booking, DiningTable, TableStatus } from "@/lib/types";
 import classes from "@/app/(portal)/floor-map/page.module.css";
@@ -141,6 +142,87 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
 
   const hasQuickActions = canComplete || canLock || showUnlock;
   const guestBadgeBooking = bookingGuestBadge ?? displayBooking;
+  const isAvailableEmpty = table.status === "available";
+
+  const statusMenu =
+    showStatusMenu && !isEmployee && !onGridSelect ? (
+      <Menu
+        withinPortal
+        position="bottom-end"
+        closeOnItemClick
+        onOpen={onStatusMenuOpen}
+        onClose={onStatusMenuClose}
+      >
+        <Menu.Target>
+          <ActionIcon
+            type="button"
+            variant="subtle"
+            color="gray"
+            size="sm"
+            className={classes.tableBlockStatusMenuBtn}
+            aria-label="Thao tác bàn"
+            disabled={isBusy}
+            onClick={stopMenuAction}
+          >
+            <MoreVertical size={14} />
+          </ActionIcon>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Item
+            disabled={isBusy}
+            onClick={(event) => {
+              stopMenuAction(event);
+              onOpenDetail();
+            }}
+          >
+            Lịch sử booking
+          </Menu.Item>
+          {hasQuickActions ? <Menu.Divider /> : null}
+          {canComplete ? (
+            <Menu.Item
+              disabled={isBusy}
+              onClick={(event) => {
+                stopMenuAction(event);
+                onCompleteBooking();
+              }}
+            >
+              Hoàn thành
+            </Menu.Item>
+          ) : null}
+          {showUnlock ? (
+            <Menu.Item
+              disabled={isBusy}
+              onClick={(event) => {
+                stopMenuAction(event);
+                onUnlockTable();
+              }}
+            >
+              Mở khóa
+            </Menu.Item>
+          ) : null}
+          {canLock ? (
+            <Menu.Item
+              disabled={isBusy}
+              onClick={(event) => {
+                stopMenuAction(event);
+                onLockTable();
+              }}
+            >
+              Khóa
+            </Menu.Item>
+          ) : null}
+        </Menu.Dropdown>
+      </Menu>
+    ) : null;
+
+  const statusBadgeRow = (
+    <Group gap={6} wrap="nowrap" align="center" justify="space-between" w="100%">
+      <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
+        {tableStatusLabel[table.status]}
+      </Badge>
+      <TableBlockGuestBadge booking={guestBadgeBooking} />
+    </Group>
+  );
 
   return (
     <div
@@ -151,11 +233,16 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
         data-table-block="true"
         data-table-status={table.status}
         className={`${classes.tableBlock} ${classes.tableBlockView} ${TABLE_STATUS_SURFACE_CLASS[table.status]} ${
+          isAvailableEmpty ? classes.tableBlockAvailableEmpty : ""
+        } ${
           isDragging ? classes.tableBlockDragging : ""
         } ${isGridSelected ? classes.tableBlockMergeSelected : ""} ${
           onGridSelect ? classes.tableBlockGridSelectable : ""
         }`}
-        style={bookingRowBusyStyle(isBusy)}
+        style={{
+          ...bookingRowBusyStyle(isBusy),
+          ...(isAvailableEmpty ? { minHeight: FLOOR_TABLE_BLOCK_AVAILABLE_EMPTY_HEIGHT_PX } : null),
+        }}
         onPointerUp={(event) => {
           if (event.button !== 0) {
             return;
@@ -178,94 +265,42 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
           onOpenTable();
         }}
       >
-        <Group gap={6} wrap="nowrap" align="center" justify="space-between">
-          <Text fw={600} size="sm" lineClamp={1} style={{ minWidth: 0, flex: 1 }}>
-            {table.name}
-          </Text>
-          <Group
-            gap={4}
-            wrap="nowrap"
-            align="center"
-            className={classes.tableBlockHeaderActions}
-            data-table-status-menu=""
-          >
-            {showStatusMenu && !isEmployee && !onGridSelect ? (
-              <Menu
-                withinPortal
-                position="bottom-end"
-                closeOnItemClick
-                onOpen={onStatusMenuOpen}
-                onClose={onStatusMenuClose}
+        {isAvailableEmpty ? (
+          <>
+            <div className={classes.tableBlockAvailableMenu} data-table-status-menu="">
+              {statusMenu}
+            </div>
+            <Stack gap={4} className={classes.tableBlockAvailableBody}>
+              <Text
+                fw={700}
+                lineClamp={2}
+                className={classes.tableBlockAvailableTitle}
+                style={{ minWidth: 0 }}
               >
-                <Menu.Target>
-                  <ActionIcon
-                    type="button"
-                    variant="subtle"
-                    color="gray"
-                    size="sm"
-                    className={classes.tableBlockStatusMenuBtn}
-                    aria-label="Thao tác bàn"
-                    disabled={isBusy}
-                    onClick={stopMenuAction}
-                  >
-                    <MoreVertical size={14} />
-                  </ActionIcon>
-                </Menu.Target>
-                <Menu.Dropdown>
-                  <Menu.Item
-                    disabled={isBusy}
-                    onClick={(event) => {
-                      stopMenuAction(event);
-                      onOpenDetail();
-                    }}
-                  >
-                    Lịch sử booking
-                  </Menu.Item>
-                  {hasQuickActions ? <Menu.Divider /> : null}
-                  {canComplete ? (
-                    <Menu.Item
-                      disabled={isBusy}
-                      onClick={(event) => {
-                        stopMenuAction(event);
-                        onCompleteBooking();
-                      }}
-                    >
-                      Hoàn thành
-                    </Menu.Item>
-                  ) : null}
-                  {showUnlock ? (
-                    <Menu.Item
-                      disabled={isBusy}
-                      onClick={(event) => {
-                        stopMenuAction(event);
-                        onUnlockTable();
-                      }}
-                    >
-                      Mở khóa
-                    </Menu.Item>
-                  ) : null}
-                  {canLock ? (
-                    <Menu.Item
-                      disabled={isBusy}
-                      onClick={(event) => {
-                        stopMenuAction(event);
-                        onLockTable();
-                      }}
-                    >
-                      Khóa
-                    </Menu.Item>
-                  ) : null}
-                </Menu.Dropdown>
-              </Menu>
-            ) : null}
-          </Group>
-        </Group>
-        <Group gap={6} wrap="nowrap" align="center" justify="space-between" w="100%">
-          <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
-            {tableStatusLabel[table.status]}
-          </Badge>
-          <TableBlockGuestBadge booking={guestBadgeBooking} />
-        </Group>
+                {table.name}
+              </Text>
+              {statusBadgeRow}
+            </Stack>
+          </>
+        ) : (
+          <>
+            <Group gap={6} wrap="nowrap" align="center" justify="space-between">
+              <Text fw={600} size="sm" lineClamp={1} style={{ minWidth: 0, flex: 1 }}>
+                {table.name}
+              </Text>
+              <Group
+                gap={4}
+                wrap="nowrap"
+                align="center"
+                className={classes.tableBlockHeaderActions}
+                data-table-status-menu=""
+              >
+                {statusMenu}
+              </Group>
+            </Group>
+            {statusBadgeRow}
+          </>
+        )}
         {!hideBookingPeek ? (
           <TableBlockBookingPeek displayBooking={displayBooking} customerName={customerName} />
         ) : null}

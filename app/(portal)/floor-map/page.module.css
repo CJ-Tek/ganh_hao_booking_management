@@ -183,6 +183,34 @@
   padding-top: 8px;
 }
 
+.tableBlockAvailableEmpty {
+  display: flex;
+  flex-direction: column;
+}
+
+.tableBlockAvailableMenu {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 5;
+  pointer-events: auto;
+}
+
+.tableBlockAvailableBody {
+  flex: 1;
+  min-width: 0;
+  padding-right: 22px;
+  --stack-align: flex-start;
+  --stack-justify: center;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.tableBlockAvailableTitle {
+  font-size: 35px;
+  line-height: 1.1;
+}
+
 .tableBlockHeaderActions {
   flex-shrink: 0;
 }
