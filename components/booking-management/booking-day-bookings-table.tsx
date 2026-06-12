@@ -27,7 +27,7 @@ import {
 } from "@/lib/booking-list-sort";
 import { type Booking, type BookingStatus } from "@/lib/types";
 import { useBookingStatusFiltersWithSearch } from "@/lib/use-booking-status-filters-with-search";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 
 const DAY_LIST_BOOKING_PULSE_CYCLE_MS = 600;
 const DAY_LIST_BOOKING_PULSE_CYCLES = 2;
@@ -61,10 +61,18 @@ export function BookingDayBookingsTable(props: {
   const [internalSearchQuery, setInternalSearchQuery] = useState("");
   const searchQuery = controlledSearchQuery ?? internalSearchQuery;
   const setSearchQuery = onSearchQueryChange ?? setInternalSearchQuery;
+  const setStatusFilters = useCallback<Dispatch<SetStateAction<BookingStatus[]>>>(
+    (value) => {
+      onStatusFiltersChange(
+        typeof value === "function" ? value([...statusFilters]) : value
+      );
+    },
+    [onStatusFiltersChange, statusFilters]
+  );
   const isSearchActive = useBookingStatusFiltersWithSearch(
     searchQuery,
     statusFilters,
-    onStatusFiltersChange
+    setStatusFilters
   );
   const { state } = useAppContext();
   const { sortStatus, setSortStatus, defaultSort, timeSortFilters } = useBookingListTimeSort(

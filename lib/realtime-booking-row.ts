@@ -17,6 +17,7 @@ const BOOKING_STATUSES: BookingStatus[] = [
   "no_show",
   "checked_in",
   "completed",
+  "late",
 ];
 
 /** Map a Supabase `bookings` realtime row to app `Booking`, or null if invalid. */
@@ -51,6 +52,7 @@ export function mapRealtimeBookingRow(row: RealtimeRow): Booking | null {
         : null;
   const checkedInAt = row.checked_in_at;
   const noShowMarkedAt = row.no_show_marked_at;
+  const lateMarkedAt = row.late_marked_at;
   const note = row.note;
   const createdAtRaw = row.created_at;
   const createdByUserId = row.created_by_user_id;
@@ -87,6 +89,9 @@ export function mapRealtimeBookingRow(row: RealtimeRow): Booking | null {
   if (noShowMarkedAt !== null && typeof noShowMarkedAt !== "string") {
     return null;
   }
+  if (lateMarkedAt !== null && typeof lateMarkedAt !== "string") {
+    return null;
+  }
   if (note !== null && typeof note !== "string") {
     return null;
   }
@@ -113,6 +118,7 @@ export function mapRealtimeBookingRow(row: RealtimeRow): Booking | null {
     endTime,
     checkedInAt: checkedInAt ?? undefined,
     noShowMarkedAt: noShowMarkedAt ?? undefined,
+    lateMarkedAt: lateMarkedAt ?? undefined,
     note: note ?? undefined,
     createdAt: createdAtRaw ?? startTime,
     createdByUserId,

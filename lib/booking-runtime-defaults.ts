@@ -6,4 +6,5 @@ export const DEFAULT_BOOKING_RUNTIME_SETTINGS: BookingRuntimeSettings = {
   groupPartyGuestThreshold: 20,
   repeatCustomerMinCompleted: 2,
   receptionArrivalGraceMinutes: 15,
+  lateGraceMinutes: 15,
 };

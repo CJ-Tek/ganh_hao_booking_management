@@ -153,6 +153,7 @@ export type Database = {
         Row: {
           group_party_guest_threshold: number
           id: boolean
+          late_grace_minutes: number
           no_show_grace_minutes: number
           reception_arrival_grace_minutes: number
           repeat_customer_min_completed: number
@@ -162,6 +163,7 @@ export type Database = {
         Insert: {
           group_party_guest_threshold?: number
           id?: boolean
+          late_grace_minutes?: number
           no_show_grace_minutes?: number
           reception_arrival_grace_minutes?: number
           repeat_customer_min_completed?: number
@@ -171,6 +173,7 @@ export type Database = {
         Update: {
           group_party_guest_threshold?: number
           id?: boolean
+          late_grace_minutes?: number
           no_show_grace_minutes?: number
           reception_arrival_grace_minutes?: number
           repeat_customer_min_completed?: number
@@ -193,6 +196,7 @@ export type Database = {
           id: string
           last_edited_at: string | null
           last_edited_by_user_id: string | null
+          late_marked_at: string | null
           merge_group_id: string | null
           no_show_marked_at: string | null
           note: string | null
@@ -213,6 +217,7 @@ export type Database = {
           id?: string
           last_edited_at?: string | null
           last_edited_by_user_id?: string | null
+          late_marked_at?: string | null
           merge_group_id?: string | null
           no_show_marked_at?: string | null
           note?: string | null
@@ -233,6 +238,7 @@ export type Database = {
           id?: string
           last_edited_at?: string | null
           last_edited_by_user_id?: string | null
+          late_marked_at?: string | null
           merge_group_id?: string | null
           no_show_marked_at?: string | null
           note?: string | null
@@ -731,6 +737,7 @@ export type Database = {
         Args: never
         Returns: {
           expired_offer_count: number
+          late_count: number
           no_show_count: number
           promoted_count: number
         }[]

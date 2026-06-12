@@ -130,6 +130,7 @@ export const BookingCalendarPanel = forwardRef<
     runCheckIn,
     openCompleteBookingConfirm,
     openCancelBookingConfirm,
+    openQueueBookingConfirm,
   } = useBookingManagement();
 
   const today = dayjs();
@@ -631,6 +632,10 @@ export const BookingCalendarPanel = forwardRef<
         onCancel={(booking) => {
           setDayListDetailBooking(null);
           openCancelBookingConfirm(booking);
+        }}
+        onQueue={(booking) => {
+          setDayListDetailBooking(null);
+          openQueueBookingConfirm(booking);
         }}
       />
       {bookingManagementModals}

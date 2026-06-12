@@ -68,6 +68,10 @@ const handlers: Record<string, StoreHandler> = {
     store.deleteCustomersInSupabase(payload as string[]),
   checkInBooking: (payload) =>
     store.checkInBookingInSupabase(payload as string),
+  queueBooking: (payload) => {
+    const p = payload as { bookingId: string };
+    return store.queueBookingInSupabase(p.bookingId);
+  },
   getTableBlockState: (payload) =>
     store.getTableBlockStateInSupabase(payload as Parameters<typeof store.getTableBlockStateInSupabase>[0]),
   createTableMergeGroup: (payload) =>

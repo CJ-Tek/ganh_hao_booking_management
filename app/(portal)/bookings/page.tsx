@@ -23,6 +23,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
+import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingOrderDetailModal } from "@/components/booking-management/booking-order-detail-modal";
 import { BookingModalContextBanner } from "@/components/booking-management/booking-modal-context-banner";
@@ -126,6 +127,7 @@ function BookingsPageContent() {
     changeBookingTable,
     updateBookingStatus,
     checkInBooking,
+    queueBooking,
     hasSupabase,
     createTableMergeGroup,
   } = useAppContext();
@@ -146,6 +148,7 @@ function BookingsPageContent() {
       repeatCustomerMinCompleted: state.bookingRuntimeSettings.repeatCustomerMinCompleted,
       receptionArrivalGraceMinutes: state.bookingRuntimeSettings.receptionArrivalGraceMinutes,
       noShowGraceMinutes: state.bookingRuntimeSettings.noShowGraceMinutes,
+      lateGraceMinutes: state.bookingRuntimeSettings.lateGraceMinutes,
     }),
     [state.bookingRuntimeSettings]
   );
@@ -197,7 +200,6 @@ function BookingsPageContent() {
   const [todayPage, setTodayPage] = useState(1);
   const TODAY_DESKTOP_PAGE_SIZE_OPTIONS = [8, 12, 16, 24, 32] as const;
   const [todayDesktopPageSize, setTodayDesktopPageSize] = useState(12);
-
   const isListSearchActive = useBookingStatusFiltersWithSearch(
     searchQuery,
     listStatusFilters,
@@ -237,6 +239,46 @@ function BookingsPageContent() {
             notifications.show({
               color: "red",
               message: error instanceof Error ? error.message : "Không hủy được booking.",
+            });
+          }
+        });
+      },
+    });
+  };
+
+  const openQueueBookingConfirm = (booking: Booking) => {
+    const customer = state.customers.find((c) => c.id === booking.customerId);
+    const name = customer?.fullName ?? "—";
+    const hadTable = Boolean(booking.tableId || booking.mergeGroupId);
+    openPortalModalsConfirmModal({
+      title: "Chuyển về chờ xếp bàn",
+      children: (
+        <Text size="sm">
+          Chuyển booking của <strong>{name}</strong> về <strong>Chờ xếp bàn</strong>
+          {hadTable ? " và giải phóng bàn hiện tại" : ""}? Khách có thể được gán bàn lại sau.
+        </Text>
+      ),
+      labels: { cancel: "Quay lại", confirm: "Chuyển chờ xếp bàn" },
+      confirmProps: { color: "yellow" },
+      onConfirm: async () => {
+        if (!hasSupabase) {
+          notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
+          return;
+        }
+        await runBookingRowAction(booking.id, async () => {
+          try {
+            const result = await queueBooking(booking.id, booking);
+            notifications.show({
+              color: result.ok ? "green" : "red",
+              message: result.message,
+            });
+          } catch (error) {
+            notifications.show({
+              color: "red",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Không chuyển được booking về chờ xếp bàn.",
             });
           }
         });
@@ -1959,6 +2001,7 @@ function BookingsPageContent() {
         onCheckIn={(id) => void runCheckIn(id)}
         onComplete={openCompleteBookingConfirm}
         onCancel={openCancelBookingConfirm}
+        onQueue={openQueueBookingConfirm}
       />
       <Modal
         opened={editBooking != null}
@@ -2075,7 +2118,7 @@ function BookingsPageContent() {
       />
 
       {assignFormBooking ? (
-        <Modal
+        <PortalStandardModal
           opened
           onClose={() => {
             setAssignFormBooking(null);
@@ -2083,7 +2126,6 @@ function BookingsPageContent() {
           }}
           title="Gán thủ công booking vào bàn"
           size="xl"
-          centered
           zIndex={MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX}
           overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
         >
@@ -2189,7 +2231,7 @@ function BookingsPageContent() {
               </Button>
             </Group>
           </Stack>
-        </Modal>
+        </PortalStandardModal>
       ) : null}
     </Stack>
   );

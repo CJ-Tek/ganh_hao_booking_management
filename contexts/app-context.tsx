@@ -21,6 +21,7 @@ import {
 } from "@/lib/branch-pick";
 import { type BookingDuplicateInfo, DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import {
+  canQueueBooking,
   MERGE_GROUP_CHECK_IN_BLOCKED_BY_MEMBER_OCCUPIED,
   mergeGroupHasOccupiedMemberTable,
   tableStatusForCreateBooking,
@@ -61,6 +62,7 @@ import {
   deleteUserInSupabase,
   updateUserInSupabase,
   checkInBookingInSupabase,
+  queueBookingInSupabase,
   createBookingInSupabase,
   fetchFloorMapSlice,
   fetchSnapshot,
@@ -241,6 +243,7 @@ interface AppContextValue {
     seedBooking?: Booking
   ) => Promise<void>;
   checkInBooking: (bookingId: string, seedBooking?: Booking) => Promise<void>;
+  queueBooking: (bookingId: string, seedBooking?: Booking) => Promise<ActionResult>;
   deleteCustomers: (customerIds: string[]) => Promise<ActionResult>;
   upsertTable: (table: Omit<DiningTable, "id"> & { id?: string }) => Promise<void>;
   upsertTablesBatch: (tables: Array<Omit<DiningTable, "id"> & { id?: string }>) => Promise<void>;
@@ -537,6 +540,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       const groupPartyGuestThreshold = row.group_party_guest_threshold;
       const repeatCustomerMinCompleted = row.repeat_customer_min_completed;
       const receptionArrivalGraceMinutes = row.reception_arrival_grace_minutes;
+      const lateGraceMinutesRaw = row.late_grace_minutes;
       if (
         typeof standardTurnaroundMinutes !== "number" ||
         typeof noShowGraceMinutes !== "number" ||
@@ -546,12 +550,15 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       ) {
         return null;
       }
+      const lateGraceMinutes =
+        typeof lateGraceMinutesRaw === "number" ? lateGraceMinutesRaw : noShowGraceMinutes;
       return {
         standardTurnaroundMinutes,
         noShowGraceMinutes,
         groupPartyGuestThreshold,
         repeatCustomerMinCompleted,
         receptionArrivalGraceMinutes,
+        lateGraceMinutes,
       };
     };
 
@@ -1368,6 +1375,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
           tableId: input.tableId ?? null,
           mergeGroupId: input.mergeGroupId ?? null,
           status: "confirmed",
+          lateMarkedAt: undefined,
+          checkedInAt: undefined,
           guestCount:
             typeof input.guestCount === "number" && Number.isFinite(input.guestCount)
               ? Math.max(1, Math.round(input.guestCount))
@@ -1584,18 +1593,27 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       status === "completed" ||
       status === "no_show" ||
       status === "confirmed" ||
-      status === "pending";
+      status === "pending" ||
+      status === "late";
 
     const optimisticPatch: Partial<Booking> = {
       status,
       ...(clearsCheckedInAt ? { checkedInAt: undefined } : {}),
       ...(status === "no_show" ? { noShowMarkedAt: dayjs().toISOString() } : {}),
+      ...(status === "late" ? { lateMarkedAt: dayjs().toISOString() } : {}),
+      ...(status === "late" || status === "no_show"
+        ? { areaId: null, tableId: null, mergeGroupId: null }
+        : {}),
     };
 
     const revertPatch: Partial<Booking> = {
       status: booking.status,
       checkedInAt: booking.checkedInAt,
       noShowMarkedAt: booking.noShowMarkedAt,
+      lateMarkedAt: booking.lateMarkedAt,
+      areaId: booking.areaId,
+      tableId: booking.tableId,
+      mergeGroupId: booking.mergeGroupId,
     };
 
     setState((prev) => {
@@ -1658,6 +1676,74 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
 
     try {
       await checkInBookingInSupabase(bookingId);
+    } catch (error) {
+      setState((prev) => {
+        const seeded = seedBookingIntoSnapshot(prev, bookingId, seedBooking);
+        const next = applyBookingPatchToSnapshot(seeded, bookingId, revertPatch);
+        return next ?? seeded;
+      });
+      throw error;
+    }
+  };
+
+  const queueBooking = async (
+    bookingId: string,
+    seedBooking?: Booking
+  ): Promise<ActionResult> => {
+    if (!hasSupabase) {
+      return { ok: false, message: "Chưa kết nối Supabase." };
+    }
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    const booking =
+      state.bookings.find((item) => item.id === bookingId) ?? seedBooking;
+    if (!booking) {
+      return { ok: false, message: "Không tìm thấy booking." };
+    }
+    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+      return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
+    }
+    if (!canQueueBooking(booking)) {
+      return {
+        ok: false,
+        message: "Booking này không thể chuyển về chờ xếp bàn.",
+      };
+    }
+
+    const revertPatch: Partial<Booking> = {
+      status: booking.status,
+      tableId: booking.tableId,
+      mergeGroupId: booking.mergeGroupId,
+      areaId: booking.areaId,
+      checkedInAt: booking.checkedInAt,
+      lateMarkedAt: booking.lateMarkedAt,
+    };
+    const optimisticPatch: Partial<Booking> = {
+      status: "pending",
+      tableId: null,
+      mergeGroupId: null,
+      areaId: null,
+      checkedInAt: undefined,
+      lateMarkedAt: undefined,
+    };
+
+    setState((prev) => {
+      const seeded = seedBookingIntoSnapshot(prev, bookingId, seedBooking);
+      const next = applyBookingPatchToSnapshot(seeded, bookingId, optimisticPatch);
+      return next ?? seeded;
+    });
+
+    try {
+      const result = await queueBookingInSupabase(bookingId);
+      if (!result.ok) {
+        setState((prev) => {
+          const seeded = seedBookingIntoSnapshot(prev, bookingId, seedBooking);
+          const next = applyBookingPatchToSnapshot(seeded, bookingId, revertPatch);
+          return next ?? seeded;
+        });
+      }
+      return result;
     } catch (error) {
       setState((prev) => {
         const seeded = seedBookingIntoSnapshot(prev, bookingId, seedBooking);
@@ -2598,6 +2684,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     updateTableMergeGroupDates,
     updateBookingStatus,
     checkInBooking,
+    queueBooking,
     deleteCustomers,
     upsertTable,
     upsertTablesBatch,

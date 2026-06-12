@@ -137,6 +137,13 @@
 }
 
 .actions :global(.booking-row-actions-drawer) {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.actions :global(.booking-row-actions-drawer-utilities),
+.actions :global(.booking-row-actions-drawer-primary) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
@@ -149,18 +156,21 @@
   height: 100%;
 }
 
-.actions :global(.booking-row-actions-drawer > span) {
+.actions :global(.booking-row-actions-drawer-utilities > span),
+.actions :global(.booking-row-actions-drawer-primary > span) {
   display: flex;
   min-width: 0;
   min-height: 44px;
 }
 
-.actions :global(.booking-row-actions-drawer > span .mantine-Button-root) {
+.actions :global(.booking-row-actions-drawer-utilities > span .mantine-Button-root),
+.actions :global(.booking-row-actions-drawer-primary > span .mantine-Button-root) {
   flex: 1;
 }
 
 .actions :global(.booking-row-actions-drawer-span) {
   grid-column: 1 / -1;
+  width: 100%;
 }
 
 .drawerContent {

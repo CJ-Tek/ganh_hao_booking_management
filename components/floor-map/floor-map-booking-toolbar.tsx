@@ -5,12 +5,12 @@ import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import classes from "./floor-map-booking-toolbar.module.css";
 
-const ACTION_MIN_WIDTHS_PX = [92, 132, 148, 148] as const;
+const ACTION_MIN_WIDTHS_PX = [92, 132, 120, 148, 148] as const;
 const MORE_BUTTON_MIN_WIDTH_PX = 104;
 const TOOLBAR_GAP_PX = 8;
 
 type BookingToolbarAction = {
-  id: "create" | "dayList" | "mergeGroups" | "splitClones";
+  id: "create" | "dayList" | "lateList" | "mergeGroups" | "splitClones";
   label: string;
   color?: string;
   variant?: "default" | "filled" | "light" | "outline" | "subtle" | "transparent";
@@ -24,6 +24,7 @@ export type FloorMapBookingToolbarProps = {
   activeAreaBranchId: string | null | undefined;
   onCreateBooking: () => void;
   onOpenDayList: () => void;
+  onOpenLateList: () => void;
   onOpenMergeGroups: () => void;
   onOpenSplitClones: () => void;
 };
@@ -58,6 +59,7 @@ export function FloorMapBookingToolbar({
   activeAreaBranchId,
   onCreateBooking,
   onOpenDayList,
+  onOpenLateList,
   onOpenMergeGroups,
   onOpenSplitClones,
 }: FloorMapBookingToolbarProps) {
@@ -81,6 +83,13 @@ export function FloorMapBookingToolbar({
         onClick: onOpenDayList,
       },
       {
+        id: "lateList",
+        label: "Danh sách trễ",
+        variant: "default",
+        disabled: isEditMode,
+        onClick: onOpenLateList,
+      },
+      {
         id: "mergeGroups",
         label: "Danh sách bàn gộp",
         variant: "default",
@@ -100,6 +109,7 @@ export function FloorMapBookingToolbar({
       isEditMode,
       onCreateBooking,
       onOpenDayList,
+      onOpenLateList,
       onOpenMergeGroups,
       onOpenSplitClones,
     ]

@@ -44,6 +44,10 @@ export default function BookingRulesSettingsPage() {
         draft.receptionArrivalGraceMinutes,
         state.bookingRuntimeSettings.receptionArrivalGraceMinutes
       ),
+      lateGraceMinutes: parsePositiveInt(
+        draft.lateGraceMinutes,
+        state.bookingRuntimeSettings.lateGraceMinutes
+      ),
     };
 
     setSaving(true);
@@ -112,6 +116,19 @@ export default function BookingRulesSettingsPage() {
                 setDraft((prev) => ({
                   ...prev,
                   receptionArrivalGraceMinutes: value ?? prev.receptionArrivalGraceMinutes,
+                }))
+              }
+            />
+            <EditableNumberInput
+              label="Thời gian trễ tối đa (phút)"
+              description="Khách đã xác nhận quá N phút sau giờ đến mà chưa check-in → Trễ. Cuối ngày nếu vẫn Trễ → Không đến."
+              required
+              disabled={saving}
+              value={draft.lateGraceMinutes}
+              onChange={(value) =>
+                setDraft((prev) => ({
+                  ...prev,
+                  lateGraceMinutes: value ?? prev.lateGraceMinutes,
                 }))
               }
             />

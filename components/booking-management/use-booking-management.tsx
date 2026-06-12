@@ -20,6 +20,7 @@ import { GuestCountNumberInput } from "@/components/booking-management/guest-cou
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
 import { BookingTablePicker } from "@/components/booking-table-picker/booking-table-picker";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
+import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import {
   canEditBookingOrder,
   MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX,
@@ -61,6 +62,7 @@ export function useBookingManagement() {
     changeBookingTable,
     updateBookingStatus,
     checkInBooking,
+    queueBooking,
     hasSupabase,
   } = useAppContext();
   const isCompact = usePortalCompact();
@@ -191,6 +193,49 @@ export function useBookingManagement() {
       });
     },
     [checkInBooking, hasSupabase, runBookingRowAction]
+  );
+
+  const openQueueBookingConfirm = useCallback(
+    (booking: Booking) => {
+      const customer = state.customers.find((c) => c.id === booking.customerId);
+      const name = customer?.fullName ?? "—";
+      const hadTable = Boolean(booking.tableId || booking.mergeGroupId);
+      openPortalModalsConfirmModal({
+        title: "Chuyển về chờ xếp bàn",
+        children: (
+          <Text size="sm">
+            Chuyển booking của <strong>{name}</strong> về <strong>Chờ xếp bàn</strong>
+            {hadTable ? " và giải phóng bàn hiện tại" : ""}? Khách có thể được gán bàn lại sau.
+          </Text>
+        ),
+        labels: { cancel: "Quay lại", confirm: "Chuyển chờ xếp bàn" },
+        confirmProps: { color: "yellow" },
+        onConfirm: async () => {
+          if (!hasSupabase) {
+            notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
+            return;
+          }
+          await runBookingRowAction(booking.id, async () => {
+            try {
+              const result = await queueBooking(booking.id, booking);
+              notifications.show({
+                color: result.ok ? "green" : "red",
+                message: result.message,
+              });
+            } catch (error) {
+              notifications.show({
+                color: "red",
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : "Không chuyển được booking về chờ xếp bàn.",
+              });
+            }
+          });
+        },
+      });
+    },
+    [hasSupabase, queueBooking, runBookingRowAction, state.customers]
   );
 
   const runAssign = useCallback(
@@ -522,6 +567,7 @@ export function useBookingManagement() {
         onCheckIn={(bookingId) => void runCheckIn(bookingId)}
         onComplete={openCompleteBookingConfirm}
         onCancel={openCancelBookingConfirm}
+        onQueue={openQueueBookingConfirm}
       />
     ),
     [
@@ -530,6 +576,7 @@ export function useBookingManagement() {
       openCancelBookingConfirm,
       openCompleteBookingConfirm,
       openEditBookingModal,
+      openQueueBookingConfirm,
       runCheckIn,
     ]
   );
@@ -735,12 +782,11 @@ export function useBookingManagement() {
       />
 
       {assignFormBooking ? (
-        <Modal
+        <PortalStandardModal
           opened
           onClose={() => setAssignFormBooking(null)}
           title="Gán thủ công booking vào bàn"
           size="xl"
-          centered
           zIndex={MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX}
           overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
         >
@@ -828,7 +874,7 @@ export function useBookingManagement() {
               </Button>
             </Group>
           </Stack>
-        </Modal>
+        </PortalStandardModal>
       ) : null}
     </>
   );
@@ -845,5 +891,6 @@ export function useBookingManagement() {
     runCheckIn,
     openCompleteBookingConfirm,
     openCancelBookingConfirm,
+    openQueueBookingConfirm,
   };
 }

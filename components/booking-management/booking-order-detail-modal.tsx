@@ -70,6 +70,7 @@ export type BookingOrderDetailModalProps = {
     repeatCustomerMinCompleted: number;
     receptionArrivalGraceMinutes: number;
     noShowGraceMinutes: number;
+    lateGraceMinutes?: number;
   };
   completedBookingsByCustomer?: Map<string, number>;
   isBookingRowBusy: (bookingId: string) => boolean;
@@ -80,6 +81,7 @@ export type BookingOrderDetailModalProps = {
   onCheckIn: (bookingId: string) => void;
   onComplete: (booking: Booking) => void;
   onCancel: (booking: Booking) => void;
+  onQueue?: (booking: Booking) => void;
 };
 
 export function BookingOrderDetailModal(props: BookingOrderDetailModalProps) {
@@ -98,6 +100,7 @@ export function BookingOrderDetailModal(props: BookingOrderDetailModalProps) {
     onCheckIn,
     onComplete,
     onCancel,
+    onQueue,
   } = props;
 
   const { state } = useAppContext();
@@ -180,6 +183,7 @@ export function BookingOrderDetailModal(props: BookingOrderDetailModalProps) {
             onCheckIn={onCheckIn}
             onComplete={onComplete}
             onCancel={onCancel}
+            onQueue={onQueue}
           />
         ) : null;
 

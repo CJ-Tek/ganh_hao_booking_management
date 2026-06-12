@@ -188,6 +188,9 @@ async function maybeRunBookingMaintenance(force = false): Promise<void> {
     });
   await bookingMaintenanceInFlight;
 }
+/** Bookings eligible for table assignment from queue (pending / Trễ). */
+const ASSIGN_QUEUE_BOOKING_STATUSES: BookingStatus[] = ["pending", "late"];
+
 /** Bookings that tie a table (show as hold or occupied, not trống). */
 const TABLE_RESERVATION_BOOKING_STATUSES: BookingStatus[] = [
   "pending",
@@ -282,6 +285,12 @@ function mapBookingRuntimeSettingsRow(data: Record<string, unknown>): BookingRun
       typeof data.reception_arrival_grace_minutes === "number"
         ? data.reception_arrival_grace_minutes
         : DEFAULT_BOOKING_RUNTIME_SETTINGS.receptionArrivalGraceMinutes,
+    lateGraceMinutes:
+      typeof data.late_grace_minutes === "number"
+        ? data.late_grace_minutes
+        : typeof data.no_show_grace_minutes === "number"
+          ? data.no_show_grace_minutes
+          : DEFAULT_BOOKING_RUNTIME_SETTINGS.lateGraceMinutes,
   };
 }
 
@@ -291,7 +300,7 @@ async function getBookingRuntimeSettings(
   const { data, error } = await (client as any)
     .from("booking_runtime_settings")
     .select(
-      "standard_turnaround_minutes, no_show_grace_minutes, group_party_guest_threshold, repeat_customer_min_completed, reception_arrival_grace_minutes"
+      "standard_turnaround_minutes, no_show_grace_minutes, late_grace_minutes, group_party_guest_threshold, repeat_customer_min_completed, reception_arrival_grace_minutes"
     )
     .eq("id", true)
     .maybeSingle();
@@ -312,6 +321,7 @@ export async function updateBookingRuntimeSettingsInSupabase(
     .update({
       standard_turnaround_minutes: input.standardTurnaroundMinutes,
       no_show_grace_minutes: input.noShowGraceMinutes,
+      late_grace_minutes: input.lateGraceMinutes,
       group_party_guest_threshold: input.groupPartyGuestThreshold,
       repeat_customer_min_completed: input.repeatCustomerMinCompleted,
       reception_arrival_grace_minutes: input.receptionArrivalGraceMinutes,
@@ -840,6 +850,7 @@ export async function fetchSnapshot(options?: {
           .toISOString(),
       checkedInAt: item.checked_in_at ?? undefined,
       noShowMarkedAt: item.no_show_marked_at ?? undefined,
+      lateMarkedAt: item.late_marked_at ?? undefined,
       note: item.note ?? undefined,
       createdAt: item.created_at ?? item.start_time ?? item.booking_at,
       createdByUserId: item.created_by_user_id,
@@ -1082,6 +1093,7 @@ function mapBookingRowFromSupabase(item: Record<string, unknown>): Booking {
         .toISOString(),
     checkedInAt: (item.checked_in_at as string | null) ?? undefined,
     noShowMarkedAt: (item.no_show_marked_at as string | null) ?? undefined,
+    lateMarkedAt: (item.late_marked_at as string | null) ?? undefined,
     note: (item.note as string | null) ?? undefined,
     createdAt:
       (item.created_at as string | null | undefined) ??
@@ -1410,8 +1422,8 @@ export async function assignBookingToTableInSupabase(input: {
   if (bookingErr || !booking) {
     return { ok: false, message: bookingErr?.message ?? "Không tìm thấy booking." };
   }
-  if (booking.status !== "pending") {
-    return { ok: false, message: "Chỉ gán bàn cho booking đang chờ xếp bàn." };
+  if (!ASSIGN_QUEUE_BOOKING_STATUSES.includes(booking.status as BookingStatus)) {
+    return { ok: false, message: "Chỉ gán bàn cho booking đang chờ xếp bàn, chờ, hoặc trễ." };
   }
 
   const nextGuestCount =
@@ -2285,7 +2297,7 @@ export async function updateBookingStatusInSupabase(
   const client = ensureClient();
   const { data: booking } = await (client as any)
     .from("bookings")
-    .select("id, table_id, branch_id, start_time, end_time")
+    .select("id, table_id, merge_group_id, branch_id, start_time, end_time")
     .eq("id", bookingId)
     .maybeSingle();
   const normalizedStatus: BookingStatus = status === "checked_in" ? "seated" : status;
@@ -2293,7 +2305,12 @@ export async function updateBookingStatusInSupabase(
     normalizedStatus === "cancelled" ||
     normalizedStatus === "pending" ||
     normalizedStatus === "confirmed" ||
-    normalizedStatus === "no_show";
+    normalizedStatus === "no_show" ||
+    normalizedStatus === "late";
+  const clearsTableAssignment =
+    normalizedStatus === "cancelled" ||
+    normalizedStatus === "no_show" ||
+    normalizedStatus === "late";
   const { error } = await (client as any)
     .from("bookings")
     .update(
@@ -2303,6 +2320,11 @@ export async function updateBookingStatusInSupabase(
             checked_in_at: null,
             no_show_marked_at:
               normalizedStatus === "no_show" ? dayjs().toISOString() : null,
+            late_marked_at:
+              normalizedStatus === "late" ? dayjs().toISOString() : null,
+            ...(clearsTableAssignment
+              ? { table_id: null, merge_group_id: null, area_id: null }
+              : {}),
           }
         : { status: normalizedStatus }
     )
@@ -2310,19 +2332,92 @@ export async function updateBookingStatusInSupabase(
   if (error) {
     throw new Error(error.message);
   }
-  if (!booking || !booking.table_id) {
+  if (!booking) {
     return;
   }
 
-  const tableId = booking.table_id as string;
+  const tableIdsToRefresh = new Set<string>();
+  if (booking.table_id) {
+    tableIdsToRefresh.add(booking.table_id as string);
+  }
+  const mergeGroupId = (booking.merge_group_id as string | null) ?? null;
+  if (mergeGroupId) {
+    for (const memberTableId of await listMergeGroupMemberTableIds(client, mergeGroupId)) {
+      tableIdsToRefresh.add(memberTableId);
+    }
+  }
+
   const afterTable =
     normalizedStatus === "cancelled" ||
     normalizedStatus === "completed" ||
-    normalizedStatus === "no_show"
-      ? refreshTableAvailabilityForBooking(client, tableId)
+    normalizedStatus === "no_show" ||
+    normalizedStatus === "late"
+      ? Promise.all(
+          [...tableIdsToRefresh].map((id) => refreshTableAvailabilityForBooking(client, id))
+        )
       : Promise.resolve();
 
   await afterTable;
+}
+
+export async function queueBookingInSupabase(bookingId: string): Promise<Result> {
+  const client = ensureClient();
+  const { data: booking, error: loadErr } = await (client as any)
+    .from("bookings")
+    .select("id, status, table_id, merge_group_id")
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (loadErr) {
+    return { ok: false, message: loadErr.message };
+  }
+  if (!booking) {
+    return { ok: false, message: "Không tìm thấy booking." };
+  }
+
+  const status = booking.status as BookingStatus;
+  const hasTable = Boolean(booking.table_id || booking.merge_group_id);
+  if (
+    !hasTable ||
+    (status !== "confirmed" && status !== "seated" && status !== "checked_in")
+  ) {
+    return {
+      ok: false,
+      message:
+        "Chỉ chuyển về chờ xếp bàn khi booking đã có bàn và đang xác nhận hoặc đã vào bàn.",
+    };
+  }
+
+  const tableIdsToRefresh = new Set<string>();
+  if (booking.table_id) {
+    tableIdsToRefresh.add(booking.table_id as string);
+  }
+  const mergeGroupId = (booking.merge_group_id as string | null) ?? null;
+  if (mergeGroupId) {
+    for (const memberTableId of await listMergeGroupMemberTableIds(client, mergeGroupId)) {
+      tableIdsToRefresh.add(memberTableId);
+    }
+  }
+
+  const { error } = await (client as any)
+    .from("bookings")
+    .update({
+      status: "pending",
+      table_id: null,
+      merge_group_id: null,
+      area_id: null,
+      checked_in_at: null,
+      late_marked_at: null,
+    })
+    .eq("id", bookingId);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+
+  await Promise.all(
+    [...tableIdsToRefresh].map((tableId) => refreshTableAvailabilityForBooking(client, tableId))
+  );
+
+  return { ok: true, message: "Đã chuyển booking về chờ xếp bàn." };
 }
 
 export async function deleteCustomersInSupabase(customerIds: string[]): Promise<Result> {
@@ -2473,6 +2568,7 @@ export async function getTableBlockStateInSupabase(input: {
         .toISOString(),
     checkedInAt: (item.checked_in_at as string | null) ?? undefined,
     noShowMarkedAt: (item.no_show_marked_at as string | null) ?? undefined,
+    lateMarkedAt: (item.late_marked_at as string | null) ?? undefined,
     note: (item.note as string | null) ?? undefined,
     createdAt:
       (item.created_at as string | null | undefined) ??
@@ -3973,10 +4069,11 @@ export async function runBookingMaintenanceInSupabase(): Promise<Result> {
     return { ok: true, message: "Đã chạy tác vụ bảo trì booking." };
   }
   const noShowCount = Number((payload as { no_show_count?: number }).no_show_count ?? 0);
+  const lateCount = Number((payload as { late_count?: number }).late_count ?? 0);
   const expiredOfferCount = Number((payload as { expired_offer_count?: number }).expired_offer_count ?? 0);
   const promotedCount = Number((payload as { promoted_count?: number }).promoted_count ?? 0);
 
-  if (noShowCount > 0) {
+  if (noShowCount > 0 || lateCount > 0) {
     await refreshTablesTouchedByRecentNoShows(client, noShowWindowStart);
   }
 
@@ -3984,7 +4081,7 @@ export async function runBookingMaintenanceInSupabase(): Promise<Result> {
 
   return {
     ok: true,
-    message: `Bảo trì xong: ${noShowCount} no-show, ${expiredOfferCount} offer hết hạn, ${promotedCount} lượt promotion, ${staleSeatedCompleted} bàn Đã ngồi tự hoàn thành.`,
+    message: `Bảo trì xong: ${lateCount} trễ, ${noShowCount} không đến (cuối ngày), ${expiredOfferCount} offer hết hạn, ${promotedCount} lượt promotion, ${staleSeatedCompleted} bàn Đã ngồi tự hoàn thành.`,
   };
 }
 

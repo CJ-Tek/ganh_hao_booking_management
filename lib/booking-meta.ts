@@ -181,6 +181,7 @@ export type ReceptionThresholdSettings = Pick<
   | "repeatCustomerMinCompleted"
   | "receptionArrivalGraceMinutes"
   | "noShowGraceMinutes"
+  | "lateGraceMinutes"
 >;
 
 function resolveReceptionThresholds(
@@ -198,6 +199,8 @@ function resolveReceptionThresholds(
       DEFAULT_BOOKING_RUNTIME_SETTINGS.receptionArrivalGraceMinutes,
     noShowGraceMinutes:
       thresholds?.noShowGraceMinutes ?? DEFAULT_BOOKING_RUNTIME_SETTINGS.noShowGraceMinutes,
+    lateGraceMinutes:
+      thresholds?.lateGraceMinutes ?? DEFAULT_BOOKING_RUNTIME_SETTINGS.lateGraceMinutes,
   };
 }
 
@@ -206,7 +209,22 @@ export function getBookingSlotStart(booking: Pick<Booking, "startTime" | "bookin
   return dayjs(booking.startTime ?? booking.bookingAt);
 }
 
-/** True when a confirmed/pending booking is past the no-show grace window without check-in. */
+/** True when a confirmed booking is past the late grace window without check-in. */
+export function isPastLateGrace(
+  booking: Pick<Booking, "status" | "checkedInAt" | "startTime" | "bookingAt">,
+  lateGraceMinutes: number
+): boolean {
+  if (booking.checkedInAt) {
+    return false;
+  }
+  if (booking.status !== "confirmed") {
+    return false;
+  }
+  const minutesPast = dayjs().diff(getBookingSlotStart(booking), "minute");
+  return minutesPast >= lateGraceMinutes;
+}
+
+/** @deprecated Use isPastLateGrace for confirmed guests; no_show is end-of-day only. */
 export function isPastNoShowGrace(
   booking: Pick<Booking, "status" | "checkedInAt" | "startTime" | "bookingAt">,
   noShowGraceMinutes: number
@@ -295,15 +313,16 @@ export function getReceptionBookingStatus(
     return { label: bookingStatusLabel.no_show, color: bookingStatusColor.no_show };
   }
 
-  if (
-    isPastNoShowGrace(booking, thresholds.noShowGraceMinutes)
-  ) {
-    return { label: bookingStatusLabel.no_show, color: bookingStatusColor.no_show };
+  if (booking.status === "late") {
+    return { label: bookingStatusLabel.late, color: bookingStatusColor.late };
   }
 
   if (booking.status === "confirmed") {
     if (hasDepositNote) {
       return { label: "Đã cọc", color: "yellow" };
+    }
+    if (isPastLateGrace(booking, thresholds.lateGraceMinutes)) {
+      return { label: bookingStatusLabel.late, color: bookingStatusColor.late };
     }
     const slotStart = getBookingSlotStart(booking);
     const minutesUntil = slotStart.diff(dayjs(), "minute");
@@ -391,12 +410,47 @@ function slotStartMs(booking: Pick<Booking, "startTime" | "bookingAt">): number 
   return Number.isFinite(t) ? t : 0;
 }
 
+/** Terminal or queue statuses that do not occupy a table on the floor map. */
+export const INACTIVE_FLOOR_MAP_BOOKING_STATUSES: readonly BookingStatus[] = [
+  "completed",
+  "cancelled",
+  "no_show",
+  "late",
+];
+
+export function isInactiveFloorMapBookingStatus(status: BookingStatus): boolean {
+  return (INACTIVE_FLOOR_MAP_BOOKING_STATUSES as readonly string[]).includes(status);
+}
+
 function isActiveFloorBooking(booking: Booking): boolean {
+  return !isInactiveFloorMapBookingStatus(booking.status);
+}
+
+export function canAssignBookingFromQueue(booking: Pick<Booking, "status">): boolean {
+  const { status } = booking;
+  return status === "pending" || status === "late";
+}
+
+/** Manager may release table and move booking back to the assignment queue (Chờ xếp bàn). */
+export function canQueueBooking(
+  booking: Pick<Booking, "status" | "tableId" | "mergeGroupId">
+): boolean {
+  if (!booking.tableId && !booking.mergeGroupId) {
+    return false;
+  }
   return (
-    booking.status !== "cancelled" &&
-    booking.status !== "completed" &&
-    booking.status !== "no_show"
+    booking.status === "confirmed" ||
+    booking.status === "seated" ||
+    booking.status === "checked_in"
   );
+}
+
+export function minutesLateForBooking(
+  booking: Pick<Booking, "startTime" | "bookingAt" | "lateMarkedAt">
+): number {
+  const slotStart = getBookingSlotStart(booking);
+  const reference = booking.lateMarkedAt ? dayjs(booking.lateMarkedAt) : dayjs();
+  return Math.max(0, reference.diff(slotStart, "minute"));
 }
 
 /** True when the table has any non-terminal booking on the floor-map selected day. */
@@ -429,7 +483,8 @@ export function pickPrimaryBookingOnTable(
       b.tableId === tableId &&
       b.status !== "cancelled" &&
       b.status !== "completed" &&
-      b.status !== "no_show"
+      b.status !== "no_show" &&
+      b.status !== "late"
   );
   if (onTable.length === 0) {
     return null;
@@ -614,6 +669,8 @@ export function bookingStatusAdvancementRank(status: BookingStatus): number {
     case "cancelled":
     case "no_show":
       return 90;
+    case "late":
+      return 40;
     case "seated":
     case "checked_in":
       return 70;
@@ -660,7 +717,8 @@ export function deriveTableStatusFromDayBookings(
       booking.tableId === table.id &&
       booking.status !== "cancelled" &&
       booking.status !== "completed" &&
-      booking.status !== "no_show"
+      booking.status !== "no_show" &&
+      booking.status !== "late"
   );
   if (onTable.length === 0) {
     // Do not use global `tables.status` (hold/occupied) — it reflects live ops, not the selected day.

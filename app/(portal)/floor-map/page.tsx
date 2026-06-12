@@ -58,6 +58,7 @@ import {
   type BookingCreatedNextStepPayload,
 } from "@/components/booking-management/booking-created-next-step-modal";
 import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
+import { BookingLateListPanel } from "@/components/booking-management/booking-late-list-panel";
 import { useBookingManagement } from "@/components/booking-management/use-booking-management";
 import { MergeGroupsPanel } from "@/components/merge-groups/merge-groups-panel";
 import { SplitClonesPanel } from "@/components/split-clones/split-clones-panel";
@@ -522,6 +523,7 @@ export default function FloorMapPage() {
     releaseTableMergeGroup,
     updateTableMergeGroupDates,
     deleteTable,
+    updateBookingRuntimeSettings,
   } = useAppContext();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -614,6 +616,7 @@ export default function FloorMapPage() {
   const [dayListDetailBooking, setDayListDetailBooking] = useState<Booking | null>(null);
   const {
     bookingManagementModals,
+    busyBookingId,
     isBookingRowBusy,
     openEditBookingModal,
     openAssignOptions,
@@ -621,11 +624,13 @@ export default function FloorMapPage() {
     runCheckIn,
     openCompleteBookingConfirm,
     openCancelBookingConfirm,
+    openQueueBookingConfirm,
   } = useBookingManagement();
   const { isBusy: isTableStatusBusy, run: runTableStatusAction } = useBusyId();
   const [mergeModalOpen, setMergeModalOpen] = useState(false);
   const [mergeGroupsListModalOpen, setMergeGroupsListModalOpen] = useState(false);
   const [splitClonesListModalOpen, setSplitClonesListModalOpen] = useState(false);
+  const [lateListModalOpen, setLateListModalOpen] = useState(false);
   const [mergeGroupReleaseBusyId, setMergeGroupReleaseBusyId] = useState<string | null>(null);
   const [splitCloneBusyId, setSplitCloneBusyId] = useState<string | null>(null);
   const [splitCloneDeleteTarget, setSplitCloneDeleteTarget] = useState<string | null>(null);
@@ -1285,6 +1290,13 @@ export default function FloorMapPage() {
       floorMapDayBookings
         .filter((b) => b.status === "pending")
         .sort((a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf()),
+    [floorMapDayBookings]
+  );
+  const lateBookings = useMemo(
+    () =>
+      floorMapDayBookings
+        .filter((b) => b.status === "late")
+        .sort((a, b) => dayjs(a.startTime ?? a.bookingAt).valueOf() - dayjs(b.startTime ?? b.bookingAt).valueOf()),
     [floorMapDayBookings]
   );
   const seatedTableIdsOnFloorDay = useMemo(() => {
@@ -3570,7 +3582,7 @@ export default function FloorMapPage() {
     return floorMapDayBookings.filter(
       (booking) =>
         booking.tableId === splitCloneDeleteTarget &&
-        !["completed", "cancelled", "no_show"].includes(booking.status)
+        !["completed", "cancelled", "no_show", "late"].includes(booking.status)
     ).length;
   }, [floorMapDayBookings, splitCloneDeleteTarget]);
 
@@ -4463,6 +4475,7 @@ export default function FloorMapPage() {
             activeAreaBranchId={activeAreaBranchId}
             onCreateBooking={() => setCreateBookingModalOpened(true)}
             onOpenDayList={() => dayListModalRef.current?.openDayListModal()}
+            onOpenLateList={() => setLateListModalOpen(true)}
             onOpenMergeGroups={() => setMergeGroupsListModalOpen(true)}
             onOpenSplitClones={() => setSplitClonesListModalOpen(true)}
           />
@@ -5735,6 +5748,12 @@ export default function FloorMapPage() {
         onComplete={() => void handleDetailComplete()}
         onChangeTable={openChangeTableForActiveBooking}
         onCancelBooking={openDetailCancelBookingConfirm}
+        onQueueBooking={() => {
+          const b = activeBookingForDetail;
+          if (b) {
+            openQueueBookingConfirm(b);
+          }
+        }}
         onOpenMergeGroupManage={
           detailMergeGroup
             ? () => setOpenedMergeGroupId(detailMergeGroup.id)
@@ -5797,6 +5816,35 @@ export default function FloorMapPage() {
           }}
         />
       </Modal>
+
+      <PortalStandardModal
+        opened={lateListModalOpen}
+        onClose={() => setLateListModalOpen(false)}
+        title="Danh sách trễ"
+        size="xl"
+      >
+        <BookingLateListPanel
+          embedded
+          bookings={lateBookings}
+          customers={state.customers}
+          areas={state.areas}
+          tables={state.tables}
+          mergeGroups={state.mergeGroups}
+          busyBookingId={busyBookingId}
+          lateGraceMinutes={state.bookingRuntimeSettings.lateGraceMinutes}
+          canEditLateConfig={
+            currentUser?.role === "admin" || currentUser?.role === "general_manager"
+          }
+          onSaveLateGraceMinutes={async (minutes) => {
+            const payload = {
+              ...state.bookingRuntimeSettings,
+              lateGraceMinutes: minutes,
+            };
+            return updateBookingRuntimeSettings(payload);
+          }}
+          onRowClick={(booking) => setDayListDetailBooking(booking)}
+        />
+      </PortalStandardModal>
 
       <Modal
         opened={splitClonesListModalOpen}
@@ -6219,6 +6267,10 @@ export default function FloorMapPage() {
           setDayListDetailBooking(null);
           openCancelBookingConfirm(b);
         }}
+        onQueue={(b) => {
+          setDayListDetailBooking(null);
+          openQueueBookingConfirm(b);
+        }}
       />
       {bookingManagementModals}
     </Stack>
@@ -6278,7 +6330,7 @@ function MergeGroupDetailModal({
       .filter(
         (booking) =>
           booking.mergeGroupId === group.id &&
-          !["completed", "cancelled", "no_show"].includes(booking.status)
+          !["completed", "cancelled", "no_show", "late"].includes(booking.status)
       )
       .sort((a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf());
   }, [bookings, group]);

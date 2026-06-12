@@ -12,7 +12,11 @@ export const MANUAL_ASSIGN_SELECT_COMBOBOX_Z_INDEX = PORTAL_MODAL_POPOVER_Z_INDE
 export const portalModalOverlayPopoverProps = portaledComboboxProps.comboboxProps;
 
 export function canEditBookingOrder(booking: Pick<Booking, "status">): boolean {
-  return booking.status === "pending" || booking.status === "confirmed";
+  return (
+    booking.status === "pending" ||
+    booking.status === "confirmed" ||
+    booking.status === "late"
+  );
 }
 
 /** Active reservation on a single table — eligible for Đổi bàn (not merge groups). */

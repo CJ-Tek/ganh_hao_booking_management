@@ -529,7 +529,7 @@ function TablesPageContent() {
     return state.bookings.filter(
       (booking) =>
         booking.tableId === splitCloneDeleteTarget &&
-        !["completed", "cancelled", "no_show"].includes(booking.status)
+        !["completed", "cancelled", "no_show", "late"].includes(booking.status)
     ).length;
   }, [splitCloneDeleteTarget, state.bookings]);
 

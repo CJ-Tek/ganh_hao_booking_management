@@ -22,6 +22,7 @@ export const bookingStatusLabel: Record<BookingStatus, string> = {
   no_show: "Không đến",
   checked_in: "Đã check-in",
   completed: "Hoàn thành",
+  late: "Trễ",
 };
 
 export const bookingStatusColor: Record<BookingStatus, string> = {
@@ -32,6 +33,7 @@ export const bookingStatusColor: Record<BookingStatus, string> = {
   no_show: "gray",
   checked_in: "green",
   completed: "teal",
+  late: "orange",
 };
 
 /** Default selected status chip on booking list / calendar / day-list filters. */
@@ -67,7 +69,12 @@ export function normalizeBookingStatusFilters(
 }
 
 /** Statuses applied while the booking list search box has a query. */
-export const bookingSearchStatusFilters: BookingStatus[] = ["pending", "confirmed", "seated"];
+export const bookingSearchStatusFilters: BookingStatus[] = [
+  "pending",
+  "confirmed",
+  "seated",
+  "late",
+];
 
 /** Confirmed schedule table on floor map (subset of pipeline). */
 export const bookingScheduleStatusFilterStatuses = ["confirmed", "seated"] as const satisfies readonly BookingStatus[];
@@ -95,6 +102,7 @@ export const bookingPipelineStatusFilterStatuses = [
   "pending",
   "confirmed",
   "seated",
+  "late",
   "no_show",
   "cancelled",
 ] as const satisfies readonly BookingStatus[];

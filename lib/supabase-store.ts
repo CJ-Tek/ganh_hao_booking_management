@@ -151,6 +151,10 @@ export async function checkInBookingInSupabase(bookingId: string): Promise<void>
   await callStore("checkInBooking", bookingId);
 }
 
+export async function queueBookingInSupabase(bookingId: string): Promise<Result> {
+  return callStore("queueBooking", { bookingId });
+}
+
 export async function getTableBlockStateInSupabase(
   input: Parameters<typeof import("./supabase-store-server").getTableBlockStateInSupabase>[0]
 ): Promise<TableBlockState> {

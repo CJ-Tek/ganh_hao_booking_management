@@ -3,13 +3,14 @@
 import { Button, Group } from "@mantine/core";
 import { BookingCheckInButton } from "@/components/booking-management/booking-check-in-button";
 import { canChangeBookingTable, canEditBookingOrder } from "@/components/booking-management/shared";
+import { canAssignBookingFromQueue, canQueueBooking } from "@/lib/booking-meta";
 import { type Booking } from "@/lib/types";
 
 export function BookingRowActions(props: {
   booking: Booking;
   busy?: boolean;
   size?: "compact-xs" | "sm";
-  /** Drawer sheet: grid actions; Check-in/Hủy (or Hoàn thành) share one row. */
+  /** Drawer sheet: grid actions; Check-in/Chờ/Hủy (or Hoàn thành) share structured rows. */
   layout?: "inline" | "drawer";
   /** When false, hides the edit control (e.g. Booking hôm nay — edit lives in Danh sách booking). */
   showEdit?: boolean;
@@ -19,6 +20,7 @@ export function BookingRowActions(props: {
   onCheckIn: (bookingId: string) => void;
   onComplete: (booking: Booking) => void;
   onCancel: (booking: Booking) => void;
+  onQueue?: (booking: Booking) => void;
 }) {
   const {
     booking,
@@ -32,6 +34,7 @@ export function BookingRowActions(props: {
     onCheckIn,
     onComplete,
     onCancel,
+    onQueue,
   } = props;
 
   if (
@@ -41,6 +44,9 @@ export function BookingRowActions(props: {
   ) {
     return null;
   }
+
+  const showCancel =
+    booking.status !== "checked_in" && booking.status !== "seated";
 
   const editAction =
     showEdit && canEditBookingOrder(booking) ? (
@@ -62,16 +68,28 @@ export function BookingRowActions(props: {
       </Button>
     ) : null;
 
-  const assignAction =
-    booking.status === "pending" ? (
+  const assignAction = canAssignBookingFromQueue(booking) ? (
+    <Button
+      size={size}
+      variant="filled"
+      color="blue"
+      disabled={busy}
+      onClick={() => onAssign(booking)}
+    >
+      Gán vào bàn
+    </Button>
+  ) : null;
+
+  const queueAction =
+    canQueueBooking(booking) && onQueue ? (
       <Button
         size={size}
-        variant="filled"
-        color="blue"
+        variant="light"
+        color="yellow"
         disabled={busy}
-        onClick={() => onAssign(booking)}
+        onClick={() => onQueue(booking)}
       >
-        Gán vào bàn
+        Chờ
       </Button>
     ) : null;
 
@@ -81,7 +99,7 @@ export function BookingRowActions(props: {
       disabled={booking.status !== "confirmed"}
       loading={busy}
       onCheckIn={() => onCheckIn(booking.id)}
-      fullWidth={layout === "drawer"}
+      fullWidth={layout === "drawer" && !showCancel && !queueAction}
     />
   );
 
@@ -99,40 +117,66 @@ export function BookingRowActions(props: {
       </Button>
     ) : null;
 
-  const cancelAction =
-    booking.status === "checked_in" || booking.status === "seated" ? null : (
-      <Button
-        size={size}
-        variant={layout === "drawer" ? "filled" : "default"}
-        color="red"
-        disabled={busy}
-        fullWidth={layout === "drawer"}
-        onClick={() => onCancel(booking)}
-      >
-        Hủy
-      </Button>
-    );
+  const cancelAction = showCancel ? (
+    <Button
+      size={size}
+      variant={layout === "drawer" ? "filled" : "default"}
+      color="red"
+      disabled={busy}
+      onClick={() => onCancel(booking)}
+    >
+      Hủy
+    </Button>
+  ) : null;
 
   const utilityActions = (
     <>
       {editAction}
       {changeTableAction}
       {assignAction}
+      {layout === "drawer" && completeAction ? queueAction : null}
     </>
   );
 
+  const hasUtilityButtons =
+    (showEdit && canEditBookingOrder(booking)) ||
+    (canChangeBookingTable(booking) && !!onChangeTable) ||
+    canAssignBookingFromQueue(booking) ||
+    (layout === "drawer" && !!completeAction && !!queueAction);
+
   if (layout === "drawer") {
+    const utilityButtons = (
+      <>
+        {editAction}
+        {changeTableAction}
+        {assignAction}
+        {completeAction ? queueAction : null}
+      </>
+    );
+
+    if (completeAction) {
+      return (
+        <div className="booking-row-actions-drawer">
+          {hasUtilityButtons ? (
+            <div className="booking-row-actions-drawer-utilities">{utilityButtons}</div>
+          ) : null}
+          <div className="booking-row-actions-drawer-span">{completeAction}</div>
+        </div>
+      );
+    }
+
     return (
       <div className="booking-row-actions-drawer">
-        {utilityActions}
-        {completeAction ? (
-          <div className="booking-row-actions-drawer-span">{completeAction}</div>
-        ) : (
-          <>
-            {checkInAction}
-            {cancelAction}
-          </>
-        )}
+        {hasUtilityButtons ? (
+          <div className="booking-row-actions-drawer-utilities">{utilityButtons}</div>
+        ) : null}
+        <div className="booking-row-actions-drawer-primary">
+          {checkInAction}
+          {queueAction}
+        </div>
+        {showCancel ? (
+          <div className="booking-row-actions-drawer-span">{cancelAction}</div>
+        ) : null}
       </div>
     );
   }
@@ -141,6 +185,7 @@ export function BookingRowActions(props: {
     <Group gap={6} wrap="wrap">
       {utilityActions}
       {checkInAction}
+      {queueAction}
       {completeAction ?? cancelAction}
     </Group>
   );

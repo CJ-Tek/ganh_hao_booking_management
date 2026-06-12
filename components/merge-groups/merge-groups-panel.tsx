@@ -83,7 +83,7 @@ export function MergeGroupsPanel({
     for (const booking of bookings) {
       if (
         booking.mergeGroupId &&
-        !["completed", "cancelled", "no_show"].includes(booking.status)
+        !["completed", "cancelled", "no_show", "late"].includes(booking.status)
       ) {
         map.set(booking.mergeGroupId, (map.get(booking.mergeGroupId) ?? 0) + 1);
       }

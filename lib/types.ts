@@ -8,7 +8,8 @@ export type BookingStatus =
   | "cancelled"
   | "no_show"
   | "checked_in"
-  | "completed";
+  | "completed"
+  | "late";
 
 export interface AppUser {
   id: string;
@@ -78,6 +79,8 @@ export interface Booking {
   /** Set when status becomes checked_in (explicit check-in or walk-in assign). */
   checkedInAt?: string | null;
   noShowMarkedAt?: string | null;
+  /** Set when booking is auto/manual marked Trễ. */
+  lateMarkedAt?: string | null;
   note?: string;
   /** When the booking order was first created (distinct from guest arrival time). */
   createdAt?: string;
@@ -97,6 +100,8 @@ export interface BookingRuntimeSettings {
   repeatCustomerMinCompleted: number;
   /** Cửa sổ phút quanh giờ đến cho trạng thái Chờ đến. */
   receptionArrivalGraceMinutes: number;
+  /** Phút sau giờ đến (confirmed, chưa check-in) trước khi chuyển sang Trễ. */
+  lateGraceMinutes: number;
 }
 
 export interface TableBlockState {

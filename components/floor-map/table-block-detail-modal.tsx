@@ -19,6 +19,7 @@ import { PortalStandardModal } from "@/components/portal-standard-modal/portal-s
 import { useAppContext } from "@/contexts/app-context";
 import { tableStatusLabel } from "@/lib/display";
 import {
+  canQueueBooking,
   getReceptionBookingStatus,
   inferGuestTypeLabel,
   stripUnknownGuestTag,
@@ -63,6 +64,7 @@ export type TableBlockDetailModalProps = {
   onComplete: () => void;
   onChangeTable: () => void;
   onCancelBooking: () => void;
+  onQueueBooking?: () => void;
   /** Opens merge-group member management (view mode; non-employees only). */
   onOpenMergeGroupManage?: () => void;
 };
@@ -87,6 +89,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     onComplete,
     onChangeTable,
     onCancelBooking,
+    onQueueBooking,
     onOpenMergeGroupManage,
   } = props;
 
@@ -336,6 +339,17 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                               onClick={onChangeTable}
                             >
                               Đổi bàn
+                            </Button>
+                          ) : null}
+                          {canQueueBooking(activeBooking) && onQueueBooking ? (
+                            <Button
+                              size="sm"
+                              variant="light"
+                              color="yellow"
+                              loading={bookingActionLoading}
+                              onClick={onQueueBooking}
+                            >
+                              Chờ
                             </Button>
                           ) : null}
                           {!isOccupied ? (
