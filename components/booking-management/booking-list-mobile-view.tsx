@@ -7,18 +7,20 @@ import { type BookingStatus } from "@/lib/types";
 
 export function BookingListMobileView(props: {
   title: string;
-  statusFilter: BookingStatus | null;
-  onStatusFilterChange: (value: BookingStatus | null) => void;
+  statusFilters: readonly BookingStatus[];
+  onStatusFiltersChange: (value: BookingStatus[]) => void;
   statusFilterStatuses: readonly BookingStatus[];
+  statusFiltersLocked?: boolean;
   filtersToolbar: ReactNode;
   paginationBar: ReactNode | null;
   bookingsContent: ReactNode;
 }) {
   const {
     title,
-    statusFilter,
-    onStatusFilterChange,
+    statusFilters,
+    onStatusFiltersChange,
     statusFilterStatuses,
+    statusFiltersLocked,
     filtersToolbar,
     paginationBar,
     bookingsContent,
@@ -29,9 +31,10 @@ export function BookingListMobileView(props: {
       title={title}
       headerFilters={
         <BookingStatusFilterChips
-          value={statusFilter}
-          onChange={onStatusFilterChange}
+          value={statusFilters}
+          onChange={onStatusFiltersChange}
           statuses={statusFilterStatuses}
+          locked={statusFiltersLocked}
           size="xs"
         />
       }

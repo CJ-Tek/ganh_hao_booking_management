@@ -14,10 +14,12 @@ import {
   resolveBookingArrivalTime,
   resolveBookingCreatedAt,
 } from "@/lib/booking-meta";
-import { bookingStatusLabel, defaultBookingStatusFilter } from "@/lib/display";
+import {
+  bookingMatchesStatusFilters,
+  bookingStatusLabel,
+  defaultBookingStatusFilters,
+} from "@/lib/display";
 import { type Booking, type BookingStatus } from "@/lib/types";
-
-type DayTableStatusFilter = BookingStatus | null;
 
 export type BookingDayListModalHandle = {
   openDayListModal: () => void;
@@ -40,8 +42,10 @@ export const BookingDayListModal = forwardRef<
   const router = useRouter();
   const { state, filteredBranchIds } = useAppContext();
   const [opened, setOpened] = useState(false);
-  const [dayTableStatusFilter, setDayTableStatusFilter] =
-    useState<DayTableStatusFilter>(defaultBookingStatusFilter);
+  const [dayTableStatusFilters, setDayTableStatusFilters] = useState<BookingStatus[]>(
+    defaultBookingStatusFilters
+  );
+  const [dayTableSearchQuery, setDayTableSearchQuery] = useState("");
   const [focusBookingId, setFocusBookingId] = useState<string | null>(null);
 
   const filteredBookings = useMemo(
@@ -55,8 +59,8 @@ export const BookingDayListModal = forwardRef<
         .filter((booking) =>
           dayjs(resolveBookingArrivalTime(booking)).isSame(selectedDate, "day")
         )
-        .filter((booking) => !dayTableStatusFilter || booking.status === dayTableStatusFilter),
-    [dayTableStatusFilter, filteredBookings, selectedDate]
+        .filter((booking) => bookingMatchesStatusFilters(booking.status, dayTableStatusFilters)),
+    [dayTableStatusFilters, filteredBookings, selectedDate]
   );
 
   const bookingAreaTableLookup = useMemo(
@@ -98,7 +102,8 @@ export const BookingDayListModal = forwardRef<
 
   const openDayListModal = useCallback(() => {
     setFocusBookingId(null);
-    setDayTableStatusFilter(defaultBookingStatusFilter);
+    setDayTableStatusFilters(defaultBookingStatusFilters);
+    setDayTableSearchQuery("");
     setOpened(true);
   }, []);
 
@@ -117,7 +122,8 @@ export const BookingDayListModal = forwardRef<
     (booking: Booking) => {
       const date = dayjs(booking.bookingAt);
       onSelectedDateChange?.(date);
-      setDayTableStatusFilter(booking.status);
+      setDayTableStatusFilters([booking.status]);
+      setDayTableSearchQuery("");
       setFocusBookingId(booking.id);
       setOpened(true);
     },
@@ -139,6 +145,7 @@ export const BookingDayListModal = forwardRef<
       onClose={() => {
         setOpened(false);
         setFocusBookingId(null);
+        setDayTableSearchQuery("");
       }}
       title={
         <Group gap="xs" wrap="wrap">
@@ -183,8 +190,10 @@ export const BookingDayListModal = forwardRef<
         showTitle={false}
         wrapInSectionCard={false}
         records={selectedDayBookings}
-        statusFilter={dayTableStatusFilter}
-        onStatusFilterChange={setDayTableStatusFilter}
+        statusFilters={dayTableStatusFilters}
+        onStatusFiltersChange={setDayTableStatusFilters}
+        searchQuery={dayTableSearchQuery}
+        onSearchQueryChange={setDayTableSearchQuery}
         getRecordSearchValue={getDayBookingSearchValue}
         onRowClick={handleDayBookingRowClick}
         focusBookingId={focusBookingId}

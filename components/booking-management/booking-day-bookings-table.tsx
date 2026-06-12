@@ -26,7 +26,8 @@ import {
   sortBookingsForDataTable,
 } from "@/lib/booking-list-sort";
 import { type Booking, type BookingStatus } from "@/lib/types";
-import { useCallback, useMemo } from "react";
+import { useBookingStatusFiltersWithSearch } from "@/lib/use-booking-status-filters-with-search";
+import { useCallback, useMemo, useState } from "react";
 
 const DAY_LIST_BOOKING_PULSE_CYCLE_MS = 600;
 const DAY_LIST_BOOKING_PULSE_CYCLES = 2;
@@ -36,23 +37,35 @@ export function BookingDayBookingsTable(props: {
   showTitle?: boolean;
   wrapInSectionCard?: boolean;
   records: Booking[];
-  statusFilter: BookingStatus | null;
-  onStatusFilterChange: (value: BookingStatus | null) => void;
+  statusFilters: readonly BookingStatus[];
+  onStatusFiltersChange: (value: BookingStatus[]) => void;
   getRecordSearchValue: (booking: Booking) => string;
   onRowClick: (booking: Booking) => void;
   focusBookingId?: string | null;
+  searchQuery?: string;
+  onSearchQueryChange?: (query: string) => void;
 }) {
   const {
     title,
     showTitle = true,
     wrapInSectionCard = true,
     records,
-    statusFilter,
-    onStatusFilterChange,
+    statusFilters,
+    onStatusFiltersChange,
     getRecordSearchValue,
     onRowClick,
     focusBookingId = null,
+    searchQuery: controlledSearchQuery,
+    onSearchQueryChange,
   } = props;
+  const [internalSearchQuery, setInternalSearchQuery] = useState("");
+  const searchQuery = controlledSearchQuery ?? internalSearchQuery;
+  const setSearchQuery = onSearchQueryChange ?? setInternalSearchQuery;
+  const isSearchActive = useBookingStatusFiltersWithSearch(
+    searchQuery,
+    statusFilters,
+    onStatusFiltersChange
+  );
   const { state } = useAppContext();
   const { sortStatus, setSortStatus, defaultSort, timeSortFilters } = useBookingListTimeSort(
     bookingListDefaultCreatedSort
@@ -76,17 +89,20 @@ export function BookingDayBookingsTable(props: {
     [bookingAreaTableLookup, state.customers]
   );
 
-  const statusFilters = (
+  const statusFilterChips = (
     <BookingStatusFilterChips
-      value={statusFilter}
-      onChange={onStatusFilterChange}
+      value={statusFilters}
+      onChange={onStatusFiltersChange}
       statuses={bookingCalendarStatusFilterStatuses}
+      locked={isSearchActive}
     />
   );
 
   const table = (
     <PortalDataTable<Booking>
       records={records}
+      searchQuery={searchQuery}
+      onSearchQueryChange={setSearchQuery}
       getRecordSearchValue={getRecordSearchValue}
       sortRecords={sortRecords}
       sortStatus={sortStatus}
@@ -220,7 +236,7 @@ export function BookingDayBookingsTable(props: {
   if (!wrapInSectionCard) {
     return (
       <Stack gap="sm">
-        {statusFilters}
+        {statusFilterChips}
         {table}
       </Stack>
     );
@@ -230,7 +246,7 @@ export function BookingDayBookingsTable(props: {
     <PortalListSectionDesktop
       title={title ?? "Danh sách booking"}
       showTitle={showTitle}
-      headerFilters={statusFilters}
+      headerFilters={statusFilterChips}
     >
       {table}
     </PortalListSectionDesktop>

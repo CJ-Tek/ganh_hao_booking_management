@@ -6,22 +6,25 @@ import { type BookingStatus } from "@/lib/types";
 
 export function BookingListPanelHeader(props: {
   title: string;
-  statusFilter: BookingStatus | null;
-  onStatusFilterChange: (value: BookingStatus | null) => void;
+  statusFilters: readonly BookingStatus[];
+  onStatusFiltersChange: (value: BookingStatus[]) => void;
   statuses: readonly BookingStatus[];
   chipSize?: "xs" | "compact-sm" | "sm";
+  statusFiltersLocked?: boolean;
 }) {
-  const { title, statusFilter, onStatusFilterChange, statuses, chipSize } = props;
+  const { title, statusFilters, onStatusFiltersChange, statuses, chipSize, statusFiltersLocked } =
+    props;
 
   return (
     <PortalListPanelHeader
       title={title}
       filters={
         <BookingStatusFilterChips
-          value={statusFilter}
-          onChange={onStatusFilterChange}
+          value={statusFilters}
+          onChange={onStatusFiltersChange}
           statuses={statuses}
           size={chipSize}
+          locked={statusFiltersLocked}
         />
       }
     />

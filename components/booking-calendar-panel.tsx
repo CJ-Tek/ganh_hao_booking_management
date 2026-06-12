@@ -42,14 +42,16 @@ import { PortalPageTitle, PortalSectionCard, PortalStickyHeader } from "@/compon
 
 import { useAppContext } from "@/contexts/app-context";
 
+import {
+  bookingMatchesStatusFilters,
+  defaultBookingStatusFilters,
+} from "@/lib/display";
 import { type Booking, type BookingStatus } from "@/lib/types";
 
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 
-
-type CalendarStatusFilter = "all" | BookingStatus;
 
 type BookingCalendarInteraction = "modal-on-day-click" | "select-day-only";
 
@@ -116,7 +118,7 @@ export const BookingCalendarPanel = forwardRef<
 
   const dayListModalRef = useRef<BookingDayListModalHandle | null>(null);
 
-  const [statusFilter, setStatusFilter] = useState<CalendarStatusFilter>("pending");
+  const [statusFilters, setStatusFilters] = useState<BookingStatus[]>(defaultBookingStatusFilters);
   const [createBookingModalOpened, setCreateBookingModalOpened] = useState(false);
   const [dayListDetailBooking, setDayListDetailBooking] = useState<Booking | null>(null);
   const {
@@ -171,11 +173,11 @@ export const BookingCalendarPanel = forwardRef<
 
         .filter((booking) => filteredBranchIds.includes(booking.branchId))
 
-        .filter((booking) => statusFilter === "all" || booking.status === statusFilter)
+        .filter((booking) => bookingMatchesStatusFilters(booking.status, statusFilters))
 
         .sort((a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf()),
 
-    [filteredBranchIds, state.bookings, statusFilter]
+    [filteredBranchIds, state.bookings, statusFilters]
 
   );
 
@@ -363,8 +365,8 @@ export const BookingCalendarPanel = forwardRef<
     <Stack gap="sm">
 
       <BookingStatusFilterChips
-        value={statusFilter === "all" ? null : statusFilter}
-        onChange={(value) => setStatusFilter(value ?? "all")}
+        value={statusFilters}
+        onChange={setStatusFilters}
         size={isCompact || isNarrowCalendar ? "xs" : "compact-sm"}
       />
 
