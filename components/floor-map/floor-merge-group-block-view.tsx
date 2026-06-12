@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge, Group, Stack, Text } from "@mantine/core";
+import { Badge, Stack, Text } from "@mantine/core";
 import dayjs from "dayjs";
 import { memo, type CSSProperties } from "react";
 import { bookingRowBusyStyle } from "@/lib/busy-row-style";
@@ -28,10 +28,7 @@ function MergeBlockGuestBadge(props: { booking: Booking | null }) {
   );
 }
 
-function MergeBlockBookingPeek(props: {
-  displayBooking: Booking | null;
-  customerName: string;
-}) {
+function MergeBlockBookingPeek(props: { displayBooking: Booking | null }) {
   const displayBooking = props.displayBooking;
   if (!displayBooking) {
     return null;
@@ -39,21 +36,18 @@ function MergeBlockBookingPeek(props: {
   const start = displayBooking.startTime ?? displayBooking.bookingAt;
   const end = displayBooking.endTime;
   return (
-    <Stack gap={2} mt={4} style={{ pointerEvents: "none" }}>
-      <Text size="xs" fw={600} lineClamp={2} lh={1.25}>
-        {props.customerName || "—"}
-      </Text>
-      <Text size="xs" c="dimmed" lineClamp={1}>
+    <Stack gap={1} className={classes.tableBlockBookingTimes} style={{ pointerEvents: "none" }}>
+      <Text className={classes.tableBlockBookingTime} lineClamp={1}>
         Bắt đầu {dayjs(start).format("HH:mm · DD/MM")}
       </Text>
       {end ? (
-        <Text size="xs" c="dimmed" lineClamp={1}>
+        <Text className={classes.tableBlockBookingTime} lineClamp={1}>
           Kết thúc {dayjs(end).format("HH:mm · DD/MM")}
         </Text>
       ) : null}
       {(displayBooking.status === "checked_in" || displayBooking.status === "seated") &&
       displayBooking.checkedInAt ? (
-        <Text size="xs" c="dimmed" lineClamp={1}>
+        <Text className={classes.tableBlockBookingTime} lineClamp={1}>
           Check-in {dayjs(displayBooking.checkedInAt).format("HH:mm · DD/MM")}
         </Text>
       ) : null}
@@ -102,19 +96,28 @@ function FloorMergeGroupBlockViewInner(props: FloorMergeGroupBlockViewProps) {
           onOpen();
         }}
       >
-        <Group gap={6} wrap="nowrap" align="center" justify="space-between">
-          <Text fw={600} size="sm" lineClamp={1} style={{ minWidth: 0, flex: 1 }}>
-            {group.mergedName}
-          </Text>
-        </Group>
-        <Text size="xs">{group.tableIds.length} bàn</Text>
-        <Group gap={6} wrap="nowrap" align="center" justify="space-between" w="100%">
-          <Badge color={tableStatusColor[status]} variant="light" size="xs">
-            {tableStatusLabel[status]}
-          </Badge>
-          <MergeBlockGuestBadge booking={displayBooking} />
-        </Group>
-        <MergeBlockBookingPeek displayBooking={displayBooking} customerName={customerName} />
+        <div className={classes.tableBlockOccupiedBody}>
+          <Stack gap={2} className={classes.tableBlockOccupiedContent}>
+            {customerName || displayBooking ? (
+              <Text className={classes.tableBlockCustomerName} lineClamp={2}>
+                {customerName || "—"}
+              </Text>
+            ) : null}
+            <Text className={classes.tableBlockTableName} lineClamp={1}>
+              {group.mergedName}
+            </Text>
+            <Text className={classes.tableBlockBookingTime} lineClamp={1}>
+              {group.tableIds.length} bàn
+            </Text>
+            <MergeBlockBookingPeek displayBooking={displayBooking} />
+          </Stack>
+          <div className={classes.tableBlockOccupiedFooter}>
+            <Badge color={tableStatusColor[status]} variant="light" size="xs">
+              {tableStatusLabel[status]}
+            </Badge>
+            <MergeBlockGuestBadge booking={displayBooking} />
+          </div>
+        </div>
       </button>
     </div>
   );

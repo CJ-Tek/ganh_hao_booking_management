@@ -55,25 +55,19 @@ function TableBlockSplitCloneAvailability(props: {
   );
 }
 
-function TableBlockBookingPeek(props: {
-  displayBooking: Booking | null;
-  customerName: string;
-}) {
+function TableBlockBookingPeek(props: { displayBooking: Booking | null }) {
   const displayBooking = props.displayBooking;
   if (!displayBooking) {
     return null;
   }
   return (
-    <Stack gap={2} mt={4} style={{ pointerEvents: "none" }}>
-      <Text size="xs" fw={600} lineClamp={2} lh={1.25}>
-        {props.customerName || "—"}
-      </Text>
-      <Text size="xs" c="dimmed" lineClamp={1}>
+    <Stack gap={1} className={classes.tableBlockBookingTimes} style={{ pointerEvents: "none" }}>
+      <Text className={classes.tableBlockBookingTime} lineClamp={1}>
         Đặt {dayjs(displayBooking.bookingAt).format("HH:mm · DD/MM")}
       </Text>
       {(displayBooking.status === "checked_in" || displayBooking.status === "seated") &&
       displayBooking.checkedInAt ? (
-        <Text size="xs" c="dimmed" lineClamp={1}>
+        <Text className={classes.tableBlockBookingTime} lineClamp={1}>
           Check-in {dayjs(displayBooking.checkedInAt).format("HH:mm · DD/MM")}
         </Text>
       ) : null}
@@ -215,7 +209,16 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
       </Menu>
     ) : null;
 
-  const statusBadgeRow = (
+  const statusFooter = (
+    <div className={classes.tableBlockOccupiedFooter}>
+      <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
+        {tableStatusLabel[table.status]}
+      </Badge>
+      <TableBlockGuestBadge booking={guestBadgeBooking} />
+    </div>
+  );
+
+  const availableStatusRow = (
     <Group gap={6} wrap="nowrap" align="center" justify="space-between" w="100%">
       <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
         {tableStatusLabel[table.status]}
@@ -223,6 +226,8 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
       <TableBlockGuestBadge booking={guestBadgeBooking} />
     </Group>
   );
+
+  const showCustomerName = Boolean(customerName || displayBooking);
 
   return (
     <div
@@ -279,32 +284,31 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
               >
                 {table.name}
               </Text>
-              {statusBadgeRow}
+              {availableStatusRow}
             </Stack>
           </>
         ) : (
-          <>
-            <Group gap={6} wrap="nowrap" align="center" justify="space-between">
-              <Text fw={600} size="sm" lineClamp={1} style={{ minWidth: 0, flex: 1 }}>
+          <div className={classes.tableBlockOccupiedBody}>
+            <div className={classes.tableBlockOccupiedMenu} data-table-status-menu="">
+              {statusMenu}
+            </div>
+            <Stack gap={2} className={classes.tableBlockOccupiedContent}>
+              {showCustomerName ? (
+                <Text className={classes.tableBlockCustomerName} lineClamp={2}>
+                  {customerName || "—"}
+                </Text>
+              ) : null}
+              <Text className={classes.tableBlockTableName} lineClamp={1}>
                 {table.name}
               </Text>
-              <Group
-                gap={4}
-                wrap="nowrap"
-                align="center"
-                className={classes.tableBlockHeaderActions}
-                data-table-status-menu=""
-              >
-                {statusMenu}
-              </Group>
-            </Group>
-            {statusBadgeRow}
-          </>
+              {!hideBookingPeek ? (
+                <TableBlockBookingPeek displayBooking={displayBooking} />
+              ) : null}
+              <TableBlockSplitCloneAvailability table={table} />
+            </Stack>
+            {statusFooter}
+          </div>
         )}
-        {!hideBookingPeek ? (
-          <TableBlockBookingPeek displayBooking={displayBooking} customerName={customerName} />
-        ) : null}
-        <TableBlockSplitCloneAvailability table={table} />
       </div>
     </div>
   );

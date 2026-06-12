@@ -4795,7 +4795,12 @@ export default function FloorMapPage() {
                             <X size={14} />
                           </ActionIcon>
                         ) : null}
-                        <Text fw={600} size="sm" lineClamp={1}>
+                        <Text
+                          fw={700}
+                          lineClamp={2}
+                          className={classes.tableBlockAvailableTitle}
+                          style={{ minWidth: 0 }}
+                        >
                           {table.name}
                         </Text>
                         {isSplitCloneTable(table) &&
