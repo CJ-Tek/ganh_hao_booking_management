@@ -33,13 +33,19 @@ export const bookingStatusColor: Record<BookingStatus, string> = {
   no_show: "gray",
   checked_in: "green",
   completed: "teal",
-  late: "orange",
+  late: "pink",
 };
 
 /** Default selected status chip on booking list / calendar / day-list filters. */
 export const defaultBookingStatusFilter: BookingStatus = "pending";
 
-export const defaultBookingStatusFilters: BookingStatus[] = [defaultBookingStatusFilter];
+/** Default active pipeline statuses shown when opening booking views. */
+export const defaultBookingStatusFilters: BookingStatus[] = [
+  "pending",
+  "confirmed",
+  "seated",
+  "late",
+];
 
 export function bookingMatchesStatusFilters(
   status: BookingStatus,
@@ -69,12 +75,7 @@ export function normalizeBookingStatusFilters(
 }
 
 /** Statuses applied while the booking list search box has a query. */
-export const bookingSearchStatusFilters: BookingStatus[] = [
-  "pending",
-  "confirmed",
-  "seated",
-  "late",
-];
+export const bookingSearchStatusFilters: BookingStatus[] = [...defaultBookingStatusFilters];
 
 /** Confirmed schedule table on floor map (subset of pipeline). */
 export const bookingScheduleStatusFilterStatuses = ["confirmed", "seated"] as const satisfies readonly BookingStatus[];

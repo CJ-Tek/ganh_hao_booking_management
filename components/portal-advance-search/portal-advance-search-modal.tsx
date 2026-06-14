@@ -87,7 +87,7 @@ export function PortalAdvanceSearchModal(props: {
     >
       <Stack gap="md">
         <TextInputWithVoice
-          label="Từ khóa"
+          aria-label="Từ khóa"
           placeholder="Tên khách, bàn, SĐT, giờ đặt, khu vực, trạng thái…"
           value={query}
           onChange={(event) => setQuery(event.currentTarget.value)}

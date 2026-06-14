@@ -10,7 +10,7 @@ export function BookingRowActions(props: {
   booking: Booking;
   busy?: boolean;
   size?: "compact-xs" | "sm";
-  /** Drawer sheet: grid actions; Check-in/Chờ/Hủy (or Hoàn thành) share structured rows. */
+  /** Drawer sheet: grid actions; Check-in/Chờ/Hủy bàn (or Hoàn thành) share structured rows. */
   layout?: "inline" | "drawer";
   /** When false, hides the edit control (e.g. Booking hôm nay — edit lives in Danh sách booking). */
   showEdit?: boolean;
@@ -125,7 +125,7 @@ export function BookingRowActions(props: {
       disabled={busy}
       onClick={() => onCancel(booking)}
     >
-      Hủy
+      Hủy bàn
     </Button>
   ) : null;
 
@@ -165,6 +165,8 @@ export function BookingRowActions(props: {
       );
     }
 
+    const cancelBesideCheckIn = showCancel && !queueAction;
+
     return (
       <div className="booking-row-actions-drawer">
         {hasUtilityButtons ? (
@@ -172,9 +174,9 @@ export function BookingRowActions(props: {
         ) : null}
         <div className="booking-row-actions-drawer-primary">
           {checkInAction}
-          {queueAction}
+          {queueAction ?? (cancelBesideCheckIn ? cancelAction : null)}
         </div>
-        {showCancel ? (
+        {showCancel && queueAction ? (
           <div className="booking-row-actions-drawer-span">{cancelAction}</div>
         ) : null}
       </div>
