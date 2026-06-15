@@ -23,7 +23,7 @@
 
 .canvasFrame {
   position: relative;
-  height: max(360px, calc(100dvh - 210px - var(--manager-dock-reserve, 0px)));
+  height: max(360px, calc(100dvh - 160px - var(--manager-dock-reserve, 0px)));
   min-height: 0;
   border: 1px solid #cbd5e1;
   border-radius: 12px;
@@ -332,6 +332,12 @@
   width: 100%;
 }
 
+.advanceSearchBtn {
+  font-weight: 700;
+  min-height: 44px;
+  box-shadow: 0 1px 4px rgba(12, 97, 164, 0.16);
+}
+
 .pageAreaSelectRow {
   display: flex;
   align-items: center;
@@ -412,6 +418,7 @@
 }
 
 .canvasDateDock,
+.canvasSearchDock,
 .canvasGridToolsDock,
 .canvasSaveLayoutDock {
   pointer-events: auto;
@@ -439,6 +446,42 @@
   white-space: nowrap;
 }
 
+.canvasSearchDock {
+  width: auto;
+  min-width: min(240px, calc(100vw - 120px));
+  max-width: min(420px, calc(100vw - 80px));
+  padding: 8px 10px;
+  max-height: min(420px, calc(100% - 80px));
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.canvasSearchDockFilterChips {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  min-width: 0;
+}
+
+.canvasSearchDockFilterChips::-webkit-scrollbar {
+  display: none;
+}
+
+.canvasSearchDockFilterChips :global(.mantine-Group-root) {
+  flex-wrap: nowrap;
+  width: max-content;
+  min-width: 100%;
+}
+
+.canvasSearchDockTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .canvasGridToolsDock {
   width: auto;
   min-width: min(220px, calc(100vw - 120px));
@@ -456,6 +499,7 @@
 }
 
 :global([data-mantine-color-scheme="dark"]) .canvasDateDock,
+:global([data-mantine-color-scheme="dark"]) .canvasSearchDock,
 :global([data-mantine-color-scheme="dark"]) .canvasGridToolsDock,
 :global([data-mantine-color-scheme="dark"]) .canvasSaveLayoutDock {
   background: rgba(30, 36, 48, 0.92);
@@ -626,7 +670,7 @@
 
 @media (max-width: 62em) {
   .canvasFrame {
-    height: max(320px, calc(100dvh - 190px - var(--manager-dock-reserve, 0px)));
+    height: max(320px, calc(100dvh - 150px - var(--manager-dock-reserve, 0px)));
     min-height: 0;
   }
 
@@ -653,7 +697,7 @@
   }
 
   .canvasFrame {
-    height: max(300px, calc(100dvh - 176px - var(--manager-dock-reserve, 0px)));
+    height: max(300px, calc(100dvh - 136px - var(--manager-dock-reserve, 0px)));
     min-height: 0;
   }
 

@@ -400,7 +400,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                             {activeBooking.status === "checked_in" ||
                             activeBooking.status === "seated"
                               ? "Hoàn thành"
-                              : "Hủy booking"}
+                              : "Hủy bàn"}
                           </Button>
                         </>
                       )}

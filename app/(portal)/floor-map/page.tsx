@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Accordion,
   ActionIcon,
   Alert,
   Badge,
@@ -540,15 +539,25 @@ export default function FloorMapPage() {
   const [mergeGroupDragState, setMergeGroupDragState] = useState<MergeGroupDragState | null>(
     null
   );
-  const [filtersAccordionValue, setFiltersAccordionValue] = useState<string | null>(null);
+  const [isSearchDockOpen, setIsSearchDockOpen] = useState(false);
   const [advanceSearchOpen, setAdvanceSearchOpen] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(true);
   const [isDatePickerDockOpen, setIsDatePickerDockOpen] = useState(true);
   const [isGridToolsDockOpen, setIsGridToolsDockOpen] = useState(false);
   const [isSaveLayoutDockOpen, setIsSaveLayoutDockOpen] = useState(false);
+  const openSearchDock = () => {
+    setIsDatePickerDockOpen(false);
+    setIsGridToolsDockOpen(false);
+    setIsSaveLayoutDockOpen(false);
+    setIsSearchDockOpen(true);
+  };
+  const closeSearchDock = () => {
+    setIsSearchDockOpen(false);
+  };
   const openDatePickerDock = () => {
     setIsGridToolsDockOpen(false);
     setIsSaveLayoutDockOpen(false);
+    setIsSearchDockOpen(false);
     setIsDatePickerDockOpen(true);
   };
   const closeDatePickerDock = () => {
@@ -557,6 +566,7 @@ export default function FloorMapPage() {
   const openGridToolsDock = () => {
     setIsDatePickerDockOpen(false);
     setIsSaveLayoutDockOpen(false);
+    setIsSearchDockOpen(false);
     setIsGridToolsDockOpen(true);
   };
   const closeGridToolsDock = () => {
@@ -565,6 +575,7 @@ export default function FloorMapPage() {
   const openSaveLayoutDock = () => {
     setIsDatePickerDockOpen(false);
     setIsGridToolsDockOpen(false);
+    setIsSearchDockOpen(false);
     setIsSaveLayoutDockOpen(true);
   };
   const closeSaveLayoutDock = () => {
@@ -1114,7 +1125,7 @@ export default function FloorMapPage() {
         }
         setSearch(table.name);
         setStatusFilter("all");
-        setFiltersAccordionValue("search");
+        setIsSearchDockOpen(true);
         return;
       }
       router.push(result.href);
@@ -1434,7 +1445,7 @@ export default function FloorMapPage() {
     if (isEditMode) {
       setSearch("");
       setStatusFilter("all");
-      setFiltersAccordionValue(null);
+      setIsSearchDockOpen(false);
     } else {
       setIsGridToolsDockOpen(false);
       setIsSaveLayoutDockOpen(false);
@@ -2577,7 +2588,7 @@ export default function FloorMapPage() {
   const exitEditModeToView = useCallback(() => {
     setMode("view");
     setPendingPlacementTableId(null);
-    setFiltersAccordionValue(null);
+    setIsSearchDockOpen(false);
     setIsGridToolsDockOpen(false);
     setIsSaveLayoutDockOpen(false);
     setMergeGroupDragState(null);
@@ -3863,7 +3874,7 @@ export default function FloorMapPage() {
         setAreaDeleteOpen(false);
         setMode("view");
         setPendingPlacementTableId(null);
-        setFiltersAccordionValue(null);
+        setIsSearchDockOpen(false);
         setIsGridToolsDockOpen(false);
         setIsSaveLayoutDockOpen(false);
         setActiveAreaId(null);
@@ -4469,16 +4480,43 @@ export default function FloorMapPage() {
         </Group>
 
         {!isEmployee ? (
-          <FloorMapBookingToolbar
-            isCompact={isCompact}
-            isEditMode={isEditMode}
-            activeAreaBranchId={activeAreaBranchId}
-            onCreateBooking={() => setCreateBookingModalOpened(true)}
-            onOpenDayList={() => dayListModalRef.current?.openDayListModal()}
-            onOpenLateList={() => setLateListModalOpen(true)}
-            onOpenMergeGroups={() => setMergeGroupsListModalOpen(true)}
-            onOpenSplitClones={() => setSplitClonesListModalOpen(true)}
-          />
+          <Stack gap="xs">
+            <FloorMapBookingToolbar
+              isCompact={isCompact}
+              isEditMode={isEditMode}
+              activeAreaBranchId={activeAreaBranchId}
+              onCreateBooking={() => setCreateBookingModalOpened(true)}
+              onOpenDayList={() => dayListModalRef.current?.openDayListModal()}
+              onOpenLateList={() => setLateListModalOpen(true)}
+              onOpenMergeGroups={() => setMergeGroupsListModalOpen(true)}
+              onOpenSplitClones={() => setSplitClonesListModalOpen(true)}
+            />
+            {!isEditMode ? (
+              <Button
+                variant="light"
+                color="brand"
+                fullWidth
+                size={isCompact ? "sm" : "md"}
+                leftSection={<ScanSearch size={18} />}
+                className={classes.advanceSearchBtn}
+                onClick={() => setAdvanceSearchOpen(true)}
+              >
+                Tìm kiếm nâng cao
+              </Button>
+            ) : null}
+          </Stack>
+        ) : !isEditMode ? (
+          <Button
+            variant="light"
+            color="brand"
+            fullWidth
+            size={isCompact ? "sm" : "md"}
+            leftSection={<ScanSearch size={18} />}
+            className={classes.advanceSearchBtn}
+            onClick={() => setAdvanceSearchOpen(true)}
+          >
+            Tìm kiếm nâng cao
+          </Button>
         ) : null}
       </Stack>
 
@@ -4492,93 +4530,6 @@ export default function FloorMapPage() {
         <Alert color="gray" variant="light">
           Chưa kết nối Supabase — kích thước lưới chỉ lưu trên máy bạn (mock). Kết nối database để đồng bộ sơ đồ cho mọi người.
         </Alert>
-      ) : null}
-
-      {!isEditMode ? (
-        <Accordion
-          value={filtersAccordionValue}
-          onChange={setFiltersAccordionValue}
-          classNames={{ root: classes.toolbarPanelAccordion }}
-          variant="contained"
-          radius="md"
-          chevronPosition="right"
-        >
-          <Accordion.Item value="search">
-            <Accordion.Control icon={<Search size={16} />}>Tìm bàn & lọc</Accordion.Control>
-            <Accordion.Panel>
-              <Group gap="sm" grow wrap="nowrap" align="flex-end">
-                <Group gap="xs" wrap="nowrap" align="flex-end" style={{ flex: 1, minWidth: 0 }}>
-                  <TextInputWithVoice
-                    label="Tìm bàn"
-                    placeholder="Tên bàn, khách, SĐT, giờ đặt, giờ check-in…"
-                    value={search}
-                    onChange={(event) => setSearch(event.currentTarget.value)}
-                    size="sm"
-                    style={{ flex: 1, minWidth: 0 }}
-                  />
-                  <Button
-                    variant="default"
-                    size="sm"
-                    leftSection={isCompact ? undefined : <ScanSearch size={16} />}
-                    onClick={() => setAdvanceSearchOpen(true)}
-                    aria-label="Tìm kiếm nâng cao"
-                    style={{ flexShrink: 0 }}
-                  >
-                    {isCompact ? <ScanSearch size={16} /> : "Nâng cao"}
-                  </Button>
-                </Group>
-                <Stack gap={6} style={{ flex: 1, minWidth: 0 }}>
-                  <Text size="sm" fw={500}>
-                    Lọc trạng thái
-                  </Text>
-                  <div className="mobile-filter-chip-scroll">
-                    <Group
-                      gap="xs"
-                      wrap={isCompact ? "nowrap" : "wrap"}
-                      role="group"
-                      aria-label="Lọc trạng thái bàn"
-                    >
-                      <Button
-                        size={isCompact ? "xs" : "compact-sm"}
-                        radius="xl"
-                        variant={statusFilter === "all" ? "filled" : "outline"}
-                        color="gray"
-                        onClick={() => setStatusFilter("all")}
-                      >
-                        Tất cả
-                      </Button>
-                      {(["available", "hold", "occupied", "locked"] as TableStatus[]).map((status) => {
-                        const selected = statusFilter === status;
-                        const color = tableStatusColor[status];
-                        return (
-                          <Button
-                            key={status}
-                            size={isCompact ? "xs" : "compact-sm"}
-                            radius="xl"
-                            variant={selected ? "filled" : "outline"}
-                            color={color}
-                            onClick={() => setStatusFilter(status)}
-                            styles={{
-                              root: selected
-                                ? {
-                                    borderWidth: 2,
-                                    borderStyle: "solid",
-                                    borderColor: `var(--mantine-color-${color}-7)`,
-                                  }
-                                : undefined,
-                            }}
-                          >
-                            {tableStatusLabel[status]}
-                          </Button>
-                        );
-                      })}
-                    </Group>
-                  </div>
-                </Stack>
-              </Group>
-            </Accordion.Panel>
-          </Accordion.Item>
-        </Accordion>
       ) : null}
 
       <PortalSectionCard>
@@ -5140,49 +5091,138 @@ export default function FloorMapPage() {
             </div>
           ) : null}
           <div className={classes.canvasOverlay}>
-            {!isEmployee || isEditMode ? (
-              <div className={classes.canvasTopLeftDocks}>
-                {isDatePickerDockOpen && !isEmployee ? (
-                  <div className={classes.canvasDateDock}>
-                    <Group justify="space-between" align="center" wrap="nowrap" mb={4} gap={4}>
-                      <Text size="sm" fw={600} className={classes.canvasDateDockTitle}>
-                        Ngày xem sơ đồ
-                      </Text>
-                      <ActionIcon
-                        variant="transparent"
-                        size="sm"
-                        onClick={closeDatePickerDock}
-                        aria-label="Ẩn ngày xem sơ đồ"
-                      >
-                        <ChevronUp size={14} />
-                      </ActionIcon>
-                    </Group>
-                    <DatePickerInput
-                      value={floorMapSelectedDate.format("YYYY-MM-DD")}
-                      onChange={(value) => {
-                        if (!value) {
-                          return;
-                        }
-                        setFloorMapSelectedDate(dayjs(value, "YYYY-MM-DD"));
-                      }}
-                      valueFormat="DD/MM/YYYY"
-                      dropdownType="modal"
-                      size={isCompact ? "xs" : "sm"}
-                      w="100%"
-                    />
-                  </div>
-                ) : null}
-                {!isEmployee && !isDatePickerDockOpen ? (
-                  <ActionIcon
-                    variant="filled"
-                    size="lg"
-                    onClick={openDatePickerDock}
-                    aria-label="Hiện ngày xem sơ đồ"
-                  >
-                    <Calendar size={16} />
-                  </ActionIcon>
-                ) : null}
-                {isEditMode && isGridToolsDockOpen ? (
+            <div className={classes.canvasTopLeftDocks}>
+              {!isEditMode ? (
+                <>
+                  {isDatePickerDockOpen && !isEmployee ? (
+                    <div className={classes.canvasDateDock}>
+                      <Group justify="space-between" align="center" wrap="nowrap" mb={4} gap={4}>
+                        <Text size="sm" fw={600} className={classes.canvasDateDockTitle}>
+                          Ngày xem sơ đồ
+                        </Text>
+                        <ActionIcon
+                          variant="transparent"
+                          size="sm"
+                          onClick={closeDatePickerDock}
+                          aria-label="Ẩn ngày xem sơ đồ"
+                        >
+                          <ChevronUp size={14} />
+                        </ActionIcon>
+                      </Group>
+                      <DatePickerInput
+                        value={floorMapSelectedDate.format("YYYY-MM-DD")}
+                        onChange={(value) => {
+                          if (!value) {
+                            return;
+                          }
+                          setFloorMapSelectedDate(dayjs(value, "YYYY-MM-DD"));
+                        }}
+                        valueFormat="DD/MM/YYYY"
+                        dropdownType="modal"
+                        size={isCompact ? "xs" : "sm"}
+                        w="100%"
+                      />
+                    </div>
+                  ) : null}
+                  {!isEmployee && !isDatePickerDockOpen ? (
+                    <ActionIcon
+                      variant="filled"
+                      size="lg"
+                      onClick={openDatePickerDock}
+                      aria-label="Hiện ngày xem sơ đồ"
+                    >
+                      <Calendar size={16} />
+                    </ActionIcon>
+                  ) : null}
+                  {isSearchDockOpen ? (
+                    <div className={classes.canvasSearchDock}>
+                      <Group justify="space-between" align="center" wrap="nowrap" mb={4} gap={4}>
+                        <Text size="sm" fw={600} className={classes.canvasSearchDockTitle}>
+                          Tìm trong khu vực
+                        </Text>
+                        <ActionIcon
+                          variant="transparent"
+                          size="sm"
+                          onClick={closeSearchDock}
+                          aria-label="Ẩn tìm trong khu vực"
+                        >
+                          <ChevronUp size={14} />
+                        </ActionIcon>
+                      </Group>
+                      <Stack gap="sm">
+                        <TextInputWithVoice
+                          aria-label="Tìm trong khu vực"
+                          placeholder="Tên bàn, khách, SĐT, giờ đặt, giờ check-in…"
+                          value={search}
+                          onChange={(event) => setSearch(event.currentTarget.value)}
+                          size={isCompact ? "xs" : "sm"}
+                        />
+                        <Stack gap={6}>
+                          <Text size="xs" fw={600}>
+                            Lọc trạng thái
+                          </Text>
+                          <div className={classes.canvasSearchDockFilterChips}>
+                            <Group
+                              gap="xs"
+                              wrap="nowrap"
+                              role="group"
+                              aria-label="Lọc trạng thái bàn"
+                            >
+                              <Button
+                                size={isCompact ? "xs" : "compact-sm"}
+                                radius="xl"
+                                variant={statusFilter === "all" ? "filled" : "outline"}
+                                color="gray"
+                                onClick={() => setStatusFilter("all")}
+                              >
+                                Tất cả
+                              </Button>
+                              {(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
+                                (status) => {
+                                  const selected = statusFilter === status;
+                                  const color = tableStatusColor[status];
+                                  return (
+                                    <Button
+                                      key={status}
+                                      size={isCompact ? "xs" : "compact-sm"}
+                                      radius="xl"
+                                      variant={selected ? "filled" : "outline"}
+                                      color={color}
+                                      onClick={() => setStatusFilter(status)}
+                                      styles={{
+                                        root: selected
+                                          ? {
+                                              borderWidth: 2,
+                                              borderStyle: "solid",
+                                              borderColor: `var(--mantine-color-${color}-7)`,
+                                            }
+                                          : undefined,
+                                      }}
+                                    >
+                                      {tableStatusLabel[status]}
+                                    </Button>
+                                  );
+                                }
+                              )}
+                            </Group>
+                          </div>
+                        </Stack>
+                      </Stack>
+                    </div>
+                  ) : (
+                    <ActionIcon
+                      variant="filled"
+                      size="lg"
+                      onClick={openSearchDock}
+                      aria-label="Tìm trong khu vực"
+                    >
+                      <Search size={16} />
+                    </ActionIcon>
+                  )}
+                </>
+              ) : (
+                <>
+                  {isGridToolsDockOpen ? (
                   <div className={classes.canvasGridToolsDock}>
                     <Group justify="space-between" align="center" wrap="nowrap" mb={4}>
                       <Text size="sm" fw={600}>
@@ -5283,17 +5323,17 @@ export default function FloorMapPage() {
                     </Stack>
                   </div>
                 ) : null}
-                {isEditMode && !isGridToolsDockOpen ? (
-                  <ActionIcon
-                    variant="filled"
-                    size="lg"
-                    onClick={openGridToolsDock}
-                    aria-label="Hiện công cụ lưới"
-                  >
-                    <Wrench size={16} />
-                  </ActionIcon>
-                ) : null}
-                {isEditMode && isSaveLayoutDockOpen ? (
+                  {!isGridToolsDockOpen ? (
+                    <ActionIcon
+                      variant="filled"
+                      size="lg"
+                      onClick={openGridToolsDock}
+                      aria-label="Hiện công cụ lưới"
+                    >
+                      <Wrench size={16} />
+                    </ActionIcon>
+                  ) : null}
+                  {isSaveLayoutDockOpen ? (
                   <div className={classes.canvasSaveLayoutDock}>
                     <Group justify="space-between" align="center" wrap="nowrap" mb={4}>
                       <Text size="sm" fw={600}>
@@ -5342,18 +5382,19 @@ export default function FloorMapPage() {
                     </Stack>
                   </div>
                 ) : null}
-                {isEditMode && !isSaveLayoutDockOpen ? (
-                  <ActionIcon
-                    variant="filled"
-                    size="lg"
-                    onClick={openSaveLayoutDock}
-                    aria-label="Hiện lưu sơ đồ"
-                  >
-                    <Save size={16} />
-                  </ActionIcon>
-                ) : null}
-              </div>
-            ) : null}
+                  {!isSaveLayoutDockOpen ? (
+                    <ActionIcon
+                      variant="filled"
+                      size="lg"
+                      onClick={openSaveLayoutDock}
+                      aria-label="Hiện lưu sơ đồ"
+                    >
+                      <Save size={16} />
+                    </ActionIcon>
+                  ) : null}
+                </>
+              )}
+            </div>
 
             {isEditMode && isLayoutDirty ? (
               <div className={classes.canvasUnsavedBadgeDock}>
