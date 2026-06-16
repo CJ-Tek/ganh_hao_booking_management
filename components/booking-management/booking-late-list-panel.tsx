@@ -169,7 +169,6 @@ export function BookingLateListPanel({
         onSortStatusChange={setSortStatus}
         getRecordSearchValue={getRecordSearchValue}
         searchPlaceholder="Khách, SĐT, giờ đến, bàn..."
-        mobileSummaryItemLabel="khách"
         minHeight={220}
         noRecordsText={emptyText}
         onRowClick={onRowClick ? ({ record }) => onRowClick(record) : undefined}

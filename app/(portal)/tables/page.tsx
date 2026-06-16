@@ -23,6 +23,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PORTAL_SEARCH_QUERY_PARAM } from "@/lib/portal-advance-search";
+import { BookingListPaginationBar } from "@/components/booking-management/booking-list-pagination";
 import { MergeGroupsPanel } from "@/components/merge-groups/merge-groups-panel";
 import { SplitClonesPanel } from "@/components/split-clones/split-clones-panel";
 import { PortalDataTable } from "@/components/portal-data-table";
@@ -35,6 +36,8 @@ import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { FLOOR_TABLE_PALETTE_SENTINEL } from "@/lib/floor-map-layout";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type DiningTable, TableStatus } from "@/lib/types";
+
+const MOBILE_TABLE_PAGE_SIZE_OPTIONS = [6, 8, 10, 12, 20] as const;
 
 function branchScopeKey(branchIds: string[]) {
   return [...branchIds].sort().join("|") || "none";
@@ -308,22 +311,32 @@ function TablesPageContent() {
     }
   };
 
+  const mobilePageSizeSelectData = useMemo(
+    () =>
+      MOBILE_TABLE_PAGE_SIZE_OPTIONS.map((size) => ({
+        value: String(size),
+        label: `${size} thẻ`,
+      })),
+    []
+  );
+
+  const tablesPaginationBar = (
+    <BookingListPaginationBar
+      pageSize={pageSize}
+      pageSizeSelectData={mobilePageSizeSelectData}
+      onPageSizeChange={(size) => {
+        setPageSize(size);
+        setPage(1);
+      }}
+      page={currentPage}
+      totalPages={totalPages}
+      onPageChange={setPage}
+      totalBookings={sortedRecords.length}
+    />
+  );
+
   const tableCards = (
-    <Stack gap="sm">
-      {sortedRecords.length > 0 ? (
-        <Select
-          label="Số thẻ mỗi trang"
-          size="sm"
-          data={["6", "8", "10", "12", "20"].map((value) => ({ value, label: value }))}
-          value={String(pageSize)}
-          onChange={(value) => {
-            if (!value) return;
-            setPageSize(Number(value));
-            setPage(1);
-          }}
-          allowDeselect={false}
-        />
-      ) : null}
+    <Stack gap="xs">
       {pagedRecords.length === 0 ? (
         <Text c="dimmed" size="sm">
           Không có bàn phù hợp.
@@ -352,29 +365,7 @@ function TablesPageContent() {
           </Card>
         ))
       )}
-      {sortedRecords.length > pageSize ? (
-        <Group justify="center" gap="xs" mt="xs">
-          <Button
-            variant="default"
-            size="compact-sm"
-            disabled={currentPage <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            Trước
-          </Button>
-          <Text size="sm" c="dimmed">
-            {currentPage}/{totalPages}
-          </Text>
-          <Button
-            variant="default"
-            size="compact-sm"
-            disabled={currentPage >= totalPages}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          >
-            Sau
-          </Button>
-        </Group>
-      ) : null}
+      <div className="mobile-list-pagination-footer">{tablesPaginationBar}</div>
     </Stack>
   );
 

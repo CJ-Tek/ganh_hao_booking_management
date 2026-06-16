@@ -1,7 +1,6 @@
 "use client";
 
-import { Button, Group, Select, Stack, Text } from "@mantine/core";
-import type { ReactNode } from "react";
+import { Button, Group, Select, Text } from "@mantine/core";
 
 const MOBILE_PAGE_SIZE_SELECT_WIDTH = "9.5rem";
 
@@ -45,7 +44,6 @@ export function BookingListPaginationBar(props: {
   totalPages: number;
   onPageChange: (page: number) => void;
   totalBookings: number;
-  summaryItemLabel?: string;
 }) {
   const {
     pageSize,
@@ -55,7 +53,6 @@ export function BookingListPaginationBar(props: {
     totalPages,
     onPageChange,
     totalBookings,
-    summaryItemLabel = "booking",
   } = props;
 
   if (totalBookings <= 0) {
@@ -63,29 +60,24 @@ export function BookingListPaginationBar(props: {
   }
 
   return (
-    <Stack gap={4} align="stretch" w="100%">
-      <Group align="center" wrap="nowrap" w="100%" gap="sm" justify="space-between">
-        <Select
-          aria-label="Số thẻ mỗi trang"
-          size="sm"
-          data={pageSizeSelectData}
-          value={String(pageSize)}
-          onChange={(value) => {
-            if (!value) {
-              return;
-            }
-            onPageSizeChange(Number(value));
-          }}
-          allowDeselect={false}
-          w={MOBILE_PAGE_SIZE_SELECT_WIDTH}
-          style={{ flexShrink: 0 }}
-        />
-        <BookingListPaginationNav page={page} totalPages={totalPages} onPageChange={onPageChange} />
-      </Group>
-      <Text size="xs" c="dimmed" ta="right">
-        {totalBookings} {summaryItemLabel} · trang {page}/{totalPages}
-      </Text>
-    </Stack>
+    <Group align="center" wrap="nowrap" w="100%" gap="sm" justify="space-between">
+      <Select
+        aria-label="Số thẻ mỗi trang"
+        size="sm"
+        data={pageSizeSelectData}
+        value={String(pageSize)}
+        onChange={(value) => {
+          if (!value) {
+            return;
+          }
+          onPageSizeChange(Number(value));
+        }}
+        allowDeselect={false}
+        w={MOBILE_PAGE_SIZE_SELECT_WIDTH}
+        style={{ flexShrink: 0 }}
+      />
+      <BookingListPaginationNav page={page} totalPages={totalPages} onPageChange={onPageChange} />
+    </Group>
   );
 }
 

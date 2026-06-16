@@ -292,7 +292,6 @@ export default function DashboardPage() {
               totalPages={mobileTotalPages}
               onPageChange={setMobilePage}
               totalBookings={mobileSortedBookings.length}
-              summaryItemLabel="booking"
             />
           </div>
         </Stack>

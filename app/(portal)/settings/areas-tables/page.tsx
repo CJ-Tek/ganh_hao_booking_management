@@ -6,9 +6,7 @@ import {
   Button,
   Card,
   Group,
-  Modal,
   Select,
-  SimpleGrid,
   Stack,
   Text,
   TextInput,
@@ -17,18 +15,20 @@ import { notifications } from "@mantine/notifications";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { Pencil, Trash2 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
+import { BookingListPaginationBar } from "@/components/booking-management/booking-list-pagination";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalMinimalModal } from "@/components/portal-minimal-modal/portal-minimal-modal";
+import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import {
   PortalPageTitle,
   PortalSectionCard,
-  PortalStickyAction,
-  PortalStickyPanel,
 } from "@/components/portal-page";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { useAppContext } from "@/contexts/app-context";
 import { bookingCardBusyProps, bookingRowBusyStyle } from "@/lib/busy-row-style";
 import { usePortalCompact } from "@/lib/use-portal-compact";
+
+const MOBILE_AREA_PAGE_SIZE_OPTIONS = [6, 8, 10, 12, 20] as const;
 
 type AreaRow = {
   id: string;
@@ -60,6 +60,7 @@ export default function AreasTablesSettingsPage() {
   const [deleteTarget, setDeleteTarget] = useState<AreaRow | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [isAddAreaSaving, setIsAddAreaSaving] = useState(false);
+  const [addAreaOpen, setAddAreaOpen] = useState(false);
 
   const branchSelectData = useMemo(
     () =>
@@ -117,6 +118,9 @@ export default function AreasTablesSettingsPage() {
     return mobileSortedAreas.filter((area) => getAreaSearchValue(area).includes(keyword));
   }, [getAreaSearchValue, mobileSortedAreas, search]);
 
+  const filteredAreaCount = mobileFilteredAreas.length;
+  const areaListTitle = `Danh sách khu vực (${filteredAreaCount})`;
+
   const mobileTotalPages = Math.max(1, Math.ceil(mobileFilteredAreas.length / mobilePageSize));
   const mobilePageSafe = Math.min(mobilePage, mobileTotalPages);
 
@@ -129,6 +133,30 @@ export default function AreasTablesSettingsPage() {
     [mobileFilteredAreas, mobilePageSafe, mobilePageSize]
   );
 
+  const mobilePageSizeSelectData = useMemo(
+    () =>
+      MOBILE_AREA_PAGE_SIZE_OPTIONS.map((size) => ({
+        value: String(size),
+        label: `${size} thẻ`,
+      })),
+    []
+  );
+
+  const areasPaginationBar = (
+    <BookingListPaginationBar
+      pageSize={mobilePageSize}
+      pageSizeSelectData={mobilePageSizeSelectData}
+      onPageSizeChange={(size) => {
+        setMobilePageSize(size);
+        setMobilePage(1);
+      }}
+      page={mobilePageSafe}
+      totalPages={mobileTotalPages}
+      onPageChange={setMobilePage}
+      totalBookings={mobileFilteredAreas.length}
+    />
+  );
+
   const handleAddArea = async () => {
     if (!branchId || !name) {
       notifications.show({ color: "red", message: "Vui lòng nhập đầy đủ thông tin." });
@@ -138,6 +166,7 @@ export default function AreasTablesSettingsPage() {
     try {
       await addArea(branchId, name);
       setName("");
+      setAddAreaOpen(false);
       notifications.show({ color: "green", message: "Đã tạo khu vực mới." });
     } finally {
       setIsAddAreaSaving(false);
@@ -197,151 +226,134 @@ export default function AreasTablesSettingsPage() {
     }
   };
 
+  const addAreaForm = (
+    <TextInput
+      label="Tên khu vực mới"
+      placeholder="VD: Tầng 1"
+      value={name}
+      onChange={(event) => setName(event.currentTarget.value)}
+      disabled={isAddAreaSaving}
+      size={isCompact ? "md" : "sm"}
+    />
+  );
+
+  const editAreaForm = (
+    <Stack gap="sm">
+      <Select
+        label="Chi nhánh"
+        value={editBranchId}
+        onChange={(value) => setEditBranchId(value ?? "")}
+        data={branchSelectData}
+        disabled={editSaving}
+        size={isCompact ? "md" : "sm"}
+      />
+      <TextInput
+        label="Tên khu vực"
+        value={editName}
+        onChange={(event) => setEditName(event.currentTarget.value)}
+        disabled={editSaving}
+        size={isCompact ? "md" : "sm"}
+      />
+    </Stack>
+  );
+
+  const openAddAreaModalButton = (
+    <Button
+      variant="filled"
+      size={isCompact ? "md" : "sm"}
+      onClick={() => setAddAreaOpen(true)}
+      style={{ flexShrink: 0 }}
+    >
+      Thêm khu vực
+    </Button>
+  );
+
+  const areaListToolbar = (
+    <Group align="flex-end" gap="sm" wrap="nowrap">
+      <TextInputWithVoice
+        label="Tìm khu vực"
+        placeholder="Tên hoặc chi nhánh"
+        value={search}
+        onChange={(event) => {
+          setSearch(event.currentTarget.value);
+          setMobilePage(1);
+        }}
+        size={isCompact ? "md" : "sm"}
+        voiceIconSize={isCompact ? "md" : "sm"}
+        style={{ flex: 1, minWidth: 0 }}
+      />
+      {openAddAreaModalButton}
+    </Group>
+  );
+
   return (
     <Stack>
       <PortalPageTitle order={isCompact ? 3 : 2}>
-        {isCompact ? "Khu vực & bàn" : "Cấu hình khu vực"}
+        {isCompact ? "Khu vực" : "Cấu hình khu vực"}
       </PortalPageTitle>
-      <PortalStickyPanel>
-        <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
-          <Stack gap={4}>
-            <Text size="xs" fw={600}>
-              Chi nhánh
-            </Text>
-            <Text size="sm" c="dimmed">
-              {branchName}
-            </Text>
-          </Stack>
-          <TextInput
-            label="Tên khu vực mới"
-            placeholder="VD: Tầng 1"
-            value={name}
-            onChange={(event) => setName(event.currentTarget.value)}
-            disabled={isAddAreaSaving}
-            size={isCompact ? "md" : "sm"}
-          />
-          <PortalStickyAction>
-            <Button
-              fullWidth
-              size={isCompact ? "md" : "sm"}
-              loading={isAddAreaSaving}
-              disabled={isAddAreaSaving}
-              onClick={() => void handleAddArea()}
-              mt={{ base: 0, lg: 26 }}
-            >
-              Thêm khu vực
-            </Button>
-          </PortalStickyAction>
-        </SimpleGrid>
-      </PortalStickyPanel>
+
+      {areaListToolbar}
 
       <PortalSectionCard>
         <Text fw={600} mb="sm" size={isCompact ? "sm" : "md"}>
-          Danh sách khu vực
+          {areaListTitle}
         </Text>
         {isCompact ? (
-          <Stack gap="sm">
-            <TextInputWithVoice
-              label="Tìm khu vực"
-              placeholder="Tên hoặc chi nhánh"
-              value={search}
-              onChange={(event) => {
-                setSearch(event.currentTarget.value);
-                setMobilePage(1);
-              }}
-              size="md"
-              voiceIconSize="md"
-            />
-            {mobileFilteredAreas.length > 0 ? (
-              <Select
-                label="Số thẻ mỗi trang"
-                size="sm"
-                data={["6", "8", "10", "12", "20"].map((value) => ({ value, label: value }))}
-                value={String(mobilePageSize)}
-                onChange={(value) => {
-                  if (!value) return;
-                  setMobilePageSize(Number(value));
-                  setMobilePage(1);
-                }}
-                allowDeselect={false}
-              />
-            ) : null}
-            {pagedMobileAreas.length === 0 ? (
-              <Text c="dimmed" size="sm">
-                Không có khu vực phù hợp.
-              </Text>
-            ) : (
-              pagedMobileAreas.map((area) => {
-                const cardBusy = bookingCardBusyProps(isAreaRowBusy(area.id));
-                return (
-                <Card
-                  key={area.id}
-                  withBorder
-                  radius="md"
-                  padding="md"
-                  className={cardBusy.className}
-                  style={cardBusy.style}
-                >
-                  <Stack gap="sm">
-                    <Group justify="space-between" align="flex-start" wrap="nowrap">
-                      <div style={{ minWidth: 0 }}>
-                        <Text fw={800}>{area.name}</Text>
-                        <Text size="xs" c="dimmed">
-                          {area.branchName}
-                        </Text>
-                      </div>
-                      <Group gap={6}>
-                        <ActionIcon
-                          variant="light"
-                          aria-label="Sửa khu vực"
-                          disabled={!hasSupabase || isAreaRowBusy(area.id)}
-                          onClick={() => openEdit(area)}
-                        >
-                          <Pencil size={16} />
-                        </ActionIcon>
-                        <ActionIcon
-                          variant="light"
-                          color="red"
-                          aria-label="Xóa khu vực"
-                          disabled={!hasSupabase || isAreaRowBusy(area.id)}
-                          onClick={() => setDeleteTarget(area)}
-                        >
-                          <Trash2 size={16} />
-                        </ActionIcon>
-                      </Group>
-                    </Group>
-                    <Group gap="xs">
-                      <Badge variant="light">{area.tableCount} bàn</Badge>
-                      <Badge variant="light">{area.bookingCount} đặt</Badge>
-                    </Group>
-                  </Stack>
-                </Card>
-              );
-              })
-            )}
-            {mobileFilteredAreas.length > mobilePageSize ? (
-              <Group justify="center" gap="xs" mt="xs">
-                <Button
-                  variant="default"
-                  size="compact-sm"
-                  disabled={mobilePageSafe <= 1}
-                  onClick={() => setMobilePage((p) => Math.max(1, p - 1))}
-                >
-                  Trước
-                </Button>
-                <Text size="sm" c="dimmed">
-                  {mobilePageSafe}/{mobileTotalPages}
+          <Stack gap="xs">
+              {pagedMobileAreas.length === 0 ? (
+                <Text c="dimmed" size="sm">
+                  Không có khu vực phù hợp.
                 </Text>
-                <Button
-                  variant="default"
-                  size="compact-sm"
-                  disabled={mobilePageSafe >= mobileTotalPages}
-                  onClick={() => setMobilePage((p) => Math.min(mobileTotalPages, p + 1))}
-                >
-                  Sau
-                </Button>
-              </Group>
-            ) : null}
+              ) : (
+                pagedMobileAreas.map((area) => {
+                  const cardBusy = bookingCardBusyProps(isAreaRowBusy(area.id));
+                  return (
+                  <Card
+                    key={area.id}
+                    withBorder
+                    radius="md"
+                    padding="md"
+                    className={cardBusy.className}
+                    style={cardBusy.style}
+                  >
+                    <Stack gap="sm">
+                      <Group justify="space-between" align="flex-start" wrap="nowrap">
+                        <div style={{ minWidth: 0 }}>
+                          <Text fw={800}>{area.name}</Text>
+                          <Text size="xs" c="dimmed">
+                            {area.branchName}
+                          </Text>
+                        </div>
+                        <Group gap={6}>
+                          <ActionIcon
+                            variant="light"
+                            aria-label="Sửa khu vực"
+                            disabled={!hasSupabase || isAreaRowBusy(area.id)}
+                            onClick={() => openEdit(area)}
+                          >
+                            <Pencil size={16} />
+                          </ActionIcon>
+                          <ActionIcon
+                            variant="light"
+                            color="red"
+                            aria-label="Xóa khu vực"
+                            disabled={!hasSupabase || isAreaRowBusy(area.id)}
+                            onClick={() => setDeleteTarget(area)}
+                          >
+                            <Trash2 size={16} />
+                          </ActionIcon>
+                        </Group>
+                      </Group>
+                      <Group gap="xs">
+                        <Badge variant="light">{area.tableCount} bàn</Badge>
+                        <Badge variant="light">{area.bookingCount} đặt</Badge>
+                      </Group>
+                    </Stack>
+                  </Card>
+                );
+                })
+              )}
+              <div className="mobile-list-pagination-footer">{areasPaginationBar}</div>
           </Stack>
         ) : (
           <PortalDataTable<AreaRow>
@@ -349,8 +361,10 @@ export default function AreasTablesSettingsPage() {
             getRecordSearchValue={getAreaSearchValue}
             sortRecords={sortAreas}
             defaultSort={{ columnAccessor: "name", direction: "asc" }}
-            searchLabel="Tìm khu vực"
-            searchPlaceholder="Tên hoặc chi nhánh"
+            searchQuery={search}
+            onSearchQueryChange={setSearch}
+            hideSearch
+            withToolbar={false}
             minHeight={240}
             noRecordsText="Không có khu vực phù hợp."
             rowStyle={(area) => bookingRowBusyStyle(isAreaRowBusy(area.id))}
@@ -401,29 +415,63 @@ export default function AreasTablesSettingsPage() {
         )}
       </PortalSectionCard>
 
-      <Modal opened={editOpen} onClose={() => setEditOpen(false)} title="Sửa khu vực" size="md">
-        <Stack gap="sm">
-          <Select
-            label="Chi nhánh"
-            value={editBranchId}
-            onChange={(value) => setEditBranchId(value ?? "")}
-            data={branchSelectData}
-          />
-          <TextInput
-            label="Tên khu vực"
-            value={editName}
-            onChange={(event) => setEditName(event.currentTarget.value)}
-          />
-          <Group justify="flex-end" mt="md">
-            <Button variant="default" onClick={() => setEditOpen(false)}>
+      <PortalStandardModal
+        opened={addAreaOpen}
+        onClose={() => setAddAreaOpen(false)}
+        closeOnClickOutside={!isAddAreaSaving}
+        closeOnEscape={!isAddAreaSaving}
+        title={
+          <Text fw={600} component="span">
+            Thêm khu vực -{" "}
+            <Text component="span" fw={700} c="blue">
+              {branchName}
+            </Text>
+          </Text>
+        }
+        size="md"
+        footer={
+          <Group justify="flex-end" gap="sm" wrap="nowrap">
+            <Button variant="default" onClick={() => setAddAreaOpen(false)} disabled={isAddAreaSaving}>
               Hủy
             </Button>
-            <Button loading={editSaving} onClick={() => void handleSaveEdit()}>
+            <Button
+              loading={isAddAreaSaving}
+              disabled={isAddAreaSaving}
+              onClick={() => void handleAddArea()}
+            >
+              Thêm khu vực
+            </Button>
+          </Group>
+        }
+      >
+        {addAreaForm}
+      </PortalStandardModal>
+
+      <PortalStandardModal
+        opened={editOpen}
+        onClose={() => {
+          if (!editSaving) {
+            setEditOpen(false);
+            setEditingArea(null);
+          }
+        }}
+        closeOnClickOutside={!editSaving}
+        closeOnEscape={!editSaving}
+        title="Sửa khu vực"
+        size="md"
+        footer={
+          <Group justify="flex-end" gap="sm" wrap="nowrap">
+            <Button variant="default" disabled={editSaving} onClick={() => setEditOpen(false)}>
+              Hủy
+            </Button>
+            <Button loading={editSaving} disabled={editSaving} onClick={() => void handleSaveEdit()}>
               Lưu
             </Button>
           </Group>
-        </Stack>
-      </Modal>
+        }
+      >
+        {editAreaForm}
+      </PortalStandardModal>
 
       <PortalMinimalModal
         opened={deleteTarget != null}

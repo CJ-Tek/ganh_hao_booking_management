@@ -7,6 +7,9 @@ export const PORTAL_MODAL_Z_INDEX = 600;
 /** Booking detail drawer/modal stacked above another modal (e.g. day-list). */
 export const PORTAL_MODAL_DETAIL_Z_INDEX = 620;
 
+/** Form modals opened while a detail drawer (620) stays visible underneath. */
+export const PORTAL_MODAL_ABOVE_DETAIL_Z_INDEX = 640;
+
 /**
  * Mantine ModalsProvider dialogs (confirm/alert) must stack above page `<Modal>` /
  * `PortalStandardModal` (600). Always open via `openPortalModalsConfirmModal` or
@@ -61,6 +64,12 @@ export const portalConfirmModalProps = {
 export const portalMinimalPageModalProps = {
   ...portalMinimalModalLayoutProps,
   zIndex: PORTAL_MODAL_Z_INDEX,
+  overlayProps: modalOverlayBlur,
+} as const;
+
+/** Standard page modal stacked above an open detail drawer. */
+export const portalModalAboveDetailProps = {
+  zIndex: PORTAL_MODAL_ABOVE_DETAIL_Z_INDEX,
   overlayProps: modalOverlayBlur,
 } as const;
 

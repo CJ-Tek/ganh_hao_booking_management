@@ -4589,6 +4589,7 @@ export async function addUserInSupabase(payload: {
   fullName: string;
   role: Role;
   branchIds: string[];
+  actorUserId?: string;
 }): Promise<Result> {
   return addAppUserServer(payload);
 }
@@ -4601,6 +4602,7 @@ export async function updateUserInSupabase(
     fullName: string;
     role: Role;
     branchIds: string[];
+    actorUserId?: string;
   }
 ): Promise<Result> {
   return updateAppUserServer(userId, payload);

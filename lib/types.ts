@@ -18,6 +18,10 @@ export interface AppUser {
   fullName: string;
   role: Role;
   branchIds: string[];
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  createdByUserId?: string | null;
+  updatedByUserId?: string | null;
 }
 
 export interface Branch {

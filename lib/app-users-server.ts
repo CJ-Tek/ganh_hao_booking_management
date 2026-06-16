@@ -6,9 +6,14 @@ export type AppUserResult = { ok: boolean; message: string };
 type AppUserRow = {
   id: string;
   username: string;
+  password: string;
   full_name: string;
   role: string;
   branch_ids: string[] | null;
+  created_at: string | null;
+  updated_at: string | null;
+  created_by_user_id: string | null;
+  updated_by_user_id: string | null;
 };
 
 function requireAdminClient() {
@@ -19,18 +24,23 @@ function requireAdminClient() {
   return client;
 }
 
-function mapPublicUser(row: AppUserRow): AppUser {
+function mapAdminUser(row: AppUserRow): AppUser {
   return {
     id: row.id,
     username: row.username,
-    password: "",
+    password: row.password ?? "",
     fullName: row.full_name,
     role: row.role as Role,
     branchIds: (row.branch_ids ?? []) as string[],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    createdByUserId: row.created_by_user_id,
+    updatedByUserId: row.updated_by_user_id,
   };
 }
 
-const PUBLIC_USER_COLUMNS = "id, username, full_name, role, branch_ids";
+const ADMIN_USER_COLUMNS =
+  "id, username, password, full_name, role, branch_ids, created_at, updated_at, created_by_user_id, updated_by_user_id";
 
 export async function listAppUsersServer(): Promise<AppUser[] | null> {
   const client = requireAdminClient();
@@ -38,12 +48,12 @@ export async function listAppUsersServer(): Promise<AppUser[] | null> {
     return null;
   }
 
-  const { data, error } = await client.from("app_users").select(PUBLIC_USER_COLUMNS);
+  const { data, error } = await client.from("app_users").select(ADMIN_USER_COLUMNS);
   if (error) {
     throw new Error(error.message);
   }
 
-  return (data as AppUserRow[]).map(mapPublicUser);
+  return (data as AppUserRow[]).map(mapAdminUser);
 }
 
 export async function getAppUserServer(userId: string): Promise<AppUser | null> {
@@ -54,7 +64,7 @@ export async function getAppUserServer(userId: string): Promise<AppUser | null> 
 
   const { data, error } = await client
     .from("app_users")
-    .select(PUBLIC_USER_COLUMNS)
+    .select(ADMIN_USER_COLUMNS)
     .eq("id", userId)
     .maybeSingle();
 
@@ -62,7 +72,7 @@ export async function getAppUserServer(userId: string): Promise<AppUser | null> 
     return null;
   }
 
-  return mapPublicUser(data as AppUserRow);
+  return mapAdminUser(data as AppUserRow);
 }
 
 export async function addAppUserServer(payload: {
@@ -71,6 +81,7 @@ export async function addAppUserServer(payload: {
   fullName: string;
   role: Role;
   branchIds: string[];
+  actorUserId?: string;
 }): Promise<AppUserResult> {
   const client = requireAdminClient();
   if (!client) {
@@ -92,6 +103,8 @@ export async function addAppUserServer(payload: {
     full_name: payload.fullName,
     role: payload.role,
     branch_ids: payload.branchIds,
+    created_by_user_id: payload.actorUserId ?? null,
+    updated_by_user_id: payload.actorUserId ?? null,
   });
   if (error) {
     return { ok: false, message: error.message };
@@ -107,6 +120,7 @@ export async function updateAppUserServer(
     fullName: string;
     role: Role;
     branchIds: string[];
+    actorUserId?: string;
   }
 ): Promise<AppUserResult> {
   const client = requireAdminClient();
@@ -130,11 +144,15 @@ export async function updateAppUserServer(
     role: Role;
     branch_ids: string[];
     password?: string;
+    updated_at: string;
+    updated_by_user_id: string | null;
   } = {
     username: payload.username,
     full_name: payload.fullName,
     role: payload.role,
     branch_ids: payload.branchIds,
+    updated_at: new Date().toISOString(),
+    updated_by_user_id: payload.actorUserId ?? null,
   };
   if (payload.password && payload.password.trim().length > 0) {
     update.password = payload.password.trim();

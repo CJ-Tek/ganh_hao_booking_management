@@ -711,10 +711,16 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       return {
         id,
         username,
-        password: "",
+        password: typeof row.password === "string" ? row.password : "",
         fullName,
         role: role as Role,
         branchIds: (branchIds ?? []) as string[],
+        createdAt: typeof row.created_at === "string" ? row.created_at : null,
+        updatedAt: typeof row.updated_at === "string" ? row.updated_at : null,
+        createdByUserId:
+          typeof row.created_by_user_id === "string" ? row.created_by_user_id : null,
+        updatedByUserId:
+          typeof row.updated_by_user_id === "string" ? row.updated_by_user_id : null,
       };
     };
 
@@ -2070,7 +2076,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!hasSupabase) {
       return { ok: false, message: "Chưa kết nối Supabase." };
     }
-    const result = await addUserInSupabase(payload);
+    const result = await addUserInSupabase({
+      ...payload,
+      actorUserId: currentUser?.id,
+    });
     if (result.ok) {
       // Realtime for `app_users` might be disabled; ensure UI reflects the new user.
       await reload();
@@ -2153,7 +2162,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       applySession();
       return { ok: true, message: "Đã cập nhật tài khoản." };
     }
-    const result = await updateUserInSupabase(userId, payload);
+    const result = await updateUserInSupabase(userId, {
+      ...payload,
+      actorUserId: currentUser?.id,
+    });
     if (result.ok) {
       setState((prev) => ({
         ...prev,

@@ -168,7 +168,6 @@ export default function CustomersPage() {
       totalPages={listTotalPages}
       onPageChange={setListPage}
       totalBookings={searchFilteredRows.length}
-      summaryItemLabel="khách"
     />
   );
 
@@ -265,7 +264,6 @@ export default function CustomersPage() {
       idAccessor="id"
       searchPlaceholder="Tìm tên hoặc SĐT"
       noRecordsText="Không tìm thấy khách hàng phù hợp."
-      mobileSummaryItemLabel="khách"
       onRowClick={({ record }) => openCustomerDetail(record)}
       selectedRecords={selectedCustomers}
       onSelectedRecordsChange={setSelectedCustomers}

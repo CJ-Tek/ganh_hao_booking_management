@@ -397,6 +397,7 @@ export async function addUserInSupabase(payload: {
   fullName: string;
   role: Role;
   branchIds: string[];
+  actorUserId?: string;
 }): Promise<Result> {
   if (!isSupabaseEnabled()) {
     return { ok: false, message: "Chưa cấu hình Supabase." };
@@ -412,6 +413,7 @@ export async function updateUserInSupabase(
     fullName: string;
     role: Role;
     branchIds: string[];
+    actorUserId?: string;
   }
 ): Promise<Result> {
   if (!isSupabaseEnabled()) {

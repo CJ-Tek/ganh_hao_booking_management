@@ -92,8 +92,6 @@ export type PortalDataTableProps<T> = {
   mobileRecordsPerPageOptions?: readonly number[];
   withToolbar?: boolean;
   hideSearch?: boolean;
-  /** Label in mobile summary line (e.g. "booking", "mục", "khách"). */
-  mobileSummaryItemLabel?: string;
 } & Omit<
   DataTableWithBuiltinLoaderProps<T>,
   | "records"
@@ -138,7 +136,6 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
     mobileRecordsPerPageOptions = [6, 8, 10, 12],
     withToolbar = true,
     hideSearch = false,
-    mobileSummaryItemLabel = "mục",
     minHeight = 260,
     withTableBorder = true,
     noRecordsText = "Không có dữ liệu phù hợp.",
@@ -298,7 +295,6 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
             totalPages={totalMobilePages}
             onPageChange={setMobilePage}
             totalBookings={sortedRecords.length}
-            summaryItemLabel={mobileSummaryItemLabel}
           />
           </div>
         </Stack>

@@ -2,11 +2,8 @@
 
 import {
   ActionIcon,
-  Badge,
   Button,
-  Card,
   Group,
-  Modal,
   MultiSelect,
   PasswordInput,
   Select,
@@ -21,33 +18,54 @@ import { Pencil, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalMinimalModal } from "@/components/portal-minimal-modal/portal-minimal-modal";
-import { PortalPageTitle, PortalSectionCard, PortalStickyAction } from "@/components/portal-page";
+import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
+import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
+import { TextInputWithVoice } from "@/components/TextInputWithVoice";
+import { AppUserCompactCard } from "@/components/settings/app-user-compact-card";
+import { AppUserDetailDrawer } from "@/components/settings/app-user-detail-drawer";
+import { AppUserRoleBadge } from "@/components/settings/app-user-role-badge";
+import { AppUserRoleFilterChips } from "@/components/settings/app-user-role-filter-chips";
 import { RouteGuard } from "@/components/route-guard";
 import { useAppContext } from "@/contexts/app-context";
-import { bookingRowBusyStyle } from "@/lib/busy-row-style";
+import {
+  APP_USER_ROLE_LABEL,
+  appUserBranchNames,
+  appUserDisplayName,
+  formatAppUserAuditAt,
+  formatAppUserPassword,
+  scopedAppUserRoleFilterStatuses,
+  userMatchesRoleFilters,
+} from "@/lib/app-user-display";
+import { bookingCardBusyProps, bookingRowBusyStyle } from "@/lib/busy-row-style";
+import { portalModalAboveDetailProps } from "@/lib/portal-z-index";
+import { usePortalCompact } from "@/lib/use-portal-compact";
 import { AppUser, Role } from "@/lib/types";
 
-const roleLabel: Record<Role, string> = {
-  admin: "Admin",
-  general_manager: "Quản lý tổng",
-  manager: "Quản lý chi nhánh",
-  employee: "Nhân viên",
-};
-
 const ROLE_OPTIONS: { value: Role; label: string }[] = [
-  { value: "admin", label: "Admin" },
-  { value: "general_manager", label: "Quản lý tổng" },
-  { value: "manager", label: "Quản lý chi nhánh" },
-  { value: "employee", label: "Nhân viên" },
+  { value: "admin", label: APP_USER_ROLE_LABEL.admin },
+  { value: "general_manager", label: APP_USER_ROLE_LABEL.general_manager },
+  { value: "manager", label: APP_USER_ROLE_LABEL.manager },
+  { value: "employee", label: APP_USER_ROLE_LABEL.employee },
 ];
 
 export default function UserManagementPage() {
   const { state, addUser, updateUser, deleteUser, currentUser } = useAppContext();
+  const isCompact = usePortalCompact();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
   const [role, setRole] = useState<Role>("manager");
   const [branchIds, setBranchIds] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const userRoleFilterStatuses = useMemo(
+    () => scopedAppUserRoleFilterStatuses(currentUser?.role),
+    [currentUser?.role]
+  );
+  const [roleFilters, setRoleFilters] = useState<Role[]>(() => [
+    ...scopedAppUserRoleFilterStatuses(undefined),
+  ]);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<AppUser | null>(null);
   const [editUsername, setEditUsername] = useState("");
@@ -74,12 +92,33 @@ export default function UserManagementPage() {
       const branchText = user.branchIds
         .map((id) => state.branches.find((branch) => branch.id === id)?.name ?? id)
         .join(", ");
-      return [user.username, user.fullName, roleLabel[user.role], branchText]
+      return [user.username, user.fullName, APP_USER_ROLE_LABEL[user.role], branchText, user.password]
+        .concat([
+          appUserDisplayName(user.createdByUserId, state.users),
+          appUserDisplayName(user.updatedByUserId, state.users),
+          formatAppUserAuditAt(user.createdAt),
+          formatAppUserAuditAt(user.updatedAt),
+        ])
         .join(" ")
         .toLowerCase();
     },
-    [state.branches]
+    [state.branches, state.users]
   );
+
+  const roleFilteredUsers = useMemo(
+    () => visibleUsers.filter((user) => userMatchesRoleFilters(user.role, roleFilters)),
+    [roleFilters, visibleUsers]
+  );
+
+  const filteredUserCount = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) {
+      return roleFilteredUsers.length;
+    }
+    return roleFilteredUsers.filter((user) => getUserSearchValue(user).includes(keyword)).length;
+  }, [getUserSearchValue, roleFilteredUsers, search]);
+
+  const userListTitle = `Danh sách tài khoản (${filteredUserCount})`;
 
   const sortUsers = useCallback((records: AppUser[], sortStatus: DataTableSortStatus<AppUser>) => {
     return [...records].sort((a, b) => {
@@ -89,11 +128,20 @@ export default function UserManagementPage() {
         left = a.fullName;
         right = b.fullName;
       } else if (sortStatus.columnAccessor === "role") {
-        left = roleLabel[a.role];
-        right = roleLabel[b.role];
+        left = APP_USER_ROLE_LABEL[a.role];
+        right = APP_USER_ROLE_LABEL[b.role];
       } else if (sortStatus.columnAccessor === "branchIds") {
         left = a.branchIds.join(",");
         right = b.branchIds.join(",");
+      } else if (sortStatus.columnAccessor === "createdAt") {
+        left = a.createdAt ?? "";
+        right = b.createdAt ?? "";
+      } else if (sortStatus.columnAccessor === "updatedAt") {
+        left = a.updatedAt ?? "";
+        right = b.updatedAt ?? "";
+      } else if (sortStatus.columnAccessor === "password") {
+        left = a.password;
+        right = b.password;
       } else {
         left = a.username;
         right = b.username;
@@ -121,6 +169,10 @@ export default function UserManagementPage() {
     }
   }, [currentUser?.role, role]);
 
+  useEffect(() => {
+    setRoleFilters(userRoleFilterStatuses);
+  }, [userRoleFilterStatuses]);
+
   const openEdit = (user: AppUser) => {
     if (gmCannotManageUser(user)) {
       return;
@@ -137,6 +189,40 @@ export default function UserManagementPage() {
   const isUserRowBusy = (userId: string) =>
     (editSaving && editingUser?.id === userId) || (deleteLoading && deleteTarget?.id === userId);
 
+  const selectedUser = useMemo(
+    () =>
+      selectedUserId
+        ? state.users.find((user) => user.id === selectedUserId) ?? null
+        : null,
+    [selectedUserId, state.users]
+  );
+
+  const openUserDetail = useCallback((user: AppUser) => {
+    setSelectedUserId(user.id);
+  }, []);
+
+  const closeUserDetail = useCallback(() => {
+    setSelectedUserId(null);
+  }, []);
+
+  const cannotManageUser = (user: AppUser) =>
+    user.id === currentUser?.id || gmCannotManageUser(user) || isUserRowBusy(user.id);
+
+  const handleEditFromDetail = () => {
+    if (!selectedUser || cannotManageUser(selectedUser)) {
+      return;
+    }
+    openEdit(selectedUser);
+  };
+
+  const handleDeleteFromDetail = () => {
+    if (!selectedUser || cannotManageUser(selectedUser)) {
+      return;
+    }
+    closeUserDetail();
+    setDeleteTarget(selectedUser);
+  };
+
   const handleCreateUser = async () => {
     setIsCreateSaving(true);
     try {
@@ -151,6 +237,7 @@ export default function UserManagementPage() {
         setFullName("");
         setRole("manager");
         setBranchIds([]);
+        setCreateOpen(false);
       }
     } finally {
       setIsCreateSaving(false);
@@ -199,6 +286,9 @@ export default function UserManagementPage() {
         message: result.message,
       });
       if (result.ok) {
+        if (selectedUserId === deleteTarget.id) {
+          setSelectedUserId(null);
+        }
         setDeleteTarget(null);
       }
     } finally {
@@ -208,113 +298,164 @@ export default function UserManagementPage() {
 
   const branchMultiData = state.branches.map((b) => ({ value: b.id, label: b.name }));
 
+  const createUserForm = (
+    <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+      <TextInput
+        label="Tên đăng nhập"
+        value={username}
+        onChange={(event) => setUsername(event.currentTarget.value)}
+        disabled={isCreateSaving}
+        size={isCompact ? "md" : "sm"}
+      />
+      <PasswordInput
+        label="Mật khẩu"
+        value={password}
+        onChange={(event) => setPassword(event.currentTarget.value)}
+        disabled={isCreateSaving}
+        size={isCompact ? "md" : "sm"}
+      />
+      <TextInput
+        label="Họ tên"
+        value={fullName}
+        onChange={(event) => setFullName(event.currentTarget.value)}
+        disabled={isCreateSaving}
+        size={isCompact ? "md" : "sm"}
+      />
+      <Select
+        label="Vai trò"
+        value={role}
+        onChange={(value) => setRole((value as Role) || "manager")}
+        data={roleSelectDataScoped}
+        disabled={isCreateSaving}
+        size={isCompact ? "md" : "sm"}
+      />
+      <MultiSelect
+        label="Chi nhánh quản lý"
+        value={branchIds}
+        onChange={setBranchIds}
+        data={branchMultiData}
+        disabled={isCreateSaving}
+        size={isCompact ? "md" : "sm"}
+      />
+    </SimpleGrid>
+  );
+
+  const editUserForm = (
+    <Stack gap="sm">
+      <TextInput
+        label="Tên đăng nhập"
+        value={editUsername}
+        onChange={(e) => setEditUsername(e.currentTarget.value)}
+        disabled={editSaving}
+        size={isCompact ? "md" : "sm"}
+      />
+      <PasswordInput
+        label="Mật khẩu mới"
+        placeholder="Để trống nếu không đổi mật khẩu"
+        value={editPassword}
+        onChange={(e) => setEditPassword(e.currentTarget.value)}
+        disabled={editSaving}
+        size={isCompact ? "md" : "sm"}
+      />
+      <TextInput
+        label="Họ tên"
+        value={editFullName}
+        onChange={(e) => setEditFullName(e.currentTarget.value)}
+        disabled={editSaving}
+        size={isCompact ? "md" : "sm"}
+      />
+      <Select
+        label="Vai trò"
+        value={editRole}
+        onChange={(value) => setEditRole((value as Role) || "manager")}
+        data={roleSelectDataScoped}
+        disabled={editSaving}
+        size={isCompact ? "md" : "sm"}
+      />
+      <MultiSelect
+        label="Chi nhánh quản lý"
+        value={editBranchIds}
+        onChange={setEditBranchIds}
+        data={branchMultiData}
+        disabled={editSaving}
+        size={isCompact ? "md" : "sm"}
+      />
+    </Stack>
+  );
+
+  const openCreateUserButton = (
+    <Button
+      variant="filled"
+      size={isCompact ? "md" : "sm"}
+      onClick={() => setCreateOpen(true)}
+      style={{ flexShrink: 0 }}
+    >
+      Tạo tài khoản
+    </Button>
+  );
+
+  const userListToolbar = (
+    <Stack gap="sm">
+      <Group align="flex-end" gap="sm" wrap="nowrap">
+        <TextInputWithVoice
+          label="Tìm tài khoản"
+          placeholder="Tên đăng nhập, họ tên, vai trò..."
+          value={search}
+          onChange={(event) => setSearch(event.currentTarget.value)}
+          size={isCompact ? "md" : "sm"}
+          voiceIconSize={isCompact ? "md" : "sm"}
+          style={{ flex: 1, minWidth: 0 }}
+        />
+        {openCreateUserButton}
+      </Group>
+      <AppUserRoleFilterChips
+        value={roleFilters}
+        onChange={setRoleFilters}
+        roles={userRoleFilterStatuses}
+      />
+    </Stack>
+  );
+
   return (
     <RouteGuard allowedRoles={["admin", "general_manager"]}>
       <Stack>
-        <PortalPageTitle>User management & phân quyền</PortalPageTitle>
-        <PortalSectionCard>
-          <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }} spacing="sm">
-            <TextInput
-              label="Tên đăng nhập"
-              value={username}
-              onChange={(event) => setUsername(event.currentTarget.value)}
-              disabled={isCreateSaving}
-            />
-            <PasswordInput
-              label="Mật khẩu"
-              value={password}
-              onChange={(event) => setPassword(event.currentTarget.value)}
-              disabled={isCreateSaving}
-            />
-            <TextInput
-              label="Họ tên"
-              value={fullName}
-              onChange={(event) => setFullName(event.currentTarget.value)}
-              disabled={isCreateSaving}
-            />
-            <Select
-              label="Vai trò"
-              value={role}
-              onChange={(value) => setRole((value as Role) || "manager")}
-              data={roleSelectDataScoped}
-              disabled={isCreateSaving}
-            />
-            <MultiSelect
-              label="Chi nhánh quản lý"
-              value={branchIds}
-              onChange={setBranchIds}
-              data={branchMultiData}
-              disabled={isCreateSaving}
-            />
-            <PortalStickyAction>
-              <Button
-                fullWidth
-                loading={isCreateSaving}
-                disabled={isCreateSaving}
-                onClick={() => void handleCreateUser()}
-                mt={{ base: 0, sm: 25 }}
-              >
-                Tạo tài khoản
-              </Button>
-            </PortalStickyAction>
-          </SimpleGrid>
-        </PortalSectionCard>
+        <PortalPageTitle>Quản lý người dùng</PortalPageTitle>
+
+        {userListToolbar}
 
         <PortalSectionCard>
+          <Text fw={600} mb="sm" size={isCompact ? "sm" : "md"}>
+            {userListTitle}
+          </Text>
           <PortalDataTable<AppUser>
-            records={visibleUsers}
+            records={roleFilteredUsers}
             getRecordSearchValue={getUserSearchValue}
             sortRecords={sortUsers}
             defaultSort={{ columnAccessor: "username", direction: "asc" }}
-            searchLabel="Tìm tài khoản"
-            searchPlaceholder="Tên đăng nhập, họ tên, vai trò..."
+            searchQuery={search}
+            onSearchQueryChange={setSearch}
+            hideSearch
+            withToolbar={false}
             minHeight={240}
             rowStyle={(u) => bookingRowBusyStyle(isUserRowBusy(u.id))}
-            mobileCardRender={(u) => (
-              <Card key={u.id} withBorder radius="md" padding="md">
-                <Stack gap="xs">
-                  <Group justify="space-between" align="flex-start" wrap="nowrap">
-                    <Stack gap={2} style={{ minWidth: 0 }}>
-                      <Text fw={700} lineClamp={2}>
-                        {u.fullName}
-                      </Text>
-                      <Text size="sm" c="dimmed">
-                        @{u.username}
-                      </Text>
-                    </Stack>
-                    <Badge>{roleLabel[u.role]}</Badge>
-                  </Group>
-                  <Text size="xs" c="dimmed">
-                    {u.branchIds
-                      .map((id) => state.branches.find((branch) => branch.id === id)?.name ?? id)
-                      .join(", ")}
-                  </Text>
-                  <Group gap={6} justify="flex-end" wrap="nowrap">
-                    <ActionIcon
-                      variant="subtle"
-                      aria-label="Sửa"
-                      disabled={
-                        u.id === currentUser?.id || gmCannotManageUser(u) || isUserRowBusy(u.id)
-                      }
-                      onClick={() => openEdit(u)}
-                    >
-                      <Pencil size={16} />
-                    </ActionIcon>
-                    <ActionIcon
-                      variant="subtle"
-                      color="red"
-                      aria-label="Xóa"
-                      disabled={
-                        u.id === currentUser?.id || gmCannotManageUser(u) || isUserRowBusy(u.id)
-                      }
-                      onClick={() => setDeleteTarget(u)}
-                    >
-                      <Trash2 size={16} />
-                    </ActionIcon>
-                  </Group>
-                </Stack>
-              </Card>
-            )}
+            mobileCardRender={(u) => {
+              const cardBusy = bookingCardBusyProps(isUserRowBusy(u.id));
+              return (
+                <AppUserCompactCard
+                  key={u.id}
+                  user={u}
+                  branches={state.branches}
+                  className={cardBusy.className}
+                  style={cardBusy.style}
+                  onClick={() => {
+                    if (isUserRowBusy(u.id)) {
+                      return;
+                    }
+                    openUserDetail(u);
+                  }}
+                />
+              );
+            }}
             columns={[
               { accessor: "username", title: "Tài khoản", sortable: true },
               { accessor: "fullName", title: "Họ tên", sortable: true },
@@ -322,16 +463,44 @@ export default function UserManagementPage() {
                 accessor: "role",
                 title: "Vai trò",
                 sortable: true,
-                render: (u) => <Badge>{roleLabel[u.role]}</Badge>,
+                render: (u) => <AppUserRoleBadge role={u.role} />,
               },
               {
                 accessor: "branchIds",
                 title: "Chi nhánh",
                 sortable: true,
-                render: (u) =>
-                  u.branchIds
-                    .map((id) => state.branches.find((branch) => branch.id === id)?.name ?? id)
-                    .join(", "),
+                render: (u) => appUserBranchNames(u, state.branches) || "—",
+              },
+              {
+                accessor: "password",
+                title: "Mật khẩu",
+                render: (u) => formatAppUserPassword(u.password),
+              },
+              {
+                accessor: "createdAt",
+                title: "Tạo bởi",
+                sortable: true,
+                render: (u) => (
+                  <Stack gap={0}>
+                    <Text size="sm">{appUserDisplayName(u.createdByUserId, state.users)}</Text>
+                    <Text size="xs" c="dimmed">
+                      {formatAppUserAuditAt(u.createdAt)}
+                    </Text>
+                  </Stack>
+                ),
+              },
+              {
+                accessor: "updatedAt",
+                title: "Cập nhật bởi",
+                sortable: true,
+                render: (u) => (
+                  <Stack gap={0}>
+                    <Text size="sm">{appUserDisplayName(u.updatedByUserId, state.users)}</Text>
+                    <Text size="xs" c="dimmed">
+                      {formatAppUserAuditAt(u.updatedAt)}
+                    </Text>
+                  </Stack>
+                ),
               },
               {
                 accessor: "actions",
@@ -367,7 +536,44 @@ export default function UserManagementPage() {
           />
         </PortalSectionCard>
 
-        <Modal
+        <AppUserDetailDrawer
+          user={selectedUser}
+          users={state.users}
+          branches={state.branches}
+          opened={selectedUser != null}
+          onClose={closeUserDetail}
+          disableActions={selectedUser ? cannotManageUser(selectedUser) || editOpen : true}
+          onEdit={handleEditFromDetail}
+          onDelete={handleDeleteFromDetail}
+        />
+
+        <PortalStandardModal
+          opened={createOpen}
+          onClose={() => setCreateOpen(false)}
+          closeOnClickOutside={!isCreateSaving}
+          closeOnEscape={!isCreateSaving}
+          title="Tạo tài khoản"
+          size="md"
+          footer={
+            <Group justify="flex-end" gap="sm" wrap="nowrap">
+              <Button variant="default" onClick={() => setCreateOpen(false)} disabled={isCreateSaving}>
+                Hủy
+              </Button>
+              <Button
+                loading={isCreateSaving}
+                disabled={isCreateSaving}
+                onClick={() => void handleCreateUser()}
+              >
+                Tạo tài khoản
+              </Button>
+            </Group>
+          }
+        >
+          {createUserForm}
+        </PortalStandardModal>
+
+        <PortalStandardModal
+          {...portalModalAboveDetailProps}
           opened={editOpen}
           onClose={() => {
             if (!editSaving) {
@@ -379,42 +585,8 @@ export default function UserManagementPage() {
           closeOnEscape={!editSaving}
           title="Sửa tài khoản"
           size="md"
-        >
-          <Stack gap="sm">
-            <TextInput
-              label="Tên đăng nhập"
-              value={editUsername}
-              onChange={(e) => setEditUsername(e.currentTarget.value)}
-              disabled={editSaving}
-            />
-            <PasswordInput
-              label="Mật khẩu mới"
-              placeholder="Để trống nếu không đổi mật khẩu"
-              value={editPassword}
-              onChange={(e) => setEditPassword(e.currentTarget.value)}
-              disabled={editSaving}
-            />
-            <TextInput
-              label="Họ tên"
-              value={editFullName}
-              onChange={(e) => setEditFullName(e.currentTarget.value)}
-              disabled={editSaving}
-            />
-            <Select
-              label="Vai trò"
-              value={editRole}
-              onChange={(value) => setEditRole((value as Role) || "manager")}
-              data={roleSelectDataScoped}
-              disabled={editSaving}
-            />
-            <MultiSelect
-              label="Chi nhánh quản lý"
-              value={editBranchIds}
-              onChange={setEditBranchIds}
-              data={branchMultiData}
-              disabled={editSaving}
-            />
-            <Group justify="flex-end" mt="md">
+          footer={
+            <Group justify="flex-end" gap="sm" wrap="nowrap">
               <Button variant="default" disabled={editSaving} onClick={() => setEditOpen(false)}>
                 Hủy
               </Button>
@@ -422,8 +594,10 @@ export default function UserManagementPage() {
                 Lưu
               </Button>
             </Group>
-          </Stack>
-        </Modal>
+          }
+        >
+          {editUserForm}
+        </PortalStandardModal>
 
         <PortalMinimalModal
           opened={deleteTarget !== null}

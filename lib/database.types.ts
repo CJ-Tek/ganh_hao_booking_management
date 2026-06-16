@@ -19,26 +19,38 @@ export type Database = {
       app_users: {
         Row: {
           branch_ids: string[]
+          created_at: string
+          created_by_user_id: string | null
           full_name: string
           id: string
           password: string
           role: string
+          updated_at: string
+          updated_by_user_id: string | null
           username: string
         }
         Insert: {
           branch_ids?: string[]
+          created_at?: string
+          created_by_user_id?: string | null
           full_name: string
           id?: string
           password: string
           role: string
+          updated_at?: string
+          updated_by_user_id?: string | null
           username: string
         }
         Update: {
           branch_ids?: string[]
+          created_at?: string
+          created_by_user_id?: string | null
           full_name?: string
           id?: string
           password?: string
           role?: string
+          updated_at?: string
+          updated_by_user_id?: string | null
           username?: string
         }
         Relationships: []
