@@ -71,6 +71,8 @@ export type BookingTablePickerProps = {
   selectableMergeGroupIds?: ReadonlySet<string>;
   highlightTableId?: string | null;
   disabled?: boolean;
+  /** Show sector map and table availability without selection controls. */
+  readOnly?: boolean;
 };
 
 export function BookingTablePicker(props: BookingTablePickerProps) {
@@ -90,6 +92,7 @@ export function BookingTablePicker(props: BookingTablePickerProps) {
     selectableMergeGroupIds,
     highlightTableId,
     disabled = false,
+    readOnly = false,
   } = props;
 
   const isCompact = usePortalCompact();
@@ -263,19 +266,25 @@ export function BookingTablePicker(props: BookingTablePickerProps) {
 
   return (
     <Stack gap="sm">
-      <Group justify="space-between" align="center" wrap="nowrap" gap="sm">
+      {readOnly ? (
         <Text size="sm" fw={600}>
           Khu vực &amp; bàn
         </Text>
-        <Button
-          variant="subtle"
-          size="compact-sm"
-          disabled={disabled || !canClearTableSelection}
-          onClick={handleClearTableSelection}
-        >
-          Bỏ chọn bàn
-        </Button>
-      </Group>
+      ) : (
+        <Group justify="space-between" align="center" wrap="nowrap" gap="sm">
+          <Text size="sm" fw={600}>
+            Khu vực &amp; bàn
+          </Text>
+          <Button
+            variant="subtle"
+            size="compact-sm"
+            disabled={disabled || !canClearTableSelection}
+            onClick={handleClearTableSelection}
+          >
+            Bỏ chọn bàn
+          </Button>
+        </Group>
+      )}
       {branchAreas.length === 0 ? (
         <Text size="sm" c="dimmed">
           Chi nhánh này chưa có khu vực.
@@ -295,7 +304,7 @@ export function BookingTablePicker(props: BookingTablePickerProps) {
                     color="gray"
                     role="radio"
                     aria-checked={selected}
-                    disabled={disabled || branchAreas.length <= 1}
+                    disabled={disabled || (!readOnly && branchAreas.length <= 1)}
                     onClick={() => handleSelectArea(area.id)}
                     styles={{
                       root: selected
@@ -320,7 +329,7 @@ export function BookingTablePicker(props: BookingTablePickerProps) {
               </Text>
             ) : (
               <>
-                <Group gap="xs" wrap="wrap" justify="space-between" align="center">
+                <Group gap="xs" wrap="wrap" justify={readOnly ? "flex-start" : "space-between"} align="center">
                   <Group gap="xs" wrap="wrap">
                     {(["available", "hold", "occupied", "locked"] as const).map((status) => (
                       <Badge
@@ -333,9 +342,11 @@ export function BookingTablePicker(props: BookingTablePickerProps) {
                       </Badge>
                     ))}
                   </Group>
-                  <Text size="sm">
-                    Đã chọn: <strong>{selectionLabel}</strong>
-                  </Text>
+                  {readOnly ? null : (
+                    <Text size="sm">
+                      Đã chọn: <strong>{selectionLabel}</strong>
+                    </Text>
+                  )}
                 </Group>
                 <BookingTablePickerMap
                   layout={layoutModel}
@@ -344,17 +355,13 @@ export function BookingTablePicker(props: BookingTablePickerProps) {
                   tableId={tableId}
                   mergeGroupId={mergeGroupId}
                   disabled={disabled}
+                  readOnly={readOnly}
                   selectableTableIds={selectableTableIds}
                   selectableMergeGroupIds={selectableMergeGroupIds}
                   highlightTableId={highlightTableId}
                   onSelectTable={handleSelectTable}
                   onSelectMergeGroup={handleSelectMergeGroup}
                 />
-                {layoutModel.paletteTableCount > 0 ? (
-                  <Text size="xs" c="dimmed">
-                    {layoutModel.paletteTableCount} bàn chưa đặt trên sơ đồ (chỉ hiện bàn trên lưới).
-                  </Text>
-                ) : null}
               </>
             )
           ) : (

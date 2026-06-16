@@ -42,7 +42,7 @@ export default function SelectBranchPage() {
       return;
     }
     if (currentUser.role === "manager" && currentUser.branchIds.length <= 1) {
-      router.replace("/dashboard");
+      router.replace("/bookings");
       return;
     }
   }, [currentUser, router]);
@@ -57,7 +57,13 @@ export default function SelectBranchPage() {
     if (currentUser && shouldPickBranchOnLogin(currentUser.role)) {
       clearBranchPickRequired();
     }
-    router.replace(currentUser?.role === "employee" ? "/floor-map" : "/dashboard");
+    router.replace(
+      currentUser?.role === "employee"
+        ? "/floor-map"
+        : currentUser?.role === "manager"
+          ? "/bookings"
+          : "/dashboard"
+    );
   };
 
   return (

@@ -25,7 +25,12 @@ export function RouteGuard({
       return;
     }
     if (allowedRoles && !allowedRoles.includes(currentUser.role)) {
-      const fallback = currentUser.role === "employee" ? "/floor-map" : "/dashboard";
+      const fallback =
+        currentUser.role === "employee"
+          ? "/floor-map"
+          : currentUser.role === "manager"
+            ? "/bookings"
+            : "/dashboard";
       router.replace(fallback);
     }
   }, [allowedRoles, currentUser, isLoading, router]);

@@ -60,7 +60,7 @@ import classes from "./app-shell-layout.module.css";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode; adminOnly?: boolean };
 
-const MANAGER_SECTION_HREFS = ["/calendar", "/floor-map", "/bookings", "/customers"] as const;
+const MANAGER_SECTION_HREFS = ["/dashboard", "/calendar", "/floor-map", "/bookings", "/customers"] as const;
 const MANAGER_DOCK_HREFS = ["/calendar", "/floor-map", "/bookings"] as const;
 
 const managerDockShortLabel: Record<(typeof MANAGER_DOCK_HREFS)[number], string> = {

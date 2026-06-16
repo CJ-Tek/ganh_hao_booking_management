@@ -30,10 +30,11 @@ function isTableSelectable(
   table: PickerPlacedTable,
   options: {
     disabled?: boolean;
+    readOnly?: boolean;
     selectableTableIds?: ReadonlySet<string>;
   }
 ): boolean {
-  if (options.disabled) {
+  if (options.readOnly || options.disabled) {
     return false;
   }
   if (table.status === "locked") {
@@ -71,6 +72,7 @@ export type BookingTablePickerMapProps = {
   tableId: string | null;
   mergeGroupId: string | null;
   disabled?: boolean;
+  readOnly?: boolean;
   selectableTableIds?: ReadonlySet<string>;
   selectableMergeGroupIds?: ReadonlySet<string>;
   highlightTableId?: string | null;
@@ -86,6 +88,7 @@ export function BookingTablePickerMap(props: BookingTablePickerMapProps) {
     tableId,
     mergeGroupId,
     disabled = false,
+    readOnly = false,
     selectableTableIds,
     selectableMergeGroupIds,
     highlightTableId,
@@ -130,22 +133,23 @@ export function BookingTablePickerMap(props: BookingTablePickerMapProps) {
 
   const tableNodes = useMemo(() => {
     return layout.placedTables.map((table) => {
-      const selectable = isTableSelectable(table, { disabled, selectableTableIds });
-      const selectedAsTable = tableId === table.id;
+      const selectable = isTableSelectable(table, { disabled, readOnly, selectableTableIds });
+      const selectedAsTable = !readOnly && tableId === table.id;
       const selectedAsMergeMember =
+        !readOnly &&
         Boolean(table.mergeGroupId) &&
         mergeGroupId === table.mergeGroupId &&
         !tableId;
-      const highlighted = highlightTableId === table.id;
+      const highlighted = !readOnly && highlightTableId === table.id;
       const style = tableStatusKonvaStyle[table.status];
-      const fill = selectable ? style.fill : pickerDisabledFill;
+      const fill = readOnly || selectable ? style.fill : pickerDisabledFill;
       const stroke = selectedAsTable
         ? pickerSelectionStroke
         : selectedAsMergeMember
           ? pickerHoverStroke
-          : hoveredTableId === table.id && selectable
+          : !readOnly && hoveredTableId === table.id && selectable
             ? pickerHoverStroke
-            : selectable
+            : readOnly || selectable
               ? style.stroke
               : pickerDisabledStroke;
       const strokeWidth =
@@ -158,16 +162,24 @@ export function BookingTablePickerMap(props: BookingTablePickerMapProps) {
           key={table.id}
           x={table.centerX - halfW}
           y={table.centerY - halfH}
-          onMouseEnter={() => setHoveredTableId(table.id)}
-          onMouseLeave={() => setHoveredTableId((id) => (id === table.id ? null : id))}
+          onMouseEnter={() => {
+            if (!readOnly) {
+              setHoveredTableId(table.id);
+            }
+          }}
+          onMouseLeave={() => {
+            if (!readOnly) {
+              setHoveredTableId((id) => (id === table.id ? null : id));
+            }
+          }}
           onClick={() => {
-            if (!areaId || !selectable) {
+            if (readOnly || !areaId || !selectable) {
               return;
             }
             onSelectTable(table.id, areaId);
           }}
           onTap={() => {
-            if (!areaId || !selectable) {
+            if (readOnly || !areaId || !selectable) {
               return;
             }
             onSelectTable(table.id, areaId);
@@ -180,7 +192,7 @@ export function BookingTablePickerMap(props: BookingTablePickerMapProps) {
             stroke={stroke}
             strokeWidth={strokeWidth}
             cornerRadius={6}
-            opacity={selectable ? 1 : 0.55}
+            opacity={readOnly || selectable ? 1 : 0.55}
           />
           <Text
             text={table.name}
@@ -203,6 +215,7 @@ export function BookingTablePickerMap(props: BookingTablePickerMapProps) {
   }, [
     areaId,
     disabled,
+    readOnly,
     highlightTableId,
     hoveredTableId,
     layout.placedTables,
@@ -218,6 +231,7 @@ export function BookingTablePickerMap(props: BookingTablePickerMapProps) {
       renderMergeBbox(bbox, {
         areaId,
         disabled,
+        readOnly,
         mergeGroupId,
         mergeStatusById,
         hoveredMergeId,
@@ -229,6 +243,7 @@ export function BookingTablePickerMap(props: BookingTablePickerMapProps) {
   }, [
     areaId,
     disabled,
+    readOnly,
     hoveredMergeId,
     layout.mergeBboxes,
     mergeGroupId,
@@ -273,6 +288,7 @@ function renderMergeBbox(
   ctx: {
     areaId: string | null;
     disabled?: boolean;
+    readOnly?: boolean;
     mergeGroupId: string | null;
     mergeStatusById: ReadonlyMap<string, TableStatus>;
     hoveredMergeId: string | null;
@@ -282,7 +298,8 @@ function renderMergeBbox(
   }
 ) {
   const selectable =
-    !ctx.selectableMergeGroupIds || ctx.selectableMergeGroupIds.has(bbox.groupId);
+    !ctx.readOnly &&
+    (!ctx.selectableMergeGroupIds || ctx.selectableMergeGroupIds.has(bbox.groupId));
   const status = ctx.mergeStatusById.get(bbox.groupId) ?? "available";
   const style = tableStatusKonvaStyle[status];
   const selected = ctx.mergeGroupId === bbox.groupId;
@@ -297,16 +314,24 @@ function renderMergeBbox(
       key={bbox.groupId}
       x={bbox.x}
       y={bbox.y}
-      onMouseEnter={() => ctx.setHoveredMergeId(bbox.groupId)}
-      onMouseLeave={() => ctx.setHoveredMergeId(null)}
+      onMouseEnter={() => {
+        if (!ctx.readOnly) {
+          ctx.setHoveredMergeId(bbox.groupId);
+        }
+      }}
+      onMouseLeave={() => {
+        if (!ctx.readOnly) {
+          ctx.setHoveredMergeId(null);
+        }
+      }}
       onClick={() => {
-        if (ctx.disabled || !ctx.areaId || !selectable) {
+        if (ctx.readOnly || ctx.disabled || !ctx.areaId || !selectable) {
           return;
         }
         ctx.onSelectMergeGroup(bbox.groupId, ctx.areaId);
       }}
       onTap={() => {
-        if (ctx.disabled || !ctx.areaId || !selectable) {
+        if (ctx.readOnly || ctx.disabled || !ctx.areaId || !selectable) {
           return;
         }
         ctx.onSelectMergeGroup(bbox.groupId, ctx.areaId);
@@ -320,8 +345,8 @@ function renderMergeBbox(
         strokeWidth={selected ? 3 : 2}
         dash={mergeGroupKonvaStyle.dash}
         cornerRadius={8}
-        opacity={selectable ? 1 : 0.5}
-        listening={selectable}
+        opacity={ctx.readOnly || selectable ? 1 : 0.5}
+        listening={!ctx.readOnly && selectable}
       />
       <Rect
         width={bbox.width}
