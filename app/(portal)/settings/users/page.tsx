@@ -6,10 +6,14 @@ import {
   Group,
   MultiSelect,
   PasswordInput,
+  ScrollArea,
   Select,
   SimpleGrid,
   Stack,
+  Table,
+  Tabs,
   Text,
+  Textarea,
   TextInput,
 } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
@@ -37,6 +41,7 @@ import {
   userMatchesRoleFilters,
 } from "@/lib/app-user-display";
 import { bookingCardBusyProps, bookingRowBusyStyle } from "@/lib/busy-row-style";
+import { parseExcelUserPaste } from "@/lib/parse-excel-user-paste";
 import { portalModalAboveDetailProps } from "@/lib/portal-z-index";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { AppUser, Role } from "@/lib/types";
@@ -78,6 +83,8 @@ export default function UserManagementPage() {
   const [deleteTarget, setDeleteTarget] = useState<AppUser | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [isCreateSaving, setIsCreateSaving] = useState(false);
+  const [createMode, setCreateMode] = useState<"single" | "paste">("single");
+  const [pasteText, setPasteText] = useState("");
 
   const visibleUsers = useMemo(
     () =>
@@ -223,6 +230,18 @@ export default function UserManagementPage() {
     setDeleteTarget(selectedUser);
   };
 
+  const parsedPasteRows = useMemo(() => parseExcelUserPaste(pasteText), [pasteText]);
+
+  const resetCreateForm = () => {
+    setUsername("");
+    setPassword("");
+    setFullName("");
+    setRole("manager");
+    setBranchIds([]);
+    setCreateMode("single");
+    setPasteText("");
+  };
+
   const handleCreateUser = async () => {
     setIsCreateSaving(true);
     try {
@@ -232,13 +251,73 @@ export default function UserManagementPage() {
         message: result.message,
       });
       if (result.ok) {
-        setUsername("");
-        setPassword("");
-        setFullName("");
-        setRole("manager");
-        setBranchIds([]);
+        resetCreateForm();
         setCreateOpen(false);
       }
+    } finally {
+      setIsCreateSaving(false);
+    }
+  };
+
+  const handleBatchCreateUsers = async () => {
+    if (!password.trim()) {
+      notifications.show({ color: "red", message: "Vui lòng nhập mật khẩu dùng chung." });
+      return;
+    }
+    if (parsedPasteRows.length === 0) {
+      notifications.show({
+        color: "red",
+        message: "Chưa có dòng hợp lệ. Dán 2 cột từ Excel: Họ tên và Tên đăng nhập.",
+      });
+      return;
+    }
+
+    setIsCreateSaving(true);
+    let successCount = 0;
+    const failures: string[] = [];
+
+    try {
+      for (const row of parsedPasteRows) {
+        const result = await addUser({
+          username: row.username,
+          password,
+          fullName: row.fullName,
+          role,
+          branchIds,
+        });
+        if (result.ok) {
+          successCount += 1;
+        } else {
+          failures.push(`${row.username}: ${result.message}`);
+        }
+      }
+
+      if (successCount > 0 && failures.length === 0) {
+        notifications.show({
+          color: "green",
+          message: `Đã tạo ${successCount} tài khoản.`,
+        });
+        resetCreateForm();
+        setCreateOpen(false);
+        return;
+      }
+
+      if (successCount > 0) {
+        notifications.show({
+          color: "yellow",
+          title: `Đã tạo ${successCount}/${parsedPasteRows.length} tài khoản`,
+          message: failures.slice(0, 3).join(" · ") + (failures.length > 3 ? " …" : ""),
+          autoClose: false,
+        });
+        return;
+      }
+
+      notifications.show({
+        color: "red",
+        title: "Không tạo được tài khoản nào",
+        message: failures.slice(0, 3).join(" · ") + (failures.length > 3 ? " …" : ""),
+        autoClose: false,
+      });
     } finally {
       setIsCreateSaving(false);
     }
@@ -298,26 +377,12 @@ export default function UserManagementPage() {
 
   const branchMultiData = state.branches.map((b) => ({ value: b.id, label: b.name }));
 
-  const createUserForm = (
-    <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
-      <TextInput
-        label="Tên đăng nhập"
-        value={username}
-        onChange={(event) => setUsername(event.currentTarget.value)}
-        disabled={isCreateSaving}
-        size={isCompact ? "md" : "sm"}
-      />
+  const sharedCreateFields = (
+    <>
       <PasswordInput
-        label="Mật khẩu"
+        label={createMode === "paste" ? "Mật khẩu (dùng chung)" : "Mật khẩu"}
         value={password}
         onChange={(event) => setPassword(event.currentTarget.value)}
-        disabled={isCreateSaving}
-        size={isCompact ? "md" : "sm"}
-      />
-      <TextInput
-        label="Họ tên"
-        value={fullName}
-        onChange={(event) => setFullName(event.currentTarget.value)}
         disabled={isCreateSaving}
         size={isCompact ? "md" : "sm"}
       />
@@ -337,7 +402,89 @@ export default function UserManagementPage() {
         disabled={isCreateSaving}
         size={isCompact ? "md" : "sm"}
       />
-    </SimpleGrid>
+    </>
+  );
+
+  const createUserForm = (
+    <Tabs
+      value={createMode}
+      onChange={(value) => setCreateMode((value as "single" | "paste") || "single")}
+    >
+      <Tabs.List>
+        <Tabs.Tab value="single">Từng tài khoản</Tabs.Tab>
+        <Tabs.Tab value="paste">Dán từ Excel</Tabs.Tab>
+      </Tabs.List>
+
+      <Tabs.Panel value="single" pt="md">
+        <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+          <TextInput
+            label="Tên đăng nhập"
+            value={username}
+            onChange={(event) => setUsername(event.currentTarget.value)}
+            disabled={isCreateSaving}
+            size={isCompact ? "md" : "sm"}
+          />
+          {sharedCreateFields}
+          <TextInput
+            label="Họ tên"
+            value={fullName}
+            onChange={(event) => setFullName(event.currentTarget.value)}
+            disabled={isCreateSaving}
+            size={isCompact ? "md" : "sm"}
+          />
+        </SimpleGrid>
+      </Tabs.Panel>
+
+      <Tabs.Panel value="paste" pt="md">
+        <Stack gap="sm">
+          <Textarea
+            label="Dán từ Excel"
+            description="Sao chép 2 cột: cột 1 là Họ tên, cột 2 là Tên đăng nhập."
+            placeholder={"Nguyễn Văn A\tuser_a\nTrần Thị B\tuser_b"}
+            value={pasteText}
+            onChange={(event) => setPasteText(event.currentTarget.value)}
+            disabled={isCreateSaving}
+            minRows={5}
+            autosize
+            maxRows={10}
+            size={isCompact ? "md" : "sm"}
+          />
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="sm">
+            {sharedCreateFields}
+          </SimpleGrid>
+          {parsedPasteRows.length > 0 ? (
+            <Stack gap={4}>
+              <Text size="sm" fw={500}>
+                Xem trước ({parsedPasteRows.length} tài khoản)
+              </Text>
+              <ScrollArea.Autosize mah={200} type="auto">
+                <Table striped highlightOnHover withTableBorder withColumnBorders>
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Họ tên</Table.Th>
+                      <Table.Th>Tên đăng nhập</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {parsedPasteRows.map((row) => (
+                      <Table.Tr key={`${row.username}-${row.fullName}`}>
+                        <Table.Td>{row.fullName}</Table.Td>
+                        <Table.Td>{row.username}</Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </ScrollArea.Autosize>
+            </Stack>
+          ) : pasteText.trim() ? (
+            <Text size="sm" c="dimmed">
+              Chưa nhận diện được dòng hợp lệ. Mỗi dòng cần đủ Họ tên và Tên đăng nhập (phân tách bằng
+              tab khi dán từ Excel).
+            </Text>
+          ) : null}
+        </Stack>
+      </Tabs.Panel>
+    </Tabs>
   );
 
   const editUserForm = (
@@ -549,7 +696,11 @@ export default function UserManagementPage() {
 
         <PortalStandardModal
           opened={createOpen}
-          onClose={() => setCreateOpen(false)}
+          onClose={() => {
+            if (!isCreateSaving) {
+              setCreateOpen(false);
+            }
+          }}
           closeOnClickOutside={!isCreateSaving}
           closeOnEscape={!isCreateSaving}
           title="Tạo tài khoản"
@@ -561,10 +712,19 @@ export default function UserManagementPage() {
               </Button>
               <Button
                 loading={isCreateSaving}
-                disabled={isCreateSaving}
-                onClick={() => void handleCreateUser()}
+                disabled={
+                  isCreateSaving ||
+                  (createMode === "paste"
+                    ? parsedPasteRows.length === 0 || !password.trim()
+                    : false)
+                }
+                onClick={() =>
+                  void (createMode === "paste" ? handleBatchCreateUsers() : handleCreateUser())
+                }
               >
-                Tạo tài khoản
+                {createMode === "paste"
+                  ? `Tạo ${parsedPasteRows.length > 0 ? parsedPasteRows.length : ""} tài khoản`.trim()
+                  : "Tạo tài khoản"}
               </Button>
             </Group>
           }
