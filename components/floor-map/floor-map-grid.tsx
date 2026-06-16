@@ -119,7 +119,7 @@ export function FloorMapGrid(props: FloorMapGridProps) {
           enabled: isEditMode,
           bounded: true,
           cancel:
-            "[data-table-status-menu], [data-table-remove], [data-merge-no-drag], button, a",
+            "[data-table-remove], [data-merge-no-drag], button, a",
         }}
         resizeConfig={{ enabled: false }}
         dropConfig={{

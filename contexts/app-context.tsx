@@ -61,6 +61,7 @@ import {
   deleteAreaInSupabase,
   deleteUserInSupabase,
   updateUserInSupabase,
+  updateOwnProfileInSupabase,
   checkInBookingInSupabase,
   queueBookingInSupabase,
   createBookingInSupabase,
@@ -274,6 +275,11 @@ interface AppContextValue {
       branchIds: string[];
     }
   ) => Promise<ActionResult>;
+  updateOwnProfile: (payload: {
+    currentPassword: string;
+    fullName: string;
+    newPassword?: string;
+  }) => Promise<ActionResult>;
   deleteUser: (userId: string) => Promise<ActionResult>;
   markNotificationRead: (id: string) => Promise<void>;
   markAllScopedNotificationsRead: () => Promise<void>;
@@ -2190,6 +2196,63 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     return result;
   };
 
+  const updateOwnProfile = async (payload: {
+    currentPassword: string;
+    fullName: string;
+    newPassword?: string;
+  }) => {
+    if (!currentUser) {
+      return { ok: false, message: "Chưa đăng nhập." };
+    }
+    if (!hasSupabase) {
+      return { ok: false, message: "Chưa kết nối Supabase." };
+    }
+
+    const fullName = payload.fullName.trim();
+    if (!fullName) {
+      return { ok: false, message: "Vui lòng nhập họ tên." };
+    }
+    if (!payload.currentPassword) {
+      return { ok: false, message: "Vui lòng nhập mật khẩu hiện tại." };
+    }
+
+    const newPassword = payload.newPassword?.trim();
+    if (newPassword && newPassword.length > 0 && newPassword.length < 4) {
+      return { ok: false, message: "Mật khẩu mới phải có ít nhất 4 ký tự." };
+    }
+
+    const result = await updateOwnProfileInSupabase({
+      userId: currentUser.id,
+      currentPassword: payload.currentPassword,
+      fullName,
+      newPassword: newPassword && newPassword.length > 0 ? newPassword : undefined,
+    });
+
+    if (result.ok) {
+      setCurrentUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              fullName,
+            }
+          : null
+      );
+      setState((prev) => ({
+        ...prev,
+        users: prev.users.map((u) =>
+          u.id === currentUser.id
+            ? {
+                ...u,
+                fullName,
+              }
+            : u
+        ),
+      }));
+    }
+
+    return result;
+  };
+
   const deleteUser = async (userId: string) => {
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
@@ -2709,6 +2772,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     deleteArea,
     addUser,
     updateUser,
+    updateOwnProfile,
     deleteUser,
     markNotificationRead,
     markAllScopedNotificationsRead,

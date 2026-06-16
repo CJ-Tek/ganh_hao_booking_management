@@ -103,6 +103,33 @@ export async function loginWithSupabase(
   }
 }
 
+export async function updateOwnProfileInSupabase(payload: {
+  userId: string;
+  currentPassword: string;
+  fullName: string;
+  newPassword?: string;
+}): Promise<Result> {
+  if (!isSupabaseEnabled()) {
+    return { ok: false, message: "Chưa cấu hình Supabase." };
+  }
+
+  try {
+    const response = await fetch("/api/auth/profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const body = (await response.json()) as Result;
+    if (!response.ok || !body.ok) {
+      return { ok: false, message: body.message || "Không thể cập nhật tài khoản." };
+    }
+    return body;
+  } catch {
+    return { ok: false, message: "Không thể kết nối máy chủ." };
+  }
+}
+
 export async function createBookingInSupabase(
   input: Parameters<
     typeof import("./supabase-store-server").createBookingInSupabase

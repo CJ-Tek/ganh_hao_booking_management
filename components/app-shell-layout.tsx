@@ -41,6 +41,7 @@ import {
   SquareMenu,
   Users,
   UserCog,
+  UserCircle,
   BookOpenText,
   Building2,
 } from "lucide-react";
@@ -174,10 +175,9 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   }, [currentUser]);
 
   /** Bottom quick nav on narrow viewports (sync with `usePortalCompact` / navbar `breakpoint: "md"`).
-   *  Enabled for branch managers, employees, general_manager, and admin. */
+   *  Enabled for branch managers, general_manager, and admin — not employees (single floor-map page). */
   const usesMobileDock =
     currentUser?.role === "manager" ||
-    currentUser?.role === "employee" ||
     currentUser?.role === "general_manager" ||
     currentUser?.role === "admin";
 
@@ -467,24 +467,32 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               ) : null}
 
               <Group gap="xs" wrap="nowrap" visibleFrom="md">
-                <Avatar
-                  radius="xl"
-                  style={{
-                    background: "rgba(255,255,255,0.18)",
-                    color: "white",
-                    border: "1px solid rgba(255,255,255,0.28)",
-                  }}
+                <UnstyledButton
+                  component={Link}
+                  href="/settings/account"
+                  style={{ textDecoration: "none", color: "inherit" }}
                 >
-                  {currentUser?.fullName[0] ?? "U"}
-                </Avatar>
-                <Stack gap={0}>
-                  <Text size="sm" fw={600} c="white">
-                    {currentUser?.fullName}
-                  </Text>
-                  <Text size="xs" c="rgba(255,255,255,0.82)">
-                    {currentUser?.username}
-                  </Text>
-                </Stack>
+                  <Group gap="xs" wrap="nowrap">
+                    <Avatar
+                      radius="xl"
+                      style={{
+                        background: "rgba(255,255,255,0.18)",
+                        color: "white",
+                        border: "1px solid rgba(255,255,255,0.28)",
+                      }}
+                    >
+                      {currentUser?.fullName[0] ?? "U"}
+                    </Avatar>
+                    <Stack gap={0}>
+                      <Text size="sm" fw={600} c="white">
+                        {currentUser?.fullName}
+                      </Text>
+                      <Text size="xs" c="rgba(255,255,255,0.82)">
+                        {currentUser?.username}
+                      </Text>
+                    </Stack>
+                  </Group>
+                </UnstyledButton>
                 {!hasSupabase && (
                   <Badge color="red" variant="light">
                     Chưa kết nối DB
@@ -541,6 +549,22 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 }}
               />
             ))}
+            <NavLink
+              component={Link}
+              href="/settings/account"
+              className={classes.blueNavLink}
+              label="Tài khoản của tôi"
+              leftSection={<UserCircle size={20} />}
+              active={pathname.startsWith("/settings/account")}
+              onClick={close}
+              style={{
+                borderRadius: 12,
+                minHeight: 62,
+                paddingInline: 12,
+                fontSize: "1rem",
+                fontWeight: 700,
+              }}
+            />
             {currentUser?.role === "employee" && currentUser.branchIds.length > 1 ? (
               <NavLink
                 component={Link}
@@ -568,19 +592,26 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             pb="max(var(--mantine-spacing-xl), calc(env(safe-area-inset-bottom, 0px) + var(--mantine-spacing-md)))"
           >
             <Divider color="rgba(255,255,255,0.25)" />
-            <Group wrap="nowrap" align="flex-start">
-              <Avatar color="brand" radius="xl" size="md">
-                {currentUser?.fullName[0] ?? "U"}
-              </Avatar>
-              <Stack gap={0} style={{ minWidth: 0 }}>
-                <Text size="sm" fw={600} lineClamp={2} c="white">
-                  {currentUser?.fullName}
-                </Text>
-                <Text size="xs" c="rgba(255,255,255,0.82)" lineClamp={1}>
-                  {currentUser?.username}
-                </Text>
-              </Stack>
-            </Group>
+            <UnstyledButton
+              component={Link}
+              href="/settings/account"
+              onClick={close}
+              style={{ color: "inherit", width: "100%" }}
+            >
+              <Group wrap="nowrap" align="flex-start">
+                <Avatar color="brand" radius="xl" size="md">
+                  {currentUser?.fullName[0] ?? "U"}
+                </Avatar>
+                <Stack gap={0} style={{ minWidth: 0 }}>
+                  <Text size="sm" fw={600} lineClamp={2} c="white">
+                    {currentUser?.fullName}
+                  </Text>
+                  <Text size="xs" c="rgba(255,255,255,0.82)" lineClamp={1}>
+                    {currentUser?.username}
+                  </Text>
+                </Stack>
+              </Group>
+            </UnstyledButton>
             {!hasSupabase && (
               <Badge color="red" variant="light" w="fit-content">
                 Chưa kết nối DB

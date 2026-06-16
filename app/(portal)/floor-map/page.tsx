@@ -8,7 +8,6 @@ import {
   Divider,
   Flex,
   Group,
-  Menu,
   Loader,
   Modal,
   Radio,
@@ -33,7 +32,6 @@ import {
   Crosshair,
   Minimize2,
   Minus,
-  MoreVertical,
   Plus,
   RotateCcw,
   Pencil,
@@ -306,7 +304,6 @@ function isTableBlockTarget(target: EventTarget | null) {
   return Boolean(
     el.closest(".react-grid-item") ||
       el.closest("[data-table-block]") ||
-      el.closest("[data-table-status-menu]") ||
       el.closest("[data-register-panel]")
   );
 }
@@ -492,7 +489,6 @@ export default function FloorMapPage() {
   const {
     state,
     filteredBranchIds,
-    updateTableStatus,
     createBooking,
     assignBookingToTable,
     changeBookingTable,
@@ -679,8 +675,6 @@ export default function FloorMapPage() {
   const [detailTableBlockLoading, setDetailTableBlockLoading] = useState(false);
   const [detailBookingActionLoading, setDetailBookingActionLoading] = useState(false);
   const [changeTableBooking, setChangeTableBooking] = useState<Booking | null>(null);
-  /** Status menu uses portal — block canvas interaction while open */
-  const [statusMenuOpen, setStatusMenuOpen] = useState(false);
   const [floorMapSelectedDate, setFloorMapSelectedDate] = useState(() => dayjs());
   const [createBookingModalOpened, setCreateBookingModalOpened] = useState(false);
   const [registerCreatedNextStep, setRegisterCreatedNextStep] =
@@ -718,8 +712,7 @@ export default function FloorMapPage() {
   }, [searchParams]);
 
   const blockCanvasForOverlay =
-    Boolean(registerTable || registerMergeGroup || detailTable || detailMergeGroup) ||
-    statusMenuOpen;
+    Boolean(registerTable || registerMergeGroup || detailTable || detailMergeGroup);
   const isEditMode = mode === "edit";
   const editBlockedByOther = Boolean(layoutLockHolderName);
 
@@ -2778,119 +2771,6 @@ export default function FloorMapPage() {
     }
   };
 
-  const handleStatusChange = async (table: DiningTable, next: TableStatus) => {
-    if (table.status === next || isTableStatusBusy(table.id)) {
-      return;
-    }
-    await runTableStatusAction(table.id, async () => {
-      try {
-        await updateTableStatus(table.id, next);
-        notifications.show({
-          color: "green",
-          message: `Đã đổi trạng thái ${table.name} thành ${tableStatusLabel[next]}.`,
-        });
-      } catch (error) {
-        notifications.show({
-          color: "red",
-          message: error instanceof Error ? error.message : "Không thể cập nhật trạng thái.",
-        });
-      }
-    });
-  };
-
-  const handleTableBlockComplete = async (table: DiningTable) => {
-    const booking = pickPrimaryBookingOnTable(table.id, bookingsForFloorTableDisplay);
-    if (
-      !booking ||
-      (booking.status !== "checked_in" && booking.status !== "seated")
-    ) {
-      notifications.show({
-        color: "yellow",
-        message: "Chỉ hoàn thành khi khách đã vào bàn hoặc đã check-in.",
-      });
-      return;
-    }
-    if (!hasSupabase) {
-      notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
-      return;
-    }
-    if (isTableStatusBusy(table.id)) {
-      return;
-    }
-    await runTableStatusAction(table.id, async () => {
-      try {
-        await updateBookingStatus(booking.id, "completed");
-        notifications.show({ color: "green", message: "Đã hoàn thành booking." });
-        if (detailTable?.id === table.id) {
-          closeDetailModal();
-        }
-      } catch (error) {
-        notifications.show({
-          color: "red",
-          message: error instanceof Error ? error.message : "Không hoàn thành được booking.",
-        });
-      }
-    });
-  };
-
-  const handleMergeGroupBlockComplete = async (group: TableMergeGroup) => {
-    const booking = pickPrimaryBookingOnMergeGroup(group.id, bookingsForFloorTableDisplay);
-    if (
-      !booking ||
-      (booking.status !== "checked_in" && booking.status !== "seated")
-    ) {
-      notifications.show({
-        color: "yellow",
-        message: "Chỉ hoàn thành khi khách đã vào bàn hoặc đã check-in.",
-      });
-      return;
-    }
-    if (!hasSupabase) {
-      notifications.show({ color: "red", message: "Chưa kết nối Supabase." });
-      return;
-    }
-    const busyMemberId = group.tableIds.find((tableId) => isTableStatusBusy(tableId));
-    if (busyMemberId) {
-      return;
-    }
-    await runTableStatusAction(group.id, async () => {
-      try {
-        await updateBookingStatus(booking.id, "completed");
-        notifications.show({ color: "green", message: "Đã hoàn thành booking." });
-        if (detailMergeGroup?.id === group.id) {
-          closeDetailModal();
-        }
-      } catch (error) {
-        notifications.show({
-          color: "red",
-          message: error instanceof Error ? error.message : "Không hoàn thành được booking.",
-        });
-      }
-    });
-  };
-
-  const handleTableBlockLock = async (table: DiningTable) => {
-    if (tableHasActiveBookingOnFloorDay(table.id, floorMapDayBookings)) {
-      notifications.show({
-        color: "yellow",
-        message: "Không thể khóa bàn khi còn booking trong ngày đang xem.",
-      });
-      return;
-    }
-    const persisted = state.tables.find((item) => item.id === table.id);
-    if (persisted?.status === "locked") {
-      return;
-    }
-    await handleStatusChange(table, "locked");
-  };
-
-  const handleTableBlockUnlock = async (table: DiningTable) => {
-    if (table.status !== "locked") {
-      return;
-    }
-    await handleStatusChange(table, "available");
-  };
-
   const closeRegistrationPanel = useCallback(() => {
     setRegisterTable(null);
     setRegisterMergeGroup(null);
@@ -4626,21 +4506,6 @@ export default function FloorMapPage() {
                     const peekCustomer = displayBooking
                       ? customerById.get(displayBooking.customerId)
                       : undefined;
-                    const showStatusMenu =
-                      table.status === "available" ||
-                      table.status === "locked" ||
-                      table.status === "occupied";
-                    const canComplete =
-                      table.status === "occupied" &&
-                      displayBooking != null &&
-                      (displayBooking.status === "checked_in" ||
-                        displayBooking.status === "seated");
-                    const canLock =
-                      table.status === "available" &&
-                      !tableHasActiveBookingOnFloorDay(table.id, floorMapDayBookings, {
-                        excludeMergeGroupId: mergeGroupId ?? undefined,
-                      });
-                    const showUnlock = table.status === "locked";
                     const isMergeGridSelect = gridTableActionMode === "merge";
                     const isSplitGridSelect = gridTableActionMode === "split";
                     const isGridSelecting = isMergeGridSelect || isSplitGridSelect;
@@ -4695,27 +4560,12 @@ export default function FloorMapPage() {
                             isMergeMember && mergeGroupBooking && !tableBooking
                           )}
                           customerName={peekCustomer?.fullName ?? ""}
-                          isEmployee={isEmployee}
                           isBusy={isTableStatusBusy(table.id)}
                           isDragging={false}
-                          showStatusMenu={showStatusMenu && !isGridSelecting}
-                          canComplete={canComplete}
-                          canLock={canLock}
-                          showUnlock={showUnlock}
                           onGridSelect={onGridSelect}
                           isGridSelected={isGridSelected}
                           suppressOpen={isGridSelecting}
                           onOpenTable={() => handleViewOrRegisterForTable(table)}
-                          onOpenDetail={() => openDetailForTable(table)}
-                          onCompleteBooking={() => void handleTableBlockComplete(table)}
-                          onLockTable={() => void handleTableBlockLock(table)}
-                          onUnlockTable={() => void handleTableBlockUnlock(table)}
-                          onStatusMenuOpen={() => {
-                            panStateRef.current = null;
-                            placementTapRef.current = null;
-                            setStatusMenuOpen(true);
-                          }}
-                          onStatusMenuClose={() => setStatusMenuOpen(false)}
                         />
                       </div>
                     );
@@ -4802,20 +4652,6 @@ export default function FloorMapPage() {
                 const mergeStatusSurfaceClass = !isEditMode
                   ? MERGE_GROUP_STATUS_SURFACE_CLASS[viewMergeStatus ?? "available"]
                   : "";
-                const showMergeStatusMenu =
-                  !isEditMode &&
-                  !isEmployee &&
-                  (viewMergeStatus === "available" ||
-                    viewMergeStatus === "locked" ||
-                    viewMergeStatus === "occupied");
-                const canCompleteMerge =
-                  viewMergeStatus === "occupied" &&
-                  viewMergeBooking != null &&
-                  (viewMergeBooking.status === "checked_in" ||
-                    viewMergeBooking.status === "seated");
-                const isMergeGroupBusy =
-                  mergeGroup.tableIds.some((tableId) => isTableStatusBusy(tableId)) ||
-                  isTableStatusBusy(mergeGroup.id);
                 return (
                   <div
                     key={`merge-header-${bbox.groupId}`}
@@ -4921,76 +4757,6 @@ export default function FloorMapPage() {
                                   mergeGroup.endDate
                                 )}
                               </span>
-                            ) : null}
-                            {showMergeStatusMenu ? (
-                              <Group
-                                gap={4}
-                                wrap="nowrap"
-                                align="center"
-                                className={classes.mergeGroupContainerHeaderActions}
-                                data-table-status-menu=""
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  event.preventDefault();
-                                }}
-                              >
-                                <Menu
-                                  withinPortal
-                                  position="bottom-end"
-                                  closeOnItemClick
-                                  onOpen={() => {
-                                    panStateRef.current = null;
-                                    placementTapRef.current = null;
-                                    setStatusMenuOpen(true);
-                                  }}
-                                  onClose={() => setStatusMenuOpen(false)}
-                                >
-                                  <Menu.Target>
-                                    <ActionIcon
-                                      type="button"
-                                      variant="subtle"
-                                      color="gray"
-                                      size="sm"
-                                      className={classes.tableBlockStatusMenuBtn}
-                                      aria-label="Thao tác cụm gộp"
-                                      disabled={isMergeGroupBusy}
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        event.preventDefault();
-                                      }}
-                                    >
-                                      <MoreVertical size={14} />
-                                    </ActionIcon>
-                                  </Menu.Target>
-                                  <Menu.Dropdown>
-                                    <Menu.Item
-                                      disabled={isMergeGroupBusy}
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        event.preventDefault();
-                                        openDetailForMergeGroup(mergeGroup);
-                                      }}
-                                    >
-                                      Lịch sử booking
-                                    </Menu.Item>
-                                    {canCompleteMerge ? (
-                                      <>
-                                        <Menu.Divider />
-                                        <Menu.Item
-                                          disabled={isMergeGroupBusy}
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            event.preventDefault();
-                                            void handleMergeGroupBlockComplete(mergeGroup);
-                                          }}
-                                        >
-                                          Hoàn thành
-                                        </Menu.Item>
-                                      </>
-                                    ) : null}
-                                  </Menu.Dropdown>
-                                </Menu>
-                              </Group>
                             ) : null}
                           </Group>
                         </span>

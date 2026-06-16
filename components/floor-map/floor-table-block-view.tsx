@@ -1,9 +1,8 @@
 "use client";
 
-import { ActionIcon, Badge, Group, Menu, Stack, Text } from "@mantine/core";
+import { Badge, Group, Stack, Text } from "@mantine/core";
 import dayjs from "dayjs";
-import { MoreVertical } from "lucide-react";
-import { memo, type CSSProperties, type MouseEvent } from "react";
+import { memo, type CSSProperties } from "react";
 import { bookingRowBusyStyle } from "@/lib/busy-row-style";
 import { isGuestCountSpecified } from "@/lib/booking-meta";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
@@ -19,11 +18,6 @@ const TABLE_STATUS_SURFACE_CLASS: Record<TableStatus, string> = {
   occupied: classes.statusSurface_occupied,
   locked: classes.statusSurface_locked,
 };
-
-function stopMenuAction(event: MouseEvent) {
-  event.stopPropagation();
-  event.preventDefault();
-}
 
 function TableBlockGuestBadge(props: { booking: Booking | null }) {
   const { booking } = props;
@@ -81,21 +75,9 @@ export type FloorTableBlockViewProps = {
   isMergeMember: boolean;
   displayBooking: Booking | null;
   customerName: string;
-  isEmployee: boolean;
   isBusy: boolean;
   isDragging: boolean;
-  /** Trống, Khóa, or Đã ngồi — not Giữ chỏ (reservation). */
-  showStatusMenu: boolean;
-  canComplete: boolean;
-  canLock: boolean;
-  showUnlock: boolean;
   onOpenTable: () => void;
-  onOpenDetail: () => void;
-  onCompleteBooking: () => void;
-  onLockTable: () => void;
-  onUnlockTable: () => void;
-  onStatusMenuOpen: () => void;
-  onStatusMenuClose: () => void;
   /** When set (e.g. merge group booking), shown as guest badge even if displayBooking is null. */
   bookingGuestBadge?: Booking | null;
   hideBookingPeek?: boolean;
@@ -113,20 +95,9 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
     isMergeMember,
     displayBooking,
     customerName,
-    isEmployee,
     isBusy,
     isDragging,
-    showStatusMenu,
-    canComplete,
-    canLock,
-    showUnlock,
     onOpenTable,
-    onOpenDetail,
-    onCompleteBooking,
-    onLockTable,
-    onUnlockTable,
-    onStatusMenuOpen,
-    onStatusMenuClose,
     bookingGuestBadge = null,
     hideBookingPeek = false,
     onGridSelect = null,
@@ -134,80 +105,8 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
     suppressOpen = false,
   } = props;
 
-  const hasQuickActions = canComplete || canLock || showUnlock;
   const guestBadgeBooking = bookingGuestBadge ?? displayBooking;
   const isAvailableEmpty = table.status === "available";
-
-  const statusMenu =
-    showStatusMenu && !isEmployee && !onGridSelect ? (
-      <Menu
-        withinPortal
-        position="bottom-end"
-        closeOnItemClick
-        onOpen={onStatusMenuOpen}
-        onClose={onStatusMenuClose}
-      >
-        <Menu.Target>
-          <ActionIcon
-            type="button"
-            variant="subtle"
-            color="gray"
-            size="sm"
-            className={classes.tableBlockStatusMenuBtn}
-            aria-label="Thao tác bàn"
-            disabled={isBusy}
-            onClick={stopMenuAction}
-          >
-            <MoreVertical size={14} />
-          </ActionIcon>
-        </Menu.Target>
-        <Menu.Dropdown>
-          <Menu.Item
-            disabled={isBusy}
-            onClick={(event) => {
-              stopMenuAction(event);
-              onOpenDetail();
-            }}
-          >
-            Lịch sử booking
-          </Menu.Item>
-          {hasQuickActions ? <Menu.Divider /> : null}
-          {canComplete ? (
-            <Menu.Item
-              disabled={isBusy}
-              onClick={(event) => {
-                stopMenuAction(event);
-                onCompleteBooking();
-              }}
-            >
-              Hoàn thành
-            </Menu.Item>
-          ) : null}
-          {showUnlock ? (
-            <Menu.Item
-              disabled={isBusy}
-              onClick={(event) => {
-                stopMenuAction(event);
-                onUnlockTable();
-              }}
-            >
-              Mở khóa
-            </Menu.Item>
-          ) : null}
-          {canLock ? (
-            <Menu.Item
-              disabled={isBusy}
-              onClick={(event) => {
-                stopMenuAction(event);
-                onLockTable();
-              }}
-            >
-              Khóa
-            </Menu.Item>
-          ) : null}
-        </Menu.Dropdown>
-      </Menu>
-    ) : null;
 
   const statusFooter = (
     <div className={classes.tableBlockOccupiedFooter}>
@@ -252,10 +151,6 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
           if (event.button !== 0) {
             return;
           }
-          const target = event.target as HTMLElement;
-          if (target.closest("[data-table-status-menu]")) {
-            return;
-          }
           event.stopPropagation();
           if (isBusy) {
             return;
@@ -271,27 +166,19 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
         }}
       >
         {isAvailableEmpty ? (
-          <>
-            <div className={classes.tableBlockAvailableMenu} data-table-status-menu="">
-              {statusMenu}
-            </div>
-            <Stack gap={4} className={classes.tableBlockAvailableBody}>
-              <Text
-                fw={700}
-                lineClamp={2}
-                className={classes.tableBlockAvailableTitle}
-                style={{ minWidth: 0 }}
-              >
-                {table.name}
-              </Text>
-              {availableStatusRow}
-            </Stack>
-          </>
+          <Stack gap={4} className={classes.tableBlockAvailableBody}>
+            <Text
+              fw={700}
+              lineClamp={2}
+              className={classes.tableBlockAvailableTitle}
+              style={{ minWidth: 0 }}
+            >
+              {table.name}
+            </Text>
+            {availableStatusRow}
+          </Stack>
         ) : (
           <div className={classes.tableBlockOccupiedBody}>
-            <div className={classes.tableBlockOccupiedMenu} data-table-status-menu="">
-              {statusMenu}
-            </div>
             <Stack gap={2} className={classes.tableBlockOccupiedContent}>
               {showCustomerName ? (
                 <Text className={classes.tableBlockCustomerName} lineClamp={2}>
@@ -323,13 +210,8 @@ function propsAreEqual(prev: FloorTableBlockViewProps, next: FloorTableBlockView
     prev.table.splitStartDate === next.table.splitStartDate &&
     prev.table.splitEndDate === next.table.splitEndDate &&
     prev.isMergeMember === next.isMergeMember &&
-    prev.isEmployee === next.isEmployee &&
     prev.isBusy === next.isBusy &&
     prev.isDragging === next.isDragging &&
-    prev.showStatusMenu === next.showStatusMenu &&
-    prev.canComplete === next.canComplete &&
-    prev.canLock === next.canLock &&
-    prev.showUnlock === next.showUnlock &&
     prev.displayBooking?.id === next.displayBooking?.id &&
     prev.displayBooking?.status === next.displayBooking?.status &&
     prev.displayBooking?.bookingAt === next.displayBooking?.bookingAt &&

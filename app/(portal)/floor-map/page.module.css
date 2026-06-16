@@ -195,18 +195,9 @@
   flex-direction: column;
 }
 
-.tableBlockAvailableMenu {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  z-index: 5;
-  pointer-events: auto;
-}
-
 .tableBlockAvailableBody {
   flex: 1;
   min-width: 0;
-  padding-right: 22px;
   --stack-align: flex-start;
   --stack-justify: center;
   align-items: flex-start;
@@ -227,19 +218,10 @@
   width: 100%;
 }
 
-.tableBlockOccupiedMenu {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  z-index: 5;
-  pointer-events: auto;
-}
-
 .tableBlockOccupiedContent {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  padding-right: 22px;
 }
 
 .tableBlockCustomerName {
@@ -275,14 +257,6 @@
   padding-top: 4px;
   flex-shrink: 0;
   gap: 8px;
-}
-
-.tableBlockHeaderActions {
-  flex-shrink: 0;
-}
-
-.tableBlockStatusMenuBtn {
-  flex-shrink: 0;
 }
 
 .tableBlockRemove {
@@ -1069,11 +1043,6 @@
   align-items: center;
   gap: 6px;
   margin-left: auto;
-  pointer-events: auto;
-}
-
-.mergeGroupContainerHeaderActions {
-  flex-shrink: 0;
   pointer-events: auto;
 }
 

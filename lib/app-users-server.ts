@@ -165,6 +165,67 @@ export async function updateAppUserServer(
   return { ok: true, message: "Đã cập nhật tài khoản." };
 }
 
+export async function updateOwnAppUserProfileServer(payload: {
+  userId: string;
+  currentPassword: string;
+  fullName: string;
+  newPassword?: string;
+}): Promise<AppUserResult> {
+  const client = requireAdminClient();
+  if (!client) {
+    return { ok: false, message: "Server auth is not configured (SUPABASE_SERVICE_ROLE_KEY)." };
+  }
+
+  const fullName = payload.fullName.trim();
+  const currentPassword = payload.currentPassword;
+  const newPassword = payload.newPassword?.trim();
+
+  if (!fullName) {
+    return { ok: false, message: "Vui lòng nhập họ tên." };
+  }
+  if (!currentPassword) {
+    return { ok: false, message: "Vui lòng nhập mật khẩu hiện tại." };
+  }
+  if (newPassword !== undefined && newPassword.length > 0 && newPassword.length < 4) {
+    return { ok: false, message: "Mật khẩu mới phải có ít nhất 4 ký tự." };
+  }
+
+  const { data: existing, error: fetchError } = await client
+    .from("app_users")
+    .select(ADMIN_USER_COLUMNS)
+    .eq("id", payload.userId)
+    .maybeSingle();
+
+  if (fetchError || !existing) {
+    return { ok: false, message: "Không tìm thấy tài khoản." };
+  }
+
+  const row = existing as AppUserRow;
+  if (row.password !== currentPassword) {
+    return { ok: false, message: "Mật khẩu hiện tại không đúng." };
+  }
+
+  const update: {
+    full_name: string;
+    updated_at: string;
+    updated_by_user_id: string;
+    password?: string;
+  } = {
+    full_name: fullName,
+    updated_at: new Date().toISOString(),
+    updated_by_user_id: payload.userId,
+  };
+  if (newPassword && newPassword.length > 0) {
+    update.password = newPassword;
+  }
+
+  const { error } = await client.from("app_users").update(update).eq("id", payload.userId);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  return { ok: true, message: "Đã cập nhật thông tin tài khoản." };
+}
+
 export async function deleteAppUserServer(userId: string): Promise<AppUserResult> {
   const client = requireAdminClient();
   if (!client) {
