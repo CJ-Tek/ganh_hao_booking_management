@@ -186,7 +186,7 @@ export default function AccountSettingsPage() {
                       <TextInputWithVoice
                         label="Họ tên"
                         value={fullName}
-                        onChange={setFullName}
+                        onChange={(event) => setFullName(event.currentTarget.value)}
                         disabled={saving || !hasSupabase}
                         size={isCompact ? "md" : "sm"}
                       />
