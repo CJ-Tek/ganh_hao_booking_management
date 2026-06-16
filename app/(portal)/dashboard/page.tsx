@@ -255,7 +255,7 @@ export default function DashboardPage() {
   );
 
   const renderBookingStatusChartSection = (dashboard: NonNullable<typeof branchDashboard.active>) => (
-    <PortalSectionCard padding={isCompact ? "sm" : "md"}>
+    <PortalSectionCard h="100%" padding={isCompact ? "sm" : "md"}>
       <Text size="sm" c="black" fw={700} mb="xs">
         Booking theo trạng thái
       </Text>
@@ -328,8 +328,10 @@ export default function DashboardPage() {
     return (
       <Stack gap="md">
         {renderBranchStatGrid(dashboard)}
-        {renderBranchRingSection(dashboard)}
-        {renderBookingStatusChartSection(dashboard)}
+        <SimpleGrid cols={{ base: 1, lg: 2 }} spacing={isCompact ? "sm" : "md"}>
+          {renderBranchRingSection(dashboard)}
+          {renderBookingStatusChartSection(dashboard)}
+        </SimpleGrid>
         {renderBranchAreaPickerSection(branchId, dashboard, areaId, onPickerChange)}
       </Stack>
     );
