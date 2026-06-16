@@ -6,7 +6,6 @@ import {
   Badge,
   Button,
   Group,
-  SegmentedControl,
   Stack,
   Text,
 } from "@mantine/core";
@@ -19,6 +18,7 @@ import {
 } from "@/lib/booking-table-picker-layout";
 import { tableStatusColor, tableStatusLabel } from "@/lib/display";
 import { filterTablesForFloorMapDay } from "@/lib/table-split-clone-utils";
+import { usePortalCompact } from "@/lib/use-portal-compact";
 import type { Area, Booking, DiningTable, TableMergeGroup } from "@/lib/types";
 
 const BookingTablePickerMap = dynamic(
@@ -92,6 +92,8 @@ export function BookingTablePicker(props: BookingTablePickerProps) {
     disabled = false,
   } = props;
 
+  const isCompact = usePortalCompact();
+  const areaChipSize = isCompact ? "xs" : "compact-sm";
   const { filteredBranchIds, fetchAreaFloorLayoutForDate } = useAppContext();
   const [dayOverride, setDayOverride] = useState<
     import("@/lib/floor-layout-snapshot").AreaFloorLayoutByDate | null | undefined
@@ -104,11 +106,6 @@ export function BookingTablePicker(props: BookingTablePickerProps) {
         .filter((a) => a.branchId === branchId)
         .sort((a, b) => a.name.localeCompare(b.name, "vi") || a.id.localeCompare(b.id)),
     [areas, branchId]
-  );
-
-  const areaSegmentData = useMemo(
-    () => branchAreas.map((a) => ({ value: a.id, label: a.name })),
-    [branchAreas]
   );
 
   const selectedArea = useMemo(
@@ -285,14 +282,37 @@ export function BookingTablePicker(props: BookingTablePickerProps) {
         </Text>
       ) : (
         <>
-          <SegmentedControl
-            value={areaId ?? ""}
-            onChange={handleSelectArea}
-            data={areaSegmentData}
-            disabled={disabled || branchAreas.length <= 1}
-            fullWidth
-            size="xs"
-          />
+          <div className="mobile-filter-chip-scroll">
+            <Group gap="xs" wrap="nowrap" role="radiogroup" aria-label="Chọn khu vực">
+              {branchAreas.map((area) => {
+                const selected = areaId === area.id;
+                return (
+                  <Button
+                    key={area.id}
+                    size={areaChipSize}
+                    radius="xl"
+                    variant={selected ? "filled" : "outline"}
+                    color="gray"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={disabled || branchAreas.length <= 1}
+                    onClick={() => handleSelectArea(area.id)}
+                    styles={{
+                      root: selected
+                        ? {
+                            borderWidth: 2,
+                            borderStyle: "solid",
+                            borderColor: "var(--mantine-color-gray-7)",
+                          }
+                        : undefined,
+                    }}
+                  >
+                    {area.name}
+                  </Button>
+                );
+              })}
+            </Group>
+          </div>
           {areaId ? (
             layoutLoading || !layoutModel ? (
               <Text size="sm" c="dimmed">

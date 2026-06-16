@@ -311,25 +311,11 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                       </Text>
                     </Text>
 
-                    <Divider />
+                    {!isEmployee ? (
+                      <>
+                        <Divider />
 
-                    <Group justify="flex-end" gap="xs">
-                      {isEmployee ? (
-                        (activeBooking.status === "checked_in" ||
-                          activeBooking.status === "seated") &&
-                        isOccupied ? (
-                          <Button
-                            size="sm"
-                            variant="filled"
-                            color="green"
-                            loading={bookingActionLoading}
-                            onClick={onComplete}
-                          >
-                            Hoàn thành
-                          </Button>
-                        ) : null
-                      ) : (
-                        <>
+                        <Group justify="flex-end" gap="xs">
                           {canChangeBookingTable(activeBooking) ? (
                             <Button
                               size="sm"
@@ -402,9 +388,9 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                               ? "Hoàn thành"
                               : "Hủy bàn"}
                           </Button>
-                        </>
-                      )}
-                    </Group>
+                        </Group>
+                      </>
+                    ) : null}
                   </Stack>
                 </Card>
               );

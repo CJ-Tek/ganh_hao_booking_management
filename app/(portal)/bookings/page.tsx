@@ -1013,9 +1013,6 @@ function BookingsPageContent() {
     const todayStart = dayjs().startOf("day");
     const todayEnd = todayStart.endOf("day");
     return branchBookings.filter((booking) => {
-      if (booking.status === "cancelled") {
-        return false;
-      }
       const bookingTime = dayjs(booking.bookingAt);
       return (
         bookingTime.isSame(todayStart, "day") &&

@@ -2973,11 +2973,8 @@ export default function FloorMapPage() {
       return;
     }
     if (isEmployee) {
-      if (table.status !== "occupied") {
-        notifications.show({
-          color: "yellow",
-          message: "Nhân viên chỉ xử lý bàn đang ở trạng thái Đã ngồi.",
-        });
+      if (detailTable?.id === table.id) {
+        closeDetailModal();
         return;
       }
       openDetailForTable(table);
@@ -3005,11 +3002,8 @@ export default function FloorMapPage() {
   const handleViewOrRegisterForMergeGroup = (group: TableMergeGroup) => {
     const status = mergeGroupStatusById.get(group.id) ?? "available";
     if (isEmployee) {
-      if (status !== "occupied") {
-        notifications.show({
-          color: "yellow",
-          message: "Nhân viên chỉ xử lý cụm gộp đang có khách ngồi.",
-        });
+      if (detailMergeGroup?.id === group.id) {
+        closeDetailModal();
         return;
       }
       openDetailForMergeGroup(group);
