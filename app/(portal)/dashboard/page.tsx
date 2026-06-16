@@ -5,7 +5,6 @@ import { BarChart, ChartTooltip, DonutChart, getFilteredChartTooltipPayload } fr
 import {
   Badge,
   Box,
-  Grid,
   Group,
   SegmentedControl,
   SimpleGrid,
@@ -29,7 +28,7 @@ import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type BookingStatus } from "@/lib/types";
 
 export default function DashboardPage() {
-  const { state, filteredBranchIds, currentUser } = useAppContext();
+  const { state, currentUser } = useAppContext();
   const router = useRouter();
   const isCompact = usePortalCompact();
   const isEmployee = currentUser?.role === "employee";
@@ -57,20 +56,7 @@ export default function DashboardPage() {
     [dashboardBranches, activeBranchId]
   );
 
-  const [compareBranchId, setCompareBranchId] = useState<string | null>(() => {
-    if (activeBranchId) return activeBranchId;
-    return accessibleBranchIds[0] ?? null;
-  });
   const [otherBranchId, setOtherBranchId] = useState<string | null>(null);
-  useEffect(() => {
-    if (activeBranchId) {
-      setCompareBranchId(activeBranchId);
-      return;
-    }
-    if (accessibleBranchIds.length > 0) {
-      setCompareBranchId((prev) => prev ?? accessibleBranchIds[0] ?? null);
-    }
-  }, [activeBranchId, accessibleBranchIds]);
   useEffect(() => {
     setOtherBranchId((prev) => {
       if (prev && otherBranches.some((branch) => branch.id === prev)) {
@@ -79,18 +65,6 @@ export default function DashboardPage() {
       return otherBranches[0]?.id ?? null;
     });
   }, [activeBranchId, otherBranches]);
-
-  const branchBookings = useMemo(
-    () => state.bookings.filter((item) => filteredBranchIds.includes(item.branchId)),
-    [filteredBranchIds, state.bookings]
-  );
-  const branchTables = useMemo(
-    () => state.tables.filter((item) => filteredBranchIds.includes(item.branchId)),
-    [filteredBranchIds, state.tables]
-  );
-  const checkedInCount = branchBookings.filter(
-    (item) => item.status === "checked_in" || item.status === "seated"
-  ).length;
 
   const branchDashboard = useMemo(() => {
     const build = (branchId: string | null) => {
@@ -142,19 +116,8 @@ export default function DashboardPage() {
     return {
       active: build(activeBranchId ?? null),
       other: build(otherBranchId),
-      compare: build(compareBranchId),
     };
-  }, [
-    activeBranchId,
-    compareBranchId,
-    otherBranchId,
-    state.bookings,
-    state.mergeGroups,
-    state.tables,
-  ]);
-
-  const compareBranchName =
-    compareBranchId != null ? state.branches.find((b) => b.id === compareBranchId)?.name : undefined;
+  }, [activeBranchId, otherBranchId, state.bookings, state.mergeGroups, state.tables]);
 
   const syncPickerAreaId = useCallback(
     (branchId: string | null, setAreaId: Dispatch<SetStateAction<string | null>>) => {
@@ -179,7 +142,6 @@ export default function DashboardPage() {
 
   const [activePickerAreaId, setActivePickerAreaId] = useState<string | null>(null);
   const [otherPickerAreaId, setOtherPickerAreaId] = useState<string | null>(null);
-  const [pickerAreaId, setPickerAreaId] = useState<string | null>(null);
 
   useEffect(() => {
     syncPickerAreaId(activeBranchId ?? null, setActivePickerAreaId);
@@ -187,9 +149,6 @@ export default function DashboardPage() {
   useEffect(() => {
     syncPickerAreaId(otherBranchId, setOtherPickerAreaId);
   }, [otherBranchId, syncPickerAreaId]);
-  useEffect(() => {
-    syncPickerAreaId(compareBranchId, setPickerAreaId);
-  }, [compareBranchId, syncPickerAreaId]);
 
   const handleActivePickerAreaChange = useCallback((patch: { areaId?: string | null }) => {
     if (patch.areaId !== undefined) {
@@ -201,27 +160,22 @@ export default function DashboardPage() {
       setOtherPickerAreaId(patch.areaId);
     }
   }, []);
-  const handlePickerAreaChange = useCallback((patch: { areaId?: string | null }) => {
-    if (patch.areaId !== undefined) {
-      setPickerAreaId(patch.areaId);
-    }
-  }, []);
 
-  const statusCounts = {
-    hold: branchTables.filter((table) => table.status === "hold").length,
-    occupied: branchTables.filter((table) => table.status === "occupied").length,
-    available: branchTables.filter((table) => table.status === "available").length,
-    locked: branchTables.filter((table) => table.status === "locked").length,
+  type TableStatusCounts = {
+    hold: number;
+    occupied: number;
+    available: number;
+    locked: number;
   };
 
-  const buildTableStatusDonutData = (counts: typeof statusCounts) =>
+  const buildTableStatusDonutData = (counts: TableStatusCounts) =>
     (["hold", "occupied", "available", "locked"] as const).map((status) => ({
       name: tableStatusLabel[status],
       value: counts[status],
       color: `${tableStatusColor[status]}.6`,
     }));
 
-  const renderTableStatusDonut = (counts: typeof statusCounts, total: number) => {
+  const renderTableStatusDonut = (counts: TableStatusCounts, total: number) => {
     const allItems = buildTableStatusDonutData(counts);
     const chartItems = allItems.filter((item) => item.value > 0);
     const hasChartSegments = chartItems.length > 0;
@@ -262,36 +216,7 @@ export default function DashboardPage() {
     );
   };
 
-  const statGrid = (
-    <SimpleGrid cols={{ base: 2, sm: 2, lg: 4 }} spacing={isCompact ? "sm" : "md"}>
-      <PortalSectionCard padding={isCompact ? "sm" : "md"}>
-        <Text size="xs" c="dimmed" fw={600}>
-          Tổng booking
-        </Text>
-        <Title order={2}>{branchBookings.length}</Title>
-      </PortalSectionCard>
-      <PortalSectionCard padding={isCompact ? "sm" : "md"}>
-        <Text size="xs" c="dimmed" fw={600}>
-          Đã check-in
-        </Text>
-        <Title order={2}>{checkedInCount}</Title>
-      </PortalSectionCard>
-      <PortalSectionCard padding={isCompact ? "sm" : "md"}>
-        <Text size="xs" c="dimmed" fw={600}>
-          Bàn phục vụ
-        </Text>
-        <Title order={2}>{statusCounts.occupied}</Title>
-      </PortalSectionCard>
-      <PortalSectionCard padding={isCompact ? "sm" : "md"}>
-        <Text size="xs" c="dimmed" fw={600}>
-          Bàn trống
-        </Text>
-        <Title order={2}>{statusCounts.available}</Title>
-      </PortalSectionCard>
-    </SimpleGrid>
-  );
-
-  const renderBranchStatGrid = (dashboard: NonNullable<typeof branchDashboard.compare>) => (
+  const renderBranchStatGrid = (dashboard: NonNullable<typeof branchDashboard.active>) => (
     <SimpleGrid cols={{ base: 2, sm: 2, lg: 4 }} spacing={isCompact ? "sm" : "md"}>
       <PortalSectionCard padding={isCompact ? "sm" : "md"}>
         <Text size="xs" c="dimmed" fw={600}>
@@ -320,7 +245,7 @@ export default function DashboardPage() {
     </SimpleGrid>
   );
 
-  const renderBranchRingSection = (dashboard: NonNullable<typeof branchDashboard.compare>) => (
+  const renderBranchRingSection = (dashboard: NonNullable<typeof branchDashboard.active>) => (
     <PortalSectionCard h="100%" padding={isCompact ? "sm" : "md"}>
       <Text fw={700} size={isCompact ? "sm" : "md"} lineClamp={1}>
         Bàn theo trạng thái
@@ -329,7 +254,7 @@ export default function DashboardPage() {
     </PortalSectionCard>
   );
 
-  const renderBookingStatusChartSection = (dashboard: NonNullable<typeof branchDashboard.compare>) => (
+  const renderBookingStatusChartSection = (dashboard: NonNullable<typeof branchDashboard.active>) => (
     <PortalSectionCard padding={isCompact ? "sm" : "md"}>
       <Text size="sm" c="black" fw={700} mb="xs">
         Booking theo trạng thái
@@ -364,7 +289,7 @@ export default function DashboardPage() {
 
   const renderBranchAreaPickerSection = (
     branchId: string,
-    dashboard: NonNullable<typeof branchDashboard.compare>,
+    dashboard: NonNullable<typeof branchDashboard.active>,
     areaId: string | null,
     onChange: (patch: { areaId?: string | null }) => void
   ) => (
@@ -388,7 +313,7 @@ export default function DashboardPage() {
 
   const renderBranchDetailStack = (
     branchId: string | null,
-    dashboard: typeof branchDashboard.compare,
+    dashboard: typeof branchDashboard.active,
     areaId: string | null,
     onPickerChange: (patch: { areaId?: string | null }) => void
   ) => {
@@ -410,129 +335,50 @@ export default function DashboardPage() {
     );
   };
 
-  const ringStatusSection = (
-    <PortalSectionCard h="100%" padding={isCompact ? "sm" : "md"}>
-      <Text fw={600} size={isCompact ? "sm" : "md"}>
-        Bàn theo trạng thái
-      </Text>
-      {renderTableStatusDonut(statusCounts, branchTables.length)}
-    </PortalSectionCard>
-  );
-
-  const compareStatGrid = branchDashboard.compare ? renderBranchStatGrid(branchDashboard.compare) : null;
-  const compareRingStatusSection = branchDashboard.compare
-    ? renderBranchRingSection(branchDashboard.compare)
-    : null;
-  const bookingStatusChartSection = branchDashboard.compare
-    ? renderBookingStatusChartSection(branchDashboard.compare)
-    : null;
-  const branchAreaPickerSection =
-    compareBranchId != null && branchDashboard.compare
-      ? renderBranchAreaPickerSection(
-          compareBranchId,
-          branchDashboard.compare,
-          pickerAreaId,
-          handlePickerAreaChange
-        )
-      : null;
-
   return (
     <Stack gap="md">
       <PortalPageTitle order={isCompact ? 3 : 2}>
         {isCompact ? "Tổng quan" : "Dashboard tổng quan"}
       </PortalPageTitle>
 
-      {isCompact ? (
-        <Tabs defaultValue="overview" keepMounted={false}>
-          <Tabs.List grow>
-            <Tabs.Tab value="overview">{activeBranchName ?? "Tổng quan"}</Tabs.Tab>
-            <Tabs.Tab value="branches">Theo chi nhánh</Tabs.Tab>
-          </Tabs.List>
-          <Tabs.Panel value="overview" pt="md">
-            {renderBranchDetailStack(
-              activeBranchId ?? null,
-              branchDashboard.active,
-              activePickerAreaId,
-              handleActivePickerAreaChange
+      <Tabs defaultValue="overview" keepMounted={false}>
+        <Tabs.List grow>
+          <Tabs.Tab value="overview">{activeBranchName ?? "Tổng quan"}</Tabs.Tab>
+          <Tabs.Tab value="branches">Theo chi nhánh</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel value="overview" pt="md">
+          {renderBranchDetailStack(
+            activeBranchId ?? null,
+            branchDashboard.active,
+            activePickerAreaId,
+            handleActivePickerAreaChange
+          )}
+        </Tabs.Panel>
+        <Tabs.Panel value="branches" pt="md">
+          <Stack gap="md">
+            {otherBranches.length > 0 ? (
+              <SegmentedControl
+                fullWidth
+                value={otherBranchId ?? undefined}
+                onChange={(value) => setOtherBranchId(value)}
+                data={otherBranches.map((branch) => ({ value: branch.id, label: branch.name }))}
+              />
+            ) : null}
+            {otherBranches.length > 0 ? (
+              renderBranchDetailStack(
+                otherBranchId,
+                branchDashboard.other,
+                otherPickerAreaId,
+                handleOtherPickerAreaChange
+              )
+            ) : (
+              <Text size="sm" c="dimmed">
+                Không có chi nhánh khác để xem.
+              </Text>
             )}
-          </Tabs.Panel>
-          <Tabs.Panel value="branches" pt="md">
-            <Stack gap="md">
-              {otherBranches.length > 0 ? (
-                <SegmentedControl
-                  fullWidth
-                  value={otherBranchId ?? undefined}
-                  onChange={(value) => setOtherBranchId(value)}
-                  data={otherBranches.map((branch) => ({ value: branch.id, label: branch.name }))}
-                />
-              ) : null}
-              {otherBranches.length > 0 ? (
-                renderBranchDetailStack(
-                  otherBranchId,
-                  branchDashboard.other,
-                  otherPickerAreaId,
-                  handleOtherPickerAreaChange
-                )
-              ) : (
-                <Text size="sm" c="dimmed">
-                  Không có chi nhánh khác để xem.
-                </Text>
-              )}
-            </Stack>
-          </Tabs.Panel>
-        </Tabs>
-      ) : (
-        <>
-          {statGrid}
-          <Grid>
-            <Grid.Col span={{ base: 12, lg: 4 }}>{ringStatusSection}</Grid.Col>
-          </Grid>
-
-          <PortalSectionCard padding="md">
-            <Stack gap="sm">
-              <Group justify="space-between" align="flex-end" wrap="nowrap">
-                <Stack gap={2} style={{ minWidth: 0 }}>
-                  <Text fw={700} size="md" lineClamp={1}>
-                    Xem nhanh theo chi nhánh
-                  </Text>
-                  <Text size="sm" c="dimmed" lineClamp={2}>
-                    Chuyển nhanh để xem số liệu tóm tắt từng chi nhánh (không thay đổi chi nhánh đang chọn trên thanh tiêu đề).
-                  </Text>
-                </Stack>
-                {compareBranchName ? (
-                  <Badge variant="light" color="brand" style={{ flexShrink: 0 }}>
-                    {compareBranchName}
-                  </Badge>
-                ) : null}
-              </Group>
-
-              {dashboardBranches.length <= 1 ? null : (
-                <SegmentedControl
-                  fullWidth
-                  value={compareBranchId ?? undefined}
-                  onChange={(value) => setCompareBranchId(value)}
-                  data={dashboardBranches.map((b) => ({ value: b.id, label: b.name }))}
-                />
-              )}
-
-              {compareBranchId ? (
-                <Stack gap="md">
-                  <Grid>
-                    <Grid.Col span={{ base: 12, lg: 7 }}>{compareStatGrid}</Grid.Col>
-                    <Grid.Col span={{ base: 12, lg: 5 }}>{compareRingStatusSection}</Grid.Col>
-                  </Grid>
-                  {bookingStatusChartSection}
-                  {branchAreaPickerSection}
-                </Stack>
-              ) : (
-                <Text size="sm" c="dimmed">
-                  Tài khoản này chưa được gán chi nhánh.
-                </Text>
-              )}
-            </Stack>
-          </PortalSectionCard>
-        </>
-      )}
+          </Stack>
+        </Tabs.Panel>
+      </Tabs>
     </Stack>
   );
 }
