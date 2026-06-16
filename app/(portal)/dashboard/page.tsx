@@ -39,17 +39,22 @@ export default function DashboardPage() {
     }
   }, [isEmployee, router]);
 
+  const isManager = currentUser?.role === "manager";
   const accessibleBranchIds = useMemo(() => currentUser?.branchIds ?? [], [currentUser?.branchIds]);
   const accessibleBranches = useMemo(
     () => state.branches.filter((branch) => accessibleBranchIds.includes(branch.id)),
     [accessibleBranchIds, state.branches]
   );
+  const dashboardBranches = useMemo(
+    () => (isManager ? state.branches : accessibleBranches),
+    [accessibleBranches, isManager, state.branches]
+  );
   const activeBranchId = state.activeBranchId;
   const activeBranchName =
     activeBranchId != null ? state.branches.find((branch) => branch.id === activeBranchId)?.name : undefined;
   const otherBranches = useMemo(
-    () => accessibleBranches.filter((branch) => branch.id !== activeBranchId),
-    [accessibleBranches, activeBranchId]
+    () => dashboardBranches.filter((branch) => branch.id !== activeBranchId),
+    [dashboardBranches, activeBranchId]
   );
 
   const [compareBranchId, setCompareBranchId] = useState<string | null>(() => {
@@ -501,12 +506,12 @@ export default function DashboardPage() {
                 ) : null}
               </Group>
 
-              {accessibleBranches.length <= 1 ? null : (
+              {dashboardBranches.length <= 1 ? null : (
                 <SegmentedControl
                   fullWidth
                   value={compareBranchId ?? undefined}
                   onChange={(value) => setCompareBranchId(value)}
-                  data={accessibleBranches.map((b) => ({ value: b.id, label: b.name }))}
+                  data={dashboardBranches.map((b) => ({ value: b.id, label: b.name }))}
                 />
               )}
 
