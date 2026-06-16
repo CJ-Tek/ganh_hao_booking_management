@@ -35,6 +35,7 @@ import {
   Map,
   MapPin,
   MoreHorizontal,
+  Plus,
   RefreshCw,
   Settings,
   SlidersHorizontal,
@@ -48,9 +49,13 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import dayjs from "dayjs";
+import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
 import { useAppContext } from "@/contexts/app-context";
+import { buildFloorMapHref } from "@/lib/floor-map-routes";
 import { formatNotificationTime } from "@/lib/format-notification-time";
 import { usePortalCompact } from "@/lib/use-portal-compact";
+import { type Booking } from "@/lib/types";
 import classes from "./app-shell-layout.module.css";
 
 type NavItem = { label: string; href: string; icon: React.ReactNode; adminOnly?: boolean };
@@ -96,6 +101,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   const [opened, { toggle, close }] = useDisclosure();
   const [desktopNavExpanded, { toggle: toggleDesktopNav }] = useDisclosure(true);
   const [managerMoreOpen, { open: openManagerMore, close: closeManagerMore }] = useDisclosure(false);
+  const [createBookingModalOpened, setCreateBookingModalOpened] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const isCompact = usePortalCompact();
@@ -198,6 +204,75 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     }
     return shownNavItems.filter((item) => !dockHrefSet.has(item.href));
   }, [usesMobileDock, dockHrefSet, shownNavItems]);
+
+  const dockLeftCount = Math.ceil(managerDockItems.length / 2);
+  const leftManagerDockItems = managerDockItems.slice(0, dockLeftCount);
+  const rightManagerDockItems = managerDockItems.slice(dockLeftCount);
+
+  const openCreateBookingFromDock = () => {
+    closeManagerMore();
+    setCreateBookingModalOpened(true);
+  };
+
+  const focusExistingBookingFromDock = (booking: Booking) => {
+    const params = new URLSearchParams({
+      tab: "list",
+      focusBooking: booking.id,
+    });
+    router.push(`/bookings?${params.toString()}`);
+  };
+
+  const viewCreatedBookingInFloorMapFromDock = (payload: {
+    bookingId: string;
+    bookingAt: string;
+  }) => {
+    router.push(
+      buildFloorMapHref(dayjs(payload.bookingAt), { focusBookingId: payload.bookingId })
+    );
+  };
+
+  const renderManagerDockLink = (item: NavItem) => {
+    const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+    const shortLabel =
+      managerDockShortLabel[item.href as (typeof MANAGER_DOCK_HREFS)[number]] ?? item.label;
+    return (
+      <UnstyledButton
+        key={item.href}
+        component={Link}
+        href={item.href}
+        onClick={() => {
+          close();
+          closeManagerMore();
+        }}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          borderRadius: 10,
+          minHeight: 52,
+          padding: "8px 4px",
+          background: active ? "rgba(255,255,255,0.2)" : undefined,
+          color: "white",
+        }}
+      >
+        <Stack gap={2} align="center">
+          <Box
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transform: "scale(1.1)",
+              opacity: active ? 1 : 0.85,
+            }}
+          >
+            {item.icon}
+          </Box>
+          <Text size="12px" fw={active ? 700 : 600} c="white" ta="center" lineClamp={2} lh={1.2}>
+            {shortLabel}
+          </Text>
+        </Stack>
+      </UnstyledButton>
+    );
+  };
 
   // Avoid overlap: when mobile drawer is open, hide fixed bottom dock.
   const showManagerDock = usesMobileDock && isCompact && !opened;
@@ -659,6 +734,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             pt={8}
             pb="max(8px, env(safe-area-inset-bottom, 0px))"
             aria-label="Truy cập nhanh"
+            className={classes.managerDockRoot}
             style={{
               position: "fixed",
               left: 0,
@@ -669,57 +745,19 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               borderTopColor: "rgba(255,255,255,0.25)",
             }}
           >
+            <UnstyledButton
+              type="button"
+              aria-label="Tạo booking"
+              title="Tạo booking"
+              className={classes.managerDockCreateButton}
+              onClick={openCreateBookingFromDock}
+            >
+              <Plus size={28} strokeWidth={2.5} aria-hidden />
+            </UnstyledButton>
             <Group justify="space-between" gap={4} wrap="nowrap" grow>
-              {managerDockItems.map((item) => {
-                const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-                const shortLabel =
-                  managerDockShortLabel[item.href as (typeof MANAGER_DOCK_HREFS)[number]] ??
-                  item.label;
-                return (
-                  <UnstyledButton
-                    key={item.href}
-                    component={Link}
-                    href={item.href}
-                    onClick={() => {
-                      close();
-                      closeManagerMore();
-                    }}
-                    style={{
-                      flex: 1,
-                      minWidth: 0,
-                      borderRadius: 10,
-                      minHeight: 52,
-                      padding: "8px 4px",
-                      background: active ? "rgba(255,255,255,0.2)" : undefined,
-                      color: "white",
-                    }}
-                  >
-                    <Stack gap={2} align="center">
-                      <Box
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          transform: "scale(1.1)",
-                          opacity: active ? 1 : 0.85,
-                        }}
-                      >
-                        {item.icon}
-                      </Box>
-                      <Text
-                        size="12px"
-                        fw={active ? 700 : 600}
-                        c="white"
-                        ta="center"
-                        lineClamp={2}
-                        lh={1.2}
-                      >
-                        {shortLabel}
-                      </Text>
-                    </Stack>
-                  </UnstyledButton>
-                );
-              })}
+              {leftManagerDockItems.map(renderManagerDockLink)}
+              <Box className={classes.managerDockCenterSpacer} aria-hidden />
+              {rightManagerDockItems.map(renderManagerDockLink)}
               {managerMoreNavItems.length > 0 ? (
                 <UnstyledButton
                   type="button"
@@ -752,6 +790,13 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               ) : null}
             </Group>
           </Paper>
+
+          <CreateBookingModal
+            opened={createBookingModalOpened}
+            onClose={() => setCreateBookingModalOpened(false)}
+            onFocusExistingBooking={focusExistingBookingFromDock}
+            onViewCreatedBookingInFloorMap={viewCreatedBookingInFloorMapFromDock}
+          />
 
           <Drawer
             opened={managerMoreOpen}
