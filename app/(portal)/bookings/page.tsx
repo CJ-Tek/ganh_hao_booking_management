@@ -1435,11 +1435,35 @@ function BookingsPageContent() {
         noRecordsText="Chưa có booking nào cho bộ lọc hiện tại."
         columns={[
           {
-            accessor: "createdAt",
-            title: "Tạo lúc",
+            accessor: "customerId",
+            title: "Khách",
+            sortable: true,
+            render: (booking) => {
+              const c = state.customers.find((item) => item.id === booking.customerId);
+              return (
+                <Stack gap={2}>
+                  <Text size="sm">{c?.fullName ?? "—"}</Text>
+                  <Text size="xs" c="dimmed">
+                    {displayCustomerPhone(c?.phone)}
+                  </Text>
+                </Stack>
+              );
+            },
+          },
+          {
+            accessor: "note",
+            title: "Ghi chú",
             sortable: true,
             render: (booking) =>
-              dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
+              stripUnknownGuestTag(booking.note) ? (
+                <Text size="sm" lineClamp={2} maw={220}>
+                  {stripUnknownGuestTag(booking.note)}
+                </Text>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  —
+                </Text>
+              ),
           },
           {
             accessor: "bookingAt",
@@ -1460,22 +1484,6 @@ function BookingsPageContent() {
                   —
                 </Text>
               ),
-          },
-          {
-            accessor: "customerId",
-            title: "Khách",
-            sortable: true,
-            render: (booking) => {
-              const c = state.customers.find((item) => item.id === booking.customerId);
-              return (
-                <Stack gap={2}>
-                  <Text size="sm">{c?.fullName ?? "—"}</Text>
-                  <Text size="xs" c="dimmed">
-                    {displayCustomerPhone(c?.phone)}
-                  </Text>
-                </Stack>
-              );
-            },
           },
           {
             accessor: "areaTable",
@@ -1506,6 +1514,13 @@ function BookingsPageContent() {
               "Không rõ",
           },
           {
+            accessor: "createdAt",
+            title: "Tạo lúc",
+            sortable: true,
+            render: (booking) =>
+              dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
+          },
+          {
             accessor: "lastEditedByUserId",
             title: "Người sửa",
             sortable: true,
@@ -1520,21 +1535,6 @@ function BookingsPageContent() {
             render: (booking) =>
               booking.lastEditedAt ? (
                 <Text size="sm">{dayjs(booking.lastEditedAt).format("HH:mm DD/MM/YYYY")}</Text>
-              ) : (
-                <Text size="sm" c="dimmed">
-                  —
-                </Text>
-              ),
-          },
-          {
-            accessor: "note",
-            title: "Ghi chú",
-            sortable: true,
-            render: (booking) =>
-              stripUnknownGuestTag(booking.note) ? (
-                <Text size="sm" lineClamp={2} maw={220}>
-                  {stripUnknownGuestTag(booking.note)}
-                </Text>
               ) : (
                 <Text size="sm" c="dimmed">
                   —
@@ -1685,24 +1685,32 @@ function BookingsPageContent() {
         }
         columns={[
           {
-            accessor: "createdAt",
-            title: "Tạo lúc",
+            accessor: "customerId",
+            title: "Tên khách",
             sortable: true,
             render: (booking) =>
-              dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
+              state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—",
+          },
+          {
+            accessor: "note",
+            title: "Ghi chú",
+            sortable: true,
+            render: (booking) =>
+              stripUnknownGuestTag(booking.note) ? (
+                <Text size="sm" lineClamp={2} maw={220}>
+                  {stripUnknownGuestTag(booking.note)}
+                </Text>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  —
+                </Text>
+              ),
           },
           {
             accessor: "bookingAt",
             title: "Giờ đến",
             sortable: true,
             render: (booking) => dayjs(resolveBookingArrivalTime(booking)).format("HH:mm"),
-          },
-          {
-            accessor: "customerId",
-            title: "Tên khách",
-            sortable: true,
-            render: (booking) =>
-              state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—",
           },
           {
             accessor: "guestCount",
@@ -1731,6 +1739,21 @@ function BookingsPageContent() {
               formatTodayBookingAreaTable(booking, bookingAreaTableLookup),
           },
           {
+            accessor: "createdByUserId",
+            title: "Người nhận",
+            sortable: true,
+            render: (booking) =>
+              state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
+              "Không rõ",
+          },
+          {
+            accessor: "createdAt",
+            title: "Tạo lúc",
+            sortable: true,
+            render: (booking) =>
+              dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
+          },
+          {
             accessor: "status",
             title: "Trạng thái",
             sortable: true,
@@ -1742,29 +1765,6 @@ function BookingsPageContent() {
                 </Badge>
               );
             },
-          },
-          {
-            accessor: "createdByUserId",
-            title: "Người nhận",
-            sortable: true,
-            render: (booking) =>
-              state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
-              "Không rõ",
-          },
-          {
-            accessor: "note",
-            title: "Ghi chú",
-            sortable: true,
-            render: (booking) =>
-              stripUnknownGuestTag(booking.note) ? (
-                <Text size="sm" lineClamp={2} maw={220}>
-                  {stripUnknownGuestTag(booking.note)}
-                </Text>
-              ) : (
-                <Text size="sm" c="dimmed">
-                  —
-                </Text>
-              ),
           },
         ]}
       />

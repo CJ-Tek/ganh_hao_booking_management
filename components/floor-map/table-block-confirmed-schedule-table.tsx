@@ -156,6 +156,13 @@ export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) 
         }}
         columns={[
           {
+            accessor: "customerId",
+            title: "Khách",
+            sortable: true,
+            render: (booking) =>
+              state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—",
+          },
+          {
             accessor: "visitDate",
             title: "Ngày đến",
             sortable: true,
@@ -170,13 +177,6 @@ export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) 
                 {dayjs(booking.startTime).format("HH:mm")} – {dayjs(booking.endTime).format("HH:mm")}
               </Text>
             ),
-          },
-          {
-            accessor: "customerId",
-            title: "Khách",
-            sortable: true,
-            render: (booking) =>
-              state.customers.find((item) => item.id === booking.customerId)?.fullName ?? "—",
           },
           {
             accessor: "guestCount",

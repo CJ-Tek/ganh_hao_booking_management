@@ -262,20 +262,6 @@ export function RegisterPendingAssignTable(props: {
         }}
         columns={[
           {
-            accessor: "createdAt",
-            title: "Tạo lúc",
-            sortable: true,
-            render: (booking) =>
-              dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
-          },
-          {
-            accessor: "bookingAt",
-            title: "Giờ đến",
-            sortable: true,
-            render: (booking) =>
-              dayjs(resolveBookingArrivalTime(booking)).format("HH:mm DD/MM/YYYY"),
-          },
-          {
             accessor: "customerId",
             title: "Khách",
             sortable: true,
@@ -290,6 +276,20 @@ export function RegisterPendingAssignTable(props: {
                 </Stack>
               );
             },
+          },
+          {
+            accessor: "createdAt",
+            title: "Tạo lúc",
+            sortable: true,
+            render: (booking) =>
+              dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
+          },
+          {
+            accessor: "bookingAt",
+            title: "Giờ đến",
+            sortable: true,
+            render: (booking) =>
+              dayjs(resolveBookingArrivalTime(booking)).format("HH:mm DD/MM/YYYY"),
           },
           {
             accessor: "guestCount",

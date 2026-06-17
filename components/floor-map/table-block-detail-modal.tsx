@@ -8,7 +8,6 @@ import {
   Card,
   Divider,
   Group,
-  Loader,
   Stack,
   Text,
 } from "@mantine/core";
@@ -17,15 +16,12 @@ import { TableBlockConfirmedScheduleTable } from "@/components/floor-map/table-b
 import { canChangeBookingTable } from "@/components/booking-management/shared";
 import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import { useAppContext } from "@/contexts/app-context";
-import { tableStatusLabel } from "@/lib/display";
 import {
   canQueueBooking,
   getReceptionBookingStatus,
   inferGuestTypeLabel,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
-import { formatMergeGroupDateRange } from "@/lib/merge-group-utils";
-import { isSplitCloneTable } from "@/lib/table-split-clone-utils";
 import {
   type Booking,
   type DiningTable,
@@ -78,7 +74,6 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     mergeStatus = "available",
     mergeMemberOccupiedTableNames = [],
     blockState,
-    blockLoading,
     activeBooking,
     activeBookingCustomerName,
     isEmployee,
@@ -165,29 +160,6 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     >
       {targetReady ? (
         <Stack gap="md">
-          <Group justify="space-between" align="flex-start" wrap="wrap" gap="xs">
-            <Text size="sm" c="dimmed">
-              {mergeGroup
-                ? `${mergeGroup.tableIds.length} bàn · ${formatMergeGroupDateRange(mergeGroup.startDate, mergeGroup.endDate)} · ${tableStatusLabel[displayStatus]}`
-                : table && isSplitCloneTable(table) && table.splitStartDate && table.splitEndDate
-                  ? `Khả dụng: ${formatMergeGroupDateRange(table.splitStartDate, table.splitEndDate)} · ${tableStatusLabel[displayStatus]}`
-                  : tableStatusLabel[displayStatus]}
-            </Text>
-            {blockLoading ? (
-              <Group gap={6}>
-                <Loader size="xs" />
-                <Text size="xs" c="dimmed">
-                  Đang tải lịch...
-                </Text>
-              </Group>
-            ) : blockState ? (
-              <Text size="xs" c="dimmed">
-                Khung giờ: {dayjs(blockState.slotStartTime).format("HH:mm DD/MM")} –{" "}
-                {dayjs(blockState.slotEndTime).format("HH:mm DD/MM")}
-              </Text>
-            ) : null}
-          </Group>
-
           {!isEmployee ? (
             <Group justify="space-between" align="center" wrap="wrap" gap="xs" w="100%">
               <Group gap="xs" wrap="wrap">

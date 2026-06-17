@@ -20,6 +20,7 @@ import {
   isGuestCountSpecified,
   resolveBookingArrivalTime,
   resolveBookingCreatedAt,
+  stripUnknownGuestTag,
 } from "@/lib/booking-meta";
 import {
   bookingListDefaultCreatedSort,
@@ -92,9 +93,10 @@ export function BookingDayBookingsTable(props: {
     (rows: Booking[], nextSortStatus: typeof sortStatus) =>
       sortBookingsForDataTable(rows, nextSortStatus, {
         customers: state.customers,
+        users: state.users,
         bookingAreaTableLookup,
       }),
-    [bookingAreaTableLookup, state.customers]
+    [bookingAreaTableLookup, state.customers, state.users]
   );
 
   const statusFilterChips = (
@@ -166,11 +168,35 @@ export function BookingDayBookingsTable(props: {
       }}
       columns={[
         {
-          accessor: "createdAt",
-          title: "Tạo lúc",
+          accessor: "customerId",
+          title: "Khách",
+          sortable: true,
+          render: (booking) => {
+            const customer = state.customers.find((item) => item.id === booking.customerId);
+            return (
+              <Stack gap={2}>
+                <Text size="sm">{customer?.fullName ?? "—"}</Text>
+                <Text size="xs" c="dimmed">
+                  {displayCustomerPhone(customer?.phone)}
+                </Text>
+              </Stack>
+            );
+          },
+        },
+        {
+          accessor: "note",
+          title: "Ghi chú",
           sortable: true,
           render: (booking) =>
-            dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
+            stripUnknownGuestTag(booking.note) ? (
+              <Text size="sm" lineClamp={2} maw={220}>
+                {stripUnknownGuestTag(booking.note)}
+              </Text>
+            ) : (
+              <Text size="sm" c="dimmed">
+                —
+              </Text>
+            ),
         },
         {
           accessor: "bookingAt",
@@ -193,22 +219,6 @@ export function BookingDayBookingsTable(props: {
             ),
         },
         {
-          accessor: "customerId",
-          title: "Khách",
-          sortable: true,
-          render: (booking) => {
-            const customer = state.customers.find((item) => item.id === booking.customerId);
-            return (
-              <Stack gap={2}>
-                <Text size="sm">{customer?.fullName ?? "—"}</Text>
-                <Text size="xs" c="dimmed">
-                  {displayCustomerPhone(customer?.phone)}
-                </Text>
-              </Stack>
-            );
-          },
-        },
-        {
           accessor: "areaTable",
           title: "Khu vực / Bàn",
           sortable: true,
@@ -226,6 +236,21 @@ export function BookingDayBookingsTable(props: {
                 Chưa rõ
               </Text>
             ),
+        },
+        {
+          accessor: "createdByUserId",
+          title: "Người tạo",
+          sortable: true,
+          render: (booking) =>
+            state.users.find((item) => item.id === booking.createdByUserId)?.fullName ??
+            "Không rõ",
+        },
+        {
+          accessor: "createdAt",
+          title: "Tạo lúc",
+          sortable: true,
+          render: (booking) =>
+            dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
         },
         {
           accessor: "status",

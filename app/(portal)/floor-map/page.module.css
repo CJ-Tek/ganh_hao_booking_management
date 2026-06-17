@@ -231,11 +231,38 @@
   min-width: 0;
 }
 
+.statusSurface_hold .tableBlockCustomerName,
+.statusSurface_occupied .tableBlockCustomerName {
+  font-size: 21px;
+  line-height: 1.15;
+}
+
 .tableBlockTableName {
   font-size: var(--mantine-font-size-sm);
   font-weight: 600;
   line-height: 1.25;
   min-width: 0;
+}
+
+.statusSurface_hold .tableBlockTableName,
+.statusSurface_occupied .tableBlockTableName {
+  font-size: 17px;
+  line-height: 1.2;
+}
+
+.tableBlockTableNameFooter {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.15;
+  min-width: 0;
+  flex: 1;
+  align-self: flex-end;
+}
+
+.tableBlockOccupiedFooterStacked {
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 6px;
 }
 
 .tableBlockBookingTimes {
@@ -257,6 +284,13 @@
   padding-top: 4px;
   flex-shrink: 0;
   gap: 8px;
+}
+
+.tableBlockOccupiedFooterBadges {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
 }
 
 .tableBlockRemove {

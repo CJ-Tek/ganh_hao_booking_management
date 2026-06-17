@@ -107,13 +107,34 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
 
   const guestBadgeBooking = bookingGuestBadge ?? displayBooking;
   const isAvailableEmpty = table.status === "available";
+  const useStackedFooter = table.status === "hold" || table.status === "occupied";
 
   const statusFooter = (
-    <div className={classes.tableBlockOccupiedFooter}>
-      <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
-        {tableStatusLabel[table.status]}
-      </Badge>
-      <TableBlockGuestBadge booking={guestBadgeBooking} />
+    <div
+      className={`${classes.tableBlockOccupiedFooter} ${
+        useStackedFooter ? classes.tableBlockOccupiedFooterStacked : ""
+      }`}
+    >
+      {useStackedFooter ? (
+        <>
+          <Text className={classes.tableBlockTableNameFooter} lineClamp={1}>
+            {table.name}
+          </Text>
+          <div className={classes.tableBlockOccupiedFooterBadges}>
+            <TableBlockGuestBadge booking={guestBadgeBooking} />
+            <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
+              {tableStatusLabel[table.status]}
+            </Badge>
+          </div>
+        </>
+      ) : (
+        <>
+          <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
+            {tableStatusLabel[table.status]}
+          </Badge>
+          <TableBlockGuestBadge booking={guestBadgeBooking} />
+        </>
+      )}
     </div>
   );
 
@@ -127,6 +148,8 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
   );
 
   const showCustomerName = Boolean(customerName || displayBooking);
+  const showBookingPeek =
+    !hideBookingPeek && table.status !== "hold" && table.status !== "occupied";
 
   return (
     <div
@@ -185,10 +208,12 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
                   {customerName || "—"}
                 </Text>
               ) : null}
-              <Text className={classes.tableBlockTableName} lineClamp={1}>
-                {table.name}
-              </Text>
-              {!hideBookingPeek ? (
+              {!useStackedFooter ? (
+                <Text className={classes.tableBlockTableName} lineClamp={1}>
+                  {table.name}
+                </Text>
+              ) : null}
+              {showBookingPeek ? (
                 <TableBlockBookingPeek displayBooking={displayBooking} />
               ) : null}
               <TableBlockSplitCloneAvailability table={table} />
