@@ -4,97 +4,121 @@ import {
   displayCustomerPhone,
   formatBookingAreaTable,
   resolveBookingArrivalTime,
-  resolveBookingCreatedAt,
-  stripUnknownGuestTag,
   type BookingAreaTableLookup,
 } from "@/lib/booking-meta";
-import { bookingStatusLabel } from "@/lib/display";
-import type { Booking, Customer, AppUser } from "@/lib/types";
+import { formatBookingListDateRangeLabel } from "@/lib/booking-list-date-range";
+import type { Booking, Customer } from "@/lib/types";
 
 export type ExportBookingsExcelInput = {
   bookings: Booking[];
   customers: Customer[];
-  users: AppUser[];
   dateRange: { start: string; end: string };
   bookingAreaTableLookup: BookingAreaTableLookup;
 };
 
 const EXPORT_HEADERS = [
+  "Khu vực/Bàn",
+  "Số khách",
+  "Giờ đến",
   "Khách",
   "SĐT",
-  "Ghi chú",
-  "Giờ đến",
-  "Giờ check-in",
-  "Khu vực / Bàn",
-  "Số khách",
-  "Người tạo",
-  "Tạo lúc",
-  "Người sửa",
-  "Lúc sửa",
-  "Trạng thái",
 ] as const;
 
-function resolveUserName(userId: string | null | undefined, users: AppUser[]): string {
-  if (!userId) {
-    return "—";
-  }
-  return users.find((item) => item.id === userId)?.fullName ?? "Không rõ";
+const GROUP_HEADER_FILL: ExcelJS.Fill = {
+  type: "pattern",
+  pattern: "solid",
+  fgColor: { argb: "FFE8EEF4" },
+};
+
+function formatArrivalTime(value: string): string {
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.format("HH:mm") : "—";
 }
 
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) {
-    return "—";
+function formatHourGroupLabel(arrivalIso: string, includeDate: boolean): string {
+  const parsed = dayjs(arrivalIso);
+  if (!parsed.isValid()) {
+    return "Không rõ";
   }
-  const parsed = dayjs(value);
-  return parsed.isValid() ? parsed.format("HH:mm DD/MM/YYYY") : "—";
+  const start = parsed.startOf("hour").format("HH:mm");
+  const end = parsed.endOf("hour").format("HH:mm");
+  const timeRange = `${start} - ${end}`;
+  if (!includeDate) {
+    return timeRange;
+  }
+  return `${parsed.format("DD/MM/YYYY")} · ${timeRange}`;
+}
+
+function resolveArrivalHourKey(booking: Booking): string {
+  const arrival = resolveBookingArrivalTime(booking);
+  const parsed = dayjs(arrival);
+  return parsed.isValid() ? parsed.format("YYYY-MM-DD HH") : "unknown";
 }
 
 function bookingToExportRow(
   booking: Booking,
   customers: Customer[],
-  users: AppUser[],
   bookingAreaTableLookup: BookingAreaTableLookup
 ): (string | number)[] {
   const customer = customers.find((item) => item.id === booking.customerId);
   return [
-    customer?.fullName ?? "—",
-    displayCustomerPhone(customer?.phone),
-    stripUnknownGuestTag(booking.note) ?? "—",
-    formatDateTime(resolveBookingArrivalTime(booking)),
-    formatDateTime(booking.checkedInAt),
     formatBookingAreaTable(booking, bookingAreaTableLookup),
     booking.guestCount,
-    resolveUserName(booking.createdByUserId, users),
-    formatDateTime(resolveBookingCreatedAt(booking)),
-    resolveUserName(booking.lastEditedByUserId, users),
-    formatDateTime(booking.lastEditedAt),
-    bookingStatusLabel[booking.status],
+    formatArrivalTime(resolveBookingArrivalTime(booking)),
+    customer?.fullName ?? "—",
+    displayCustomerPhone(customer?.phone),
   ];
 }
 
-function columnLetter(index: number): string {
-  let letter = "";
-  let n = index;
-  while (n > 0) {
-    const remainder = (n - 1) % 26;
-    letter = String.fromCharCode(65 + remainder) + letter;
-    n = Math.floor((n - 1) / 26);
-  }
-  return letter;
+function sortBookingsForExport(bookings: Booking[]): Booking[] {
+  return [...bookings].sort((left, right) => {
+    const leftTime = dayjs(resolveBookingArrivalTime(left)).valueOf();
+    const rightTime = dayjs(resolveBookingArrivalTime(right)).valueOf();
+    const leftValid = Number.isFinite(leftTime);
+    const rightValid = Number.isFinite(rightTime);
+
+    if (!leftValid && !rightValid) {
+      return 0;
+    }
+    if (!leftValid) {
+      return 1;
+    }
+    if (!rightValid) {
+      return -1;
+    }
+    return leftTime - rightTime;
+  });
 }
 
-function autoColumnWidths(rows: (string | number)[][]): number[] {
-  const columnCount = EXPORT_HEADERS.length;
-  const widths = EXPORT_HEADERS.map((header) => header.length);
+function autoColumnWidths(
+  worksheet: ExcelJS.Worksheet,
+  titleRowNumber: number,
+  headerRowNumber: number
+): void {
+  const titleText = String(worksheet.getRow(titleRowNumber).getCell(1).value ?? "");
 
-  for (const row of rows) {
-    for (let index = 0; index < columnCount; index += 1) {
-      const cell = String(row[index] ?? "");
-      widths[index] = Math.max(widths[index] ?? 0, cell.length);
+  EXPORT_HEADERS.forEach((header, index) => {
+    const column = worksheet.getColumn(index + 1);
+    let maxWidth = header.length;
+
+    if (index === 0 && titleText) {
+      maxWidth = Math.max(maxWidth, Math.ceil(titleText.length / EXPORT_HEADERS.length));
     }
-  }
 
-  return widths.map((width) => Math.min(Math.max(width + 2, 10), 48));
+    column.eachCell({ includeEmpty: false }, (cell) => {
+      if (cell.row === headerRowNumber) {
+        return;
+      }
+      maxWidth = Math.max(maxWidth, String(cell.value ?? "").length);
+    });
+
+    column.width = Math.min(Math.max(maxWidth + 2, 10), 48);
+  });
+}
+
+function buildWorksheetTitle(dateRange: { start: string; end: string }): string {
+  const rangeLabel = formatBookingListDateRangeLabel(dateRange.start, dateRange.end);
+  return rangeLabel ? `Danh sách booking · ${rangeLabel}` : "Danh sách booking";
 }
 
 function downloadWorkbook(buffer: ArrayBuffer, filename: string): void {
@@ -110,37 +134,54 @@ function downloadWorkbook(buffer: ArrayBuffer, filename: string): void {
 }
 
 export async function exportBookingsToExcel(input: ExportBookingsExcelInput): Promise<void> {
-  const { bookings, customers, users, dateRange, bookingAreaTableLookup } = input;
-  const rows = bookings.map((booking) =>
-    bookingToExportRow(booking, customers, users, bookingAreaTableLookup)
-  );
+  const { bookings, customers, dateRange, bookingAreaTableLookup } = input;
+  const sortedBookings = sortBookingsForExport(bookings);
+  const isDateRange = dateRange.start !== dateRange.end;
 
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet("Danh sách booking", {
-    views: [{ state: "frozen", ySplit: 1 }],
-  });
-
-  const lastColumn = columnLetter(EXPORT_HEADERS.length);
-  const lastRow = rows.length + 1;
-
-  worksheet.addTable({
-    name: "DanhSachBooking",
-    ref: `A1:${lastColumn}${lastRow}`,
-    headerRow: true,
-    style: {
-      theme: "TableStyleMedium2",
-      showRowStripes: true,
+    views: [{ state: "frozen", ySplit: 2 }],
+    properties: {
+      outlineProperties: {
+        summaryBelow: false,
+        summaryRight: false,
+      },
     },
-    columns: EXPORT_HEADERS.map((header) => ({
-      name: header,
-      filterButton: true,
-    })),
-    rows,
   });
 
-  autoColumnWidths(rows).forEach((width, index) => {
-    worksheet.getColumn(index + 1).width = width;
-  });
+  const titleRow = worksheet.addRow([buildWorksheetTitle(dateRange)]);
+  worksheet.mergeCells(1, 1, 1, EXPORT_HEADERS.length);
+  titleRow.font = { bold: true, size: 12 };
+  titleRow.alignment = { horizontal: "center", vertical: "middle" };
+  titleRow.height = 24;
+
+  const headerRow = worksheet.addRow([...EXPORT_HEADERS]);
+  headerRow.font = { bold: true };
+  headerRow.alignment = { vertical: "middle" };
+
+  let currentHourKey: string | null = null;
+
+  for (const booking of sortedBookings) {
+    const hourKey = resolveArrivalHourKey(booking);
+
+    if (hourKey !== currentHourKey) {
+      currentHourKey = hourKey;
+      const arrival = resolveBookingArrivalTime(booking);
+      const groupLabel = formatHourGroupLabel(arrival, isDateRange);
+      const groupRow = worksheet.addRow(["", "", groupLabel, "", ""]);
+      groupRow.font = { bold: true };
+      groupRow.fill = GROUP_HEADER_FILL;
+      groupRow.alignment = { vertical: "middle" };
+    }
+
+    const dataRow = worksheet.addRow(
+      bookingToExportRow(booking, customers, bookingAreaTableLookup)
+    );
+    dataRow.outlineLevel = 1;
+    dataRow.alignment = { vertical: "middle" };
+  }
+
+  autoColumnWidths(worksheet, titleRow.number, headerRow.number);
 
   const buffer = await workbook.xlsx.writeBuffer();
   const filename = `danh-sach-booking_${dateRange.start}_${dateRange.end}.xlsx`;

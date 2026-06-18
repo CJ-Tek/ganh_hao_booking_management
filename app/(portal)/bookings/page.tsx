@@ -1345,20 +1345,11 @@ function BookingsPageContent() {
     [listRangeEnd, listRangeStart]
   );
 
-  const handleExportListExcel = useCallback(async () => {
-    if (!listDateRangeValidation.ok) {
-      notifications.show({ color: "red", message: listDateRangeValidation.message });
-      return;
-    }
-    if (sortedBookings.length === 0) {
-      notifications.show({ color: "yellow", message: "Không có booking để xuất Excel." });
-      return;
-    }
+  const runExportListExcel = useCallback(async () => {
     try {
       await exportBookingsToExcel({
         bookings: sortedBookings,
         customers: state.customers,
-        users: state.users,
         dateRange: { start: listRangeStart, end: listRangeEnd },
         bookingAreaTableLookup,
       });
@@ -1374,12 +1365,41 @@ function BookingsPageContent() {
     }
   }, [
     bookingAreaTableLookup,
-    listDateRangeValidation,
     listRangeEnd,
     listRangeStart,
     sortedBookings,
     state.customers,
-    state.users,
+  ]);
+
+  const handleExportListExcel = useCallback(() => {
+    if (!listDateRangeValidation.ok) {
+      notifications.show({ color: "red", message: listDateRangeValidation.message });
+      return;
+    }
+    if (sortedBookings.length === 0) {
+      notifications.show({ color: "yellow", message: "Không có booking để xuất Excel." });
+      return;
+    }
+
+    const rangeLabel = formatBookingListDateRangeLabel(listRangeStart, listRangeEnd);
+    const isSingleDay = listRangeStart === listRangeEnd;
+    openPortalModalsConfirmModal({
+      title: "Xuất Excel",
+      children: (
+        <Text size="sm">
+          Tải danh sách <strong>{sortedBookings.length}</strong> booking{" "}
+          {isSingleDay ? "trong ngày" : "trong khoảng"} <strong>{rangeLabel}</strong>?
+        </Text>
+      ),
+      labels: { cancel: "Hủy", confirm: "Xuất Excel" },
+      onConfirm: runExportListExcel,
+    });
+  }, [
+    listDateRangeValidation,
+    listRangeEnd,
+    listRangeStart,
+    runExportListExcel,
+    sortedBookings.length,
   ]);
 
   const listTimeSortFilters = (
@@ -1430,7 +1450,7 @@ function BookingsPageContent() {
         disabled={!listDateRangeValidation.ok || sortedBookings.length === 0}
         style={{ flexShrink: 0 }}
       >
-        Xuất Excel
+        Xuất file
       </Button>
     </Group>
   );
