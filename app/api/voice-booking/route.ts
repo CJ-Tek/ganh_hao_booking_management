@@ -161,11 +161,11 @@ function buildFormatSystemPrompt(nowIso: string): string {
 
 const LLM_ATTEMPTS = 3;
 
-async function generateWithRetries<T extends z.ZodType>(
-  schema: T,
+async function generateWithRetries<S extends z.ZodTypeAny>(
+  schema: S,
   system: string,
   prompt: string
-): Promise<z.infer<T>> {
+): Promise<z.infer<S>> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20_000);
 
@@ -180,7 +180,7 @@ async function generateWithRetries<T extends z.ZodType>(
           prompt,
           abortSignal: controller.signal,
         });
-        return result.object;
+        return result.object as z.infer<S>;
       } catch (error) {
         lastError = error;
         const retryable =
