@@ -26,7 +26,7 @@ import {
 import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import { normalizeGuestTypeHint } from "@/lib/voice-booking/guest-type";
 import { matchAreaId, matchTableId, type AreaLite, type TableLite } from "@/lib/voice-booking/match";
-import { finalizeCustomerName, sanitizeCustomerName } from "@/lib/voice-booking/format";
+import { appendVoiceTranscriptSession, finalizeCustomerName, sanitizeCustomerName } from "@/lib/voice-booking/format";
 import { warmUpMicrophoneForSpeech } from "@/lib/voice-booking/mic-warmup";
 import { tableStatusLabel } from "@/lib/display";
 import { usePortalModalLayoutProps } from "@/lib/use-portal-modal-layout";
@@ -57,6 +57,10 @@ type VoiceBookingResponse =
       clarificationQuestion?: string;
     }
   | { error: string };
+
+type VoiceFormatResponse = { formattedTranscript: string } | { error: string };
+
+type VoiceBookingApiMode = "parse" | "format";
 
 function normalizeVietnamPhone(raw: string): string {
   const s = raw.replace(/[\s.-]/g, "");
@@ -222,6 +226,7 @@ export function VoiceBookingAssistant(props: {
   const [isWarmingMic, setIsWarmingMic] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [isParsing, setIsParsing] = useState(false);
+  const [isFormatting, setIsFormatting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
@@ -444,7 +449,7 @@ export function VoiceBookingAssistant(props: {
       }
       const newSession = (finalText + " " + interim).trim();
       const base = recordingAppendBaseRef.current;
-      setTranscript([base, newSession].filter(Boolean).join(" "));
+      setTranscript(appendVoiceTranscriptSession(base, newSession));
     };
 
     rec.onerror = () => {
@@ -498,6 +503,47 @@ export function VoiceBookingAssistant(props: {
     if (matchedTableId) setTableId(matchedTableId);
   };
 
+  const callVoiceBookingApi = async (
+    t: string,
+    mode: VoiceBookingApiMode
+  ): Promise<VoiceBookingResponse | VoiceFormatResponse> => {
+    const payload = {
+      transcript: t,
+      nowIso: new Date().toISOString(),
+      mode,
+      branch,
+      areas,
+      tables,
+    };
+
+    let lastMessage = mode === "format" ? "Không định dạng được." : "Không phân tích được.";
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await fetch("/api/voice-booking", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await res.json()) as VoiceBookingResponse | VoiceFormatResponse;
+      if (res.ok && !("error" in data)) {
+        return data;
+      }
+
+      lastMessage = "error" in data ? data.error : lastMessage;
+      const retryable = attempt === 0 && /no object generated/i.test(lastMessage);
+      if (!retryable) break;
+    }
+
+    throw new Error(lastMessage);
+  };
+
+  const resolveFormattedTranscript = async (t: string): Promise<string> => {
+    const data = await callVoiceBookingApi(t, "format");
+    if ("formattedTranscript" in data) {
+      return data.formattedTranscript;
+    }
+    throw new Error("Không định dạng được.");
+  };
+
   const parseTranscript = async () => {
     if (!branch) {
       notifications.show({ color: "red", title: "Thiếu chi nhánh", message: "Cần chọn chi nhánh trước." });
@@ -508,44 +554,41 @@ export function VoiceBookingAssistant(props: {
     setIsParsing(true);
     setClarify(null);
     try {
-      const payload = {
-        transcript: t,
-        nowIso: new Date().toISOString(),
-        branch,
-        areas,
-        tables,
-      };
-
-      let lastMessage = "Không phân tích được.";
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const res = await fetch("/api/voice-booking", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const data = (await res.json()) as VoiceBookingResponse;
-        if (res.ok && !("error" in data)) {
-          applyParsedDraft(data);
-          if (data.missing.length > 0 && data.clarificationQuestion) {
-            setClarify(data.clarificationQuestion);
-          } else {
-            setClarify(null);
-          }
-          return;
+      const formatted = await resolveFormattedTranscript(t);
+      setTranscript(formatted);
+      const data = await callVoiceBookingApi(formatted, "parse");
+      if ("draft" in data) {
+        applyParsedDraft(data);
+        if (data.missing.length > 0 && data.clarificationQuestion) {
+          setClarify(data.clarificationQuestion);
+        } else {
+          setClarify(null);
         }
-
-        lastMessage = "error" in data ? data.error : "Không phân tích được.";
-        const retryable =
-          attempt === 0 && /no object generated/i.test(lastMessage);
-        if (!retryable) break;
       }
-
-      throw new Error(lastMessage);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unknown error";
       notifications.show({ color: "red", title: "Phân tích thất bại", message });
     } finally {
       setIsParsing(false);
+    }
+  };
+
+  const formatTranscript = async () => {
+    if (!branch) {
+      notifications.show({ color: "red", title: "Thiếu chi nhánh", message: "Cần chọn chi nhánh trước." });
+      return;
+    }
+    const t = transcript.trim();
+    if (!t) return;
+    setIsFormatting(true);
+    setClarify(null);
+    try {
+      setTranscript(await resolveFormattedTranscript(t));
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Unknown error";
+      notifications.show({ color: "red", title: "Định dạng thất bại", message });
+    } finally {
+      setIsFormatting(false);
     }
   };
 
@@ -628,8 +671,9 @@ export function VoiceBookingAssistant(props: {
             <Group justify="space-between" align="flex-start">
               <Stack gap={4}>
                 <Text size="sm" c="dimmed">
-                  Bấm <strong>Ghi âm</strong> (có thể nhiều lần) hoặc gõ nội dung → <strong>Phân tích</strong> điền các
-                  trường có trong câu (không cần đủ thông tin) → kiểm tra lại → tạo booking.
+                  Bấm <strong>Ghi âm</strong> (có thể nhiều lần) hoặc gõ nội dung →{" "}
+                  <strong>Phân tích</strong> (hoặc <strong>Định dạng</strong> trước để xem/sửa nội dung) →{" "}
+                  <strong>Kiểm tra lại</strong> → <strong>Tạo booking</strong>.
                 </Text>
               </Stack>
               <Group gap="xs" align="center">
@@ -643,9 +687,29 @@ export function VoiceBookingAssistant(props: {
                   {isListening ? "Dừng" : "Ghi âm"}
                 </Button>
                 <Button
+                  onClick={() => void formatTranscript()}
+                  loading={isFormatting}
+                  variant="light"
+                  disabled={
+                    formDisabled ||
+                    !transcript.trim() ||
+                    isListening ||
+                    isWarmingMic ||
+                    isParsing
+                  }
+                >
+                  Định dạng
+                </Button>
+                <Button
                   onClick={() => void parseTranscript()}
                   loading={isParsing}
-                  disabled={formDisabled || !transcript.trim() || isListening || isWarmingMic}
+                  disabled={
+                    formDisabled ||
+                    !transcript.trim() ||
+                    isListening ||
+                    isWarmingMic ||
+                    isFormatting
+                  }
                 >
                   Phân tích
                 </Button>
@@ -655,7 +719,13 @@ export function VoiceBookingAssistant(props: {
                     setTranscript("");
                     setClarify(null);
                   }}
-                  disabled={formDisabled || isListening || isParsing || !transcript.trim()}
+                  disabled={
+                    formDisabled ||
+                    isListening ||
+                    isParsing ||
+                    isFormatting ||
+                    !transcript.trim()
+                  }
                 >
                   Xóa
                 </Button>
@@ -864,7 +934,13 @@ export function VoiceBookingAssistant(props: {
               <Button
                 onClick={() => void submit()}
                 loading={isSubmitting}
-                disabled={!branch || isListening || isParsing || isSubmitting}
+                disabled={
+                  !branch ||
+                  isListening ||
+                  isParsing ||
+                  isFormatting ||
+                  isSubmitting
+                }
               >
                 Xác nhận & tạo booking
               </Button>
