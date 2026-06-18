@@ -106,7 +106,7 @@ function autoColumnWidths(
     }
 
     column.eachCell({ includeEmpty: false }, (cell) => {
-      if (cell.row === headerRowNumber) {
+      if (Number(cell.row) === headerRowNumber) {
         return;
       }
       maxWidth = Math.max(maxWidth, String(cell.value ?? "").length);
