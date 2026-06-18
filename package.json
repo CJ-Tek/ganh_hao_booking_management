@@ -20,6 +20,7 @@
     "@supabase/supabase-js": "^2.103.0",
     "ai": "^5.0.0",
     "dayjs": "^1.11.20",
+    "exceljs": "^4.4.0",
     "konva": "^10.3.0",
     "lucide-react": "^1.8.0",
     "mantine-datatable": "^8.3.13",

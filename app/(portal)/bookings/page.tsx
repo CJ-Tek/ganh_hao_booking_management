@@ -19,6 +19,7 @@ import {
 import { BookingDateTimeFields } from "@/components/booking-datetime-fields";
 import { notifications } from "@mantine/notifications";
 import { type DataTableSortStatus } from "mantine-datatable";
+import { FileSpreadsheet } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
@@ -31,6 +32,7 @@ import { EditBookingModalTitle } from "@/components/booking-management/edit-book
 import { BookingRowActions } from "@/components/booking-management/booking-row-actions";
 import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
 import { BookingListDesktopSection } from "@/components/booking-management/booking-list-desktop-section";
+import { BookingListDateRangeFilter } from "@/components/booking-management/booking-list-date-range-filter";
 import {
   BookingListFiltersToolbar,
   BookingListTimeSortFilters,
@@ -79,6 +81,13 @@ import {
   resolveBookingCreatedAt,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
+import {
+  formatBookingListDateRangeLabel,
+  getDefaultBookingListDateRange,
+  isBookingInDateRange,
+} from "@/lib/booking-list-date-range";
+import { exportBookingsToExcel } from "@/lib/export-bookings-excel";
+import { validateMergeGroupDateRange } from "@/lib/merge-group-utils";
 import { bookingCardBusyProps, bookingListRowStyle } from "@/lib/busy-row-style";
 import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
@@ -166,6 +175,13 @@ function BookingsPageContent() {
   const [mobileDetailSource, setMobileDetailSource] = useState<"list" | "today">("list");
   const [listFocusBookingId, setListFocusBookingId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [listRangeStart, setListRangeStart] = useState(
+    () => getDefaultBookingListDateRange().startDate
+  );
+  const [listRangeEnd, setListRangeEnd] = useState(
+    () => getDefaultBookingListDateRange().endDate
+  );
+  const [listFiltersOpen, setListFiltersOpen] = useState(false);
   const [listStatusFilters, setListStatusFilters] = useState<BookingStatus[]>(
     defaultBookingStatusFilters
   );
@@ -486,11 +502,19 @@ function BookingsPageContent() {
     state.tables,
   ]);
 
+  const dateFilteredBookings = useMemo(
+    () =>
+      branchBookings.filter((booking) =>
+        isBookingInDateRange(booking, listRangeStart, listRangeEnd)
+      ),
+    [branchBookings, listRangeEnd, listRangeStart]
+  );
+
   const pipelineFilteredBookings = useMemo(() => {
-    return branchBookings.filter((booking) =>
+    return dateFilteredBookings.filter((booking) =>
       bookingMatchesStatusFilters(booking.status, listStatusFilters)
     );
-  }, [branchBookings, listStatusFilters]);
+  }, [dateFilteredBookings, listStatusFilters]);
 
   /** Use booking.branchId — not filteredBranchIds[0] — so areas/tables match the booking's chi nhánh. */
   const getCandidateTables = (booking: Booking) =>
@@ -993,10 +1017,13 @@ function BookingsPageContent() {
     [searchedBookings, sortListBookings, sortStatus]
   );
 
-  const listSectionTitle = useMemo(
-    () => `Danh sách booking (${sortedBookings.length})`,
-    [sortedBookings.length]
-  );
+  const listSectionTitle = useMemo(() => {
+    const rangeLabel = formatBookingListDateRangeLabel(listRangeStart, listRangeEnd);
+    const count = sortedBookings.length;
+    return rangeLabel
+      ? `Danh sách booking (${count}) · ${rangeLabel}`
+      : `Danh sách booking (${count})`;
+  }, [listRangeEnd, listRangeStart, sortedBookings.length]);
 
   const completedBookingsByCustomer = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1313,6 +1340,48 @@ function BookingsPageContent() {
     []
   );
 
+  const listDateRangeValidation = useMemo(
+    () => validateMergeGroupDateRange({ startDate: listRangeStart, endDate: listRangeEnd }),
+    [listRangeEnd, listRangeStart]
+  );
+
+  const handleExportListExcel = useCallback(async () => {
+    if (!listDateRangeValidation.ok) {
+      notifications.show({ color: "red", message: listDateRangeValidation.message });
+      return;
+    }
+    if (sortedBookings.length === 0) {
+      notifications.show({ color: "yellow", message: "Không có booking để xuất Excel." });
+      return;
+    }
+    try {
+      await exportBookingsToExcel({
+        bookings: sortedBookings,
+        customers: state.customers,
+        users: state.users,
+        dateRange: { start: listRangeStart, end: listRangeEnd },
+        bookingAreaTableLookup,
+      });
+      notifications.show({
+        color: "green",
+        message: `Đã xuất ${sortedBookings.length} booking ra Excel.`,
+      });
+    } catch (error) {
+      notifications.show({
+        color: "red",
+        message: error instanceof Error ? error.message : "Xuất Excel thất bại.",
+      });
+    }
+  }, [
+    bookingAreaTableLookup,
+    listDateRangeValidation,
+    listRangeEnd,
+    listRangeStart,
+    sortedBookings,
+    state.customers,
+    state.users,
+  ]);
+
   const listTimeSortFilters = (
     <BookingListTimeSortFilters
       sortStatus={sortStatus}
@@ -1325,7 +1394,76 @@ function BookingsPageContent() {
     />
   );
 
-  const listInlineFilters = listTimeSortFilters;
+  const listAdvancedFiltersPanel = (
+    <Group gap="sm" wrap="nowrap" align="flex-end" w="100%" style={{ minWidth: 0 }}>
+      <Group gap="sm" wrap="nowrap" align="flex-end" style={{ flex: 1, minWidth: 0 }}>
+        <BookingListDateRangeFilter
+          layout="panel"
+          startDate={listRangeStart}
+          endDate={listRangeEnd}
+          onStartDateChange={(value) => {
+            setListRangeStart(value);
+            setPage(1);
+          }}
+          onEndDateChange={(value) => {
+            setListRangeEnd(value);
+            setPage(1);
+          }}
+          size="sm"
+        />
+        <BookingListTimeSortFilters
+          layout="panel"
+          sortStatus={sortStatus}
+          fallbackSort={listDefaultSort}
+          onSortStatusChange={(next) => {
+            setSortStatus(next);
+            setPage(1);
+          }}
+          size="sm"
+        />
+      </Group>
+      <Button
+        variant="default"
+        size="sm"
+        leftSection={<FileSpreadsheet size={16} />}
+        onClick={handleExportListExcel}
+        disabled={!listDateRangeValidation.ok || sortedBookings.length === 0}
+        style={{ flexShrink: 0 }}
+      >
+        Xuất Excel
+      </Button>
+    </Group>
+  );
+
+  const listInlineFilters = (
+    <Group gap="sm" wrap="wrap" align="flex-end" w="100%">
+      <BookingListDateRangeFilter
+        startDate={listRangeStart}
+        endDate={listRangeEnd}
+        onStartDateChange={(value) => {
+          setListRangeStart(value);
+          setPage(1);
+        }}
+        onEndDateChange={(value) => {
+          setListRangeEnd(value);
+          setPage(1);
+        }}
+        size="md"
+      />
+      {listTimeSortFilters}
+      <Button
+        variant="default"
+        size="md"
+        leftSection={<FileSpreadsheet size={16} />}
+        onClick={handleExportListExcel}
+        disabled={!listDateRangeValidation.ok || sortedBookings.length === 0}
+        style={{ flexShrink: 0 }}
+        ml="auto"
+      >
+        Xuất Excel
+      </Button>
+    </Group>
+  );
 
   const listFiltersToolbar = (
     <BookingListFiltersToolbar
@@ -1422,7 +1560,9 @@ function BookingsPageContent() {
         recordsPerPageOptions={[...DESKTOP_BOOKINGS_PAGE_SIZE_OPTIONS]}
         defaultSort={listDefaultSort}
         searchPlaceholder={bookingsSearchPlaceholder}
-        filters={listInlineFilters}
+        collapsibleFilters={listAdvancedFiltersPanel}
+        filtersOpen={listFiltersOpen}
+        onFiltersOpenChange={setListFiltersOpen}
         minHeight={260}
         pinLastColumn
         onRowClick={({ record }) => {

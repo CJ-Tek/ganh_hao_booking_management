@@ -1,6 +1,7 @@
 "use client";
 
-import { Button, Group, Select, Stack, Text } from "@mantine/core";
+import { Button, Collapse, Group, Select, Stack, Text } from "@mantine/core";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import {
   DataTable,
   type DataTableColumn,
@@ -66,6 +67,10 @@ export type PortalDataTableProps<T> = {
   columns: DataTableColumn<T>[];
   /** Extra filter controls rendered beside search (Select, SegmentedControl, etc.). */
   filters?: ReactNode;
+  /** Desktop-only: filter panel toggled by a toolbar button below the search row. */
+  collapsibleFilters?: ReactNode;
+  filtersOpen?: boolean;
+  onFiltersOpenChange?: (open: boolean) => void;
   /** Custom searchable text per row; defaults to stringified sortable accessors. */
   getRecordSearchValue?: (record: T) => string;
   /** Custom sort for computed columns; defaults to primitive accessor compare. */
@@ -116,6 +121,9 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
     records,
     columns,
     filters,
+    collapsibleFilters,
+    filtersOpen = false,
+    onFiltersOpenChange,
     getRecordSearchValue,
     sortRecords = defaultSortRecords,
     defaultSort,
@@ -204,7 +212,9 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
     [mobilePageSafe, mobileRecordsPerPage, sortedRecords]
   );
 
-  const showToolbar = withToolbar && (!hideSearch || filters);
+  const hasCollapsibleFilters = collapsibleFilters != null;
+  const showToolbar =
+    withToolbar && (!hideSearch || filters || (hasCollapsibleFilters && !isCompact));
 
   const dataTableElementProps = {
     minHeight,
@@ -265,10 +275,32 @@ export function PortalDataTable<T>(props: PortalDataTableProps<T>) {
             {filters}
           </Stack>
         ) : (
-          <Group align="flex-end" wrap="wrap" gap="sm">
-            {searchInput}
-            {filters}
-          </Group>
+          <Stack gap="sm">
+            <Group align="flex-end" wrap="nowrap" gap="sm">
+              {searchInput}
+              {hasCollapsibleFilters ? (
+                <Button
+                  variant="default"
+                  size="sm"
+                  aria-expanded={filtersOpen}
+                  onClick={() => onFiltersOpenChange?.(!filtersOpen)}
+                  rightSection={filtersOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  style={{ flexShrink: 0 }}
+                >
+                  {filtersOpen ? "Ẩn bộ lọc" : "Bộ lọc"}
+                </Button>
+              ) : (
+                filters
+              )}
+            </Group>
+            {hasCollapsibleFilters ? (
+              <Collapse expanded={filtersOpen}>
+                <Stack gap="sm" pt="xs" w="100%" style={{ minWidth: 0 }}>
+                  {collapsibleFilters}
+                </Stack>
+              </Collapse>
+            ) : null}
+          </Stack>
         )
       ) : null}
       {isCompact && mobileCardRender ? (

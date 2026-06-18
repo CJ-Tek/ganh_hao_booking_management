@@ -30,14 +30,16 @@ export function BookingListTimeSortFilters<T>(props: {
   onSortStatusChange: (status: DataTableSortStatus<T>) => void;
   fallbackSort: DataTableSortStatus<T>;
   size?: "sm" | "md";
+  layout?: "default" | "panel";
 }) {
-  const { sortStatus, onSortStatusChange, fallbackSort, size = "sm" } = props;
+  const { sortStatus, onSortStatusChange, fallbackSort, size = "sm", layout = "default" } = props;
   const isCompact = usePortalCompact();
+  const isPanel = layout === "panel";
+  const isFluid = isCompact || isPanel;
   const columnAccessor = sortStatus.columnAccessor as string;
-  const selectStyle = isCompact
-    ? { flex: "1 1 0", minWidth: 0 }
-    : { flexShrink: 0 };
-  const selectWidth = isCompact ? undefined : 148;
+  const selectStyle = isFluid ? { flex: "1 1 0", minWidth: 0 } : { flexShrink: 0 };
+  const selectWidth = isFluid ? undefined : 148;
+  const selectMinWidth = isCompact ? 0 : isPanel ? "6.5rem" : 148;
 
   const applyArrivalSort = (direction: SortDirection | null) => {
     if (direction) {
@@ -76,7 +78,7 @@ export function BookingListTimeSortFilters<T>(props: {
         onChange={(value) => applyArrivalSort(isSortDirection(value) ? value : null)}
         size={size}
         w={selectWidth}
-        miw={isCompact ? 0 : 148}
+        miw={selectMinWidth}
         style={selectStyle}
       />
       <Select
@@ -88,7 +90,7 @@ export function BookingListTimeSortFilters<T>(props: {
         onChange={(value) => applyCreatedSort(isSortDirection(value) ? value : null)}
         size={size}
         w={selectWidth}
-        miw={isCompact ? 0 : 148}
+        miw={selectMinWidth}
         style={selectStyle}
       />
     </>
@@ -101,6 +103,7 @@ export function BookingListTimeSortFilters<T>(props: {
       align="flex-end"
       w={isCompact ? "100%" : undefined}
       grow={isCompact}
+      style={isPanel ? { flex: "1 1 0", minWidth: 0 } : undefined}
     >
       {selects}
     </Group>
