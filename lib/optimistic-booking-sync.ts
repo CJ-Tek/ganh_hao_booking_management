@@ -172,19 +172,26 @@ export function buildOptimisticBookingFromCreate(
     .add(runtimeSettings.standardTurnaroundMinutes, "minute")
     .toISOString();
   const mergeGroupId = input.mergeGroupId ?? null;
+  const tableId = mergeGroupId ? mergeFallbackTableId : (input.tableId ?? null);
+  const hasTableAssignment = Boolean(tableId || mergeGroupId);
+  const status: BookingStatus = !hasTableAssignment
+    ? "pending"
+    : autoSeat
+      ? "seated"
+      : "confirmed";
   return {
     id: bookingId,
     customerId,
     branchId: input.branchId,
     areaId: input.areaId ?? null,
-    tableId: mergeGroupId ? mergeFallbackTableId : (input.tableId ?? null),
+    tableId,
     mergeGroupId,
     guestCount,
     bookingAt: startTime,
     startTime,
     endTime,
-    checkedInAt: autoSeat ? dayjs().toISOString() : undefined,
-    status: autoSeat ? "seated" : "confirmed",
+    checkedInAt: hasTableAssignment && autoSeat ? dayjs().toISOString() : undefined,
+    status,
     note: input.note,
     createdAt: dayjs().toISOString(),
     createdByUserId,
