@@ -4,7 +4,9 @@ import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { BOOKING_GUEST_TYPE_OPTIONS } from "@/lib/booking-meta";
 import { normalizeGuestTypeHint } from "@/lib/voice-booking/guest-type";
+import { buildRestaurantTimeContext } from "@/lib/restaurant-time";
 import { finalizeFormattedTranscript } from "@/lib/voice-booking/format";
+import { correctBookingAtLocalDate } from "@/lib/voice-booking/resolve-booking-time";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,11 +87,23 @@ type VoiceBookingApiResponse = {
 };
 
 function buildVoiceBookingResponse(
-  raw: z.infer<typeof LlmOutputSchema>
+  raw: z.infer<typeof LlmOutputSchema>,
+  input: Pick<VoiceBookingRequest, "transcript" | "nowIso">
 ): VoiceBookingApiResponse {
   const { clarificationQuestion, guestType: guestTypeHint, ...draftFields } = raw;
   const guestType = normalizeGuestTypeHint(guestTypeHint) ?? undefined;
-  const draft = { ...draftFields, ...(guestType ? { guestType } : {}) };
+  const bookingAtLocal = draftFields.bookingAtLocal?.trim()
+    ? correctBookingAtLocalDate(
+        draftFields.bookingAtLocal.trim(),
+        input.nowIso,
+        input.transcript
+      )
+    : undefined;
+  const draft = {
+    ...draftFields,
+    ...(bookingAtLocal ? { bookingAtLocal } : {}),
+    ...(guestType ? { guestType } : {}),
+  };
 
   const missing: VoiceBookingApiResponse["missing"] = [];
   if (!draft.customerName?.trim()) missing.push("customerName");
@@ -130,7 +144,7 @@ function buildParseSystemPrompt(nowIso: string): string {
     "Never invent or guess values for fields not mentioned. Omit optional fields instead of filling them.",
     "Analysis must succeed with any subset of fields (e.g. only customerName, or only bookingAtLocal, or name + time).",
     "Do NOT invent table IDs. Only return tableNameHint / areaNameHint as plain strings when mentioned.",
-    `Time handling: now is ${nowIso}. Convert relative times (e.g. 'tối nay', 'mai', 'thứ bảy') into local time string YYYY-MM-DDTHH:mm (24h) in Vietnam time when a time is mentioned.`,
+    buildRestaurantTimeContext(nowIso),
     "Phone, guestCount, area, table, guestType and note are optional.",
     "guestType: set only when the speaker clearly indicates customer type (VIP, sinh nhật, đoàn, khách quen, đặt món trước). Use a short Vietnamese label; otherwise omit.",
     `Preferred guestType labels: ${BOOKING_GUEST_TYPE_OPTIONS.join(", ")}.`,
@@ -151,7 +165,7 @@ function buildFormatSystemPrompt(nowIso: string): string {
     "Ghi chú: when multiple note items are present, separate them with commas inside the clause (not periods), e.g. 'Ghi chú: sinh nhật, dị ứng, ghế em bé.'",
     "Customer names (Tên): use correct Vietnamese spelling and grammar. Capitalize each name part: 'Nguyên' not 'nguyen', 'Văn Anh' not 'vănanh'. Split glued STT syllables into separate words with spaces. Restore diacritics when clearly inferable (Nguyễn, Văn, Anh). Do not lowercase name parts.",
     "Include only clauses for fields actually mentioned or clearly implied. Omit clauses for fields not in the source.",
-    `Time handling: now is ${nowIso}. Convert relative times (e.g. 'tối nay', 'mai', '7h30') into YYYY-MM-DDTHH:mm (24h) in Vietnam time when a time is mentioned.`,
+    buildRestaurantTimeContext(nowIso),
     "When area/table names clearly match the provided catalog lists, use the exact catalog spelling.",
     "Phone: keep digits as spoken; accept +84 forms when present.",
     "If the transcript contains multiple bookings, format only the first one and ignore the rest.",
@@ -217,7 +231,7 @@ export async function POST(req: Request) {
       buildParseSystemPrompt(input.nowIso),
       user
     );
-    return NextResponse.json(buildVoiceBookingResponse(result));
+    return NextResponse.json(buildVoiceBookingResponse(result, input));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 400 });
