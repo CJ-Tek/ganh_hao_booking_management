@@ -48,6 +48,8 @@ export interface SplitClonesPanelProps {
   onRowSelect?: (clone: DiningTable) => void;
   initialAreaFilter?: string | null;
   embedded?: boolean;
+  /** Hide delete actions (view-only branch). */
+  readOnly?: boolean;
 }
 
 export function SplitClonesPanel({
@@ -61,6 +63,7 @@ export function SplitClonesPanel({
   onRowSelect,
   initialAreaFilter = null,
   embedded = false,
+  readOnly = false,
 }: SplitClonesPanelProps) {
   const [search, setSearch] = useState("");
   const [areaFilter, setAreaFilter] = useState<string | null>(initialAreaFilter);
@@ -292,6 +295,7 @@ export function SplitClonesPanel({
                   {activeBookingCountByTable.get(clone.id) ?? 0} booking đang giữ
                 </Text>
               </Group>
+              {!readOnly ? (
               <Button
                 color="red"
                 variant="light"
@@ -304,6 +308,7 @@ export function SplitClonesPanel({
               >
                 Xóa tách
               </Button>
+              ) : null}
             </Stack>
           </Card>
         );
@@ -384,28 +389,32 @@ export function SplitClonesPanel({
             );
           },
         },
-        {
-          accessor: "actions",
-          title: "",
-          width: 116,
-          noWrap: true,
-          textAlign: "center",
-          render: (clone) => (
-            <Button
-              color="red"
-              variant="light"
-              size="compact-sm"
-              loading={busyCloneId === clone.id}
-              onClick={(event) => {
-                event.stopPropagation();
-                onRequestDelete(clone.id);
-              }}
-              style={{ whiteSpace: "nowrap" }}
-            >
-              Xóa tách
-            </Button>
-          ),
-        },
+        ...(readOnly
+          ? []
+          : [
+              {
+                accessor: "actions",
+                title: "",
+                width: 116,
+                noWrap: true,
+                textAlign: "center" as const,
+                render: (clone: DiningTable) => (
+                  <Button
+                    color="red"
+                    variant="light"
+                    size="compact-sm"
+                    loading={busyCloneId === clone.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRequestDelete(clone.id);
+                    }}
+                    style={{ whiteSpace: "nowrap" }}
+                  >
+                    Xóa tách
+                  </Button>
+                ),
+              },
+            ]),
       ]}
     />
   );

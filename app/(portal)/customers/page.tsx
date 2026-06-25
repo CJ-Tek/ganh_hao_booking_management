@@ -44,7 +44,7 @@ function applyCustomerBookingFilter(rows: CustomerListRow[], filter: CustomerBoo
 }
 
 export default function CustomersPage() {
-  const { state, filteredBranchIds, deleteCustomers } = useAppContext();
+  const { state, filteredBranchIds, deleteCustomers, canEditActiveBranch } = useAppContext();
   const isCompact = usePortalCompact();
   const searchParams = useSearchParams();
   const consumedSearchFromUrlRef = useRef<string | null>(null);
@@ -217,7 +217,7 @@ export default function CustomersPage() {
         }}
         size={isCompact ? "xs" : undefined}
       />
-      {!isCompact ? (
+      {!isCompact && canEditActiveBranch ? (
         <Button
           color="red"
           variant="light"
@@ -265,8 +265,8 @@ export default function CustomersPage() {
       searchPlaceholder="Tìm tên hoặc SĐT"
       noRecordsText="Không tìm thấy khách hàng phù hợp."
       onRowClick={({ record }) => openCustomerDetail(record)}
-      selectedRecords={selectedCustomers}
-      onSelectedRecordsChange={setSelectedCustomers}
+      selectedRecords={canEditActiveBranch ? selectedCustomers : []}
+      onSelectedRecordsChange={canEditActiveBranch ? setSelectedCustomers : undefined}
       mobileCardRender={(row) => (
         <CustomerCompactCard key={row.id} row={row} onClick={() => openCustomerDetail(row)} />
       )}

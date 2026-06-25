@@ -51,6 +51,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import dayjs from "dayjs";
 import { CreateBookingModal } from "@/components/booking-management/create-booking-modal";
+import { ViewOnlyBranchBanner } from "@/components/view-only-branch-banner";
+import { confirmBranchSwitch } from "@/lib/confirm-branch-switch";
+import { getBranchSwitcherBranches } from "@/lib/manager-branch-access";
 import { useAppContext } from "@/contexts/app-context";
 import { buildFloorMapHref } from "@/lib/floor-map-routes";
 import { formatNotificationTime } from "@/lib/format-notification-time";
@@ -115,16 +118,30 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     markNotificationRead,
     markAllScopedNotificationsRead,
     hasSupabase,
+    canEditActiveBranch,
   } = useAppContext();
 
   /** All branches this account may switch to (header); data scope uses `filteredBranchIds` only. */
   const branchSwitcherOptions = useMemo(
-    () =>
-      state.branches.filter((branch) =>
-        currentUser ? currentUser.branchIds.includes(branch.id) : false
-      ),
+    () => getBranchSwitcherBranches(currentUser, state.branches),
     [state.branches, currentUser]
   );
+
+  const handleBranchSwitch = async (value: string | null) => {
+    if (!value || value === state.activeBranchId) {
+      return;
+    }
+    const branch = branchSwitcherOptions.find((item) => item.id === value);
+    const confirmed = await confirmBranchSwitch({
+      user: currentUser,
+      targetBranchId: value,
+      targetBranchName: branch?.name ?? value,
+      currentBranchId: state.activeBranchId,
+    });
+    if (confirmed) {
+      setActiveBranchId(value);
+    }
+  };
 
   const scopedNotifications = useMemo(
     () =>
@@ -337,18 +354,18 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             </Group>
 
             <Group gap="xs" wrap="nowrap">
-              {currentUser?.role !== "manager" && currentUser?.role !== "employee" && (
+              {currentUser?.role !== "employee" && branchSwitcherOptions.length > 1 ? (
                 <Select
                   size="xs"
                   className={classes.branchSelect}
                   value={state.activeBranchId}
-                  onChange={(value) => value && setActiveBranchId(value)}
+                  onChange={(value) => void handleBranchSwitch(value)}
                   data={branchSwitcherOptions.map((branch) => ({
                     value: branch.id,
                     label: branch.name,
                   }))}
                 />
-              )}
+              ) : null}
               <ActionIcon
                 variant="transparent"
                 color="white"
@@ -721,6 +738,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             : undefined
         }
       >
+        <ViewOnlyBranchBanner />
         {children}
       </AppShell.Main>
 
@@ -751,6 +769,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               title="Tạo booking"
               className={classes.managerDockCreateButton}
               onClick={openCreateBookingFromDock}
+              style={canEditActiveBranch ? undefined : { display: "none" }}
             >
               <Plus size={28} strokeWidth={2.5} aria-hidden />
             </UnstyledButton>

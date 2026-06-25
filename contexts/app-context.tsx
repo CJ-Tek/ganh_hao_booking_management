@@ -15,7 +15,7 @@ import {
   clearStoredActiveBranch,
   isBranchPickRequired,
   persistActiveBranch,
-  readStoredActiveBranch,
+  resolveActiveBranchIdForUser,
   setBranchPickRequired,
   shouldPickBranchOnLogin,
 } from "@/lib/branch-pick";
@@ -33,6 +33,11 @@ import {
   EMPLOYEE_MUTATION_BLOCKED,
   isEmployeeUser,
 } from "@/lib/employee-access";
+import {
+  canEditActiveBranch as computeCanEditActiveBranch,
+  isManagerViewOnlyBranch,
+  MANAGER_VIEW_ONLY_BLOCKED,
+} from "@/lib/manager-branch-access";
 import { isFloorLayoutRealtimeReloadBlocked } from "@/lib/floor-layout-sync";
 import { mergeFloorMapSliceIntoState, reloadScopeForRealtimeTable, type FloorMapStateSlice } from "@/lib/floor-map-state-slice";
 import {
@@ -165,6 +170,7 @@ interface AppContextValue {
   state: AppStateSnapshot;
   currentUser: AppUser | null;
   filteredBranchIds: string[];
+  canEditActiveBranch: boolean;
   isLoading: boolean;
   hasSupabase: boolean;
   login: (username: string, password: string) => Promise<AppUser | null>;
@@ -329,14 +335,23 @@ const AppContext = createContext<AppContextValue | null>(null);
 /**
  * Branch IDs used to scope bookings, tables, areas, dashboard, etc.
  * Admin / Quản lý tổng: exactly the active branch (switch in header or after login pick).
- * Quản lý chi nhánh / nhân viên: one branch at a time — assigned branch if only one; otherwise the active
- * branch (switch via menu "Chọn chi nhánh" → /select-branch).
+ * Quản lý chi nhánh: active branch (any branch in the system; view-only when not assigned).
+ * Nhân viên: one assigned branch at a time (switch via "Chọn chi nhánh" when multi-branch).
  */
 function userScopeBranchIds(user: AppUser | null, activeBranchId?: string): string[] {
   if (!user) {
     return [];
   }
-  if (user.role === "manager" || user.role === "employee") {
+  if (user.role === "manager") {
+    if (activeBranchId) {
+      return [activeBranchId];
+    }
+    if (user.branchIds.length > 0) {
+      return [user.branchIds[0]];
+    }
+    return [];
+  }
+  if (user.role === "employee") {
     if (user.branchIds.length === 0) {
       return [];
     }
@@ -357,14 +372,32 @@ function userScopeBranchIds(user: AppUser | null, activeBranchId?: string): stri
   return [];
 }
 
-function canOperateBookingInBranch(user: AppUser | null, bookingBranchId: string): boolean {
+function canOperateBookingInBranch(
+  user: AppUser | null,
+  bookingBranchId: string,
+  activeBranchId?: string
+): boolean {
   if (!user) {
     return false;
   }
   if (user.role === "admin" || user.role === "general_manager") {
     return true;
   }
+  if (user.role === "manager") {
+    return (
+      user.branchIds.includes(bookingBranchId) &&
+      activeBranchId != null &&
+      activeBranchId === bookingBranchId
+    );
+  }
   return user.branchIds.includes(bookingBranchId);
+}
+
+function managerViewOnlyResult(user: AppUser | null, activeBranchId?: string): ActionResult | null {
+  if (isManagerViewOnlyBranch(user, activeBranchId)) {
+    return { ok: false, message: MANAGER_VIEW_ONLY_BLOCKED };
+  }
+  return null;
 }
 
 export function AppContextProvider({ children }: { children: React.ReactNode }) {
@@ -377,11 +410,18 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     const storedSession = window.localStorage.getItem(SESSION_KEY);
     return storedSession ? parseStoredSession(storedSession) : null;
   });
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
 
   const hasSupabase = isSupabaseEnabled();
   const hasRealtime = isSupabaseRealtimeConfigured();
   const filteredBranchIds = useMemo(
     () => userScopeBranchIds(currentUser, state.activeBranchId),
+    [currentUser, state.activeBranchId]
+  );
+
+  const canEditActiveBranch = useMemo(
+    () => computeCanEditActiveBranch(currentUser, state.activeBranchId),
     [currentUser, state.activeBranchId]
   );
 
@@ -419,26 +459,21 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const reload = useCallback(
     async (options?: { forceMaintenance?: boolean; scope?: "full" | "floor" }) => {
       const mergeActive = (
-        prev: AppStateSnapshot,
-        fallback: AppStateSnapshot["activeBranchId"]
+        prev: AppStateSnapshot
       ): AppStateSnapshot["activeBranchId"] => {
-        if (!currentUser) {
-          return prev.activeBranchId ?? fallback;
-        }
-        if (shouldPickBranchOnLogin(currentUser.role) && isBranchPickRequired()) {
+        const user = currentUserRef.current;
+        if (!user) {
           return undefined;
         }
-        const stored = readStoredActiveBranch(currentUser);
-        if (stored) {
-          return stored;
-        }
-        return prev.activeBranchId ?? fallback;
+        return resolveActiveBranchIdForUser(user, {
+          allBranchIds: prev.branches.map((branch) => branch.id),
+        });
       };
 
       if (!hasSupabase) {
         setState((prev) => ({
           ...initialState,
-          activeBranchId: mergeActive(prev, initialState.activeBranchId),
+          activeBranchId: mergeActive(prev),
         }));
         return;
       }
@@ -456,7 +491,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       const sanitized = applyTombstonesToSnapshot(snapshot);
       setState((prev) => ({
         ...sanitized,
-        activeBranchId: mergeActive(prev, sanitized.activeBranchId),
+        activeBranchId: mergeActive(prev),
       }));
     },
     [applyTombstonesToFloorSlice, applyTombstonesToSnapshot, filteredBranchIds, hasSupabase, currentUser]
@@ -1212,7 +1247,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     } else {
       setState((prev) => ({
         ...prev,
-        activeBranchId: user.branchIds[0],
+        activeBranchId: resolveActiveBranchIdForUser(user, { assignedOnly: true }),
       }));
     }
     return sessionUser;
@@ -1221,16 +1256,16 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const logout = () => {
     clearBranchPickRequired();
     setCurrentUser(null);
+    setState((prev) => ({ ...prev, activeBranchId: undefined }));
   };
 
   const setActiveBranchId = (branchId: string) => {
     if (currentUser) {
       if (shouldPickBranchOnLogin(currentUser.role)) {
         persistActiveBranch(currentUser, branchId);
-      } else if (
-        (currentUser.role === "manager" || currentUser.role === "employee") &&
-        currentUser.branchIds.length > 1
-      ) {
+      } else if (currentUser.role === "manager") {
+        persistActiveBranch(currentUser, branchId);
+      } else if (currentUser.role === "employee" && currentUser.branchIds.length > 1) {
         persistActiveBranch(currentUser, branchId);
       }
     }
@@ -1240,6 +1275,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const updateBranch = async (branchId: string, input: { name: string; address: string }) => {
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
     }
     if (!hasSupabase) {
       setState((prev) => ({
@@ -1292,6 +1331,16 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (
+      viewOnlyBlock &&
+      !(
+        currentUser.role === "manager" &&
+        currentUser.branchIds.includes(input.branchId)
+      )
+    ) {
+      return viewOnlyBlock;
     }
 
     if (!hasSupabase) {
@@ -1361,11 +1410,15 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
     }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
+    }
     const booking = state.bookings.find((item) => item.id === input.bookingId);
     if (!booking) {
       return { ok: false, message: "Không tìm thấy booking." };
     }
-    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+    if (!canOperateBookingInBranch(currentUser, booking.branchId, state.activeBranchId)) {
       return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
     }
     if (!hasSupabase) {
@@ -1412,11 +1465,15 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
     }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
+    }
     const booking = state.bookings.find((item) => item.id === bookingId);
     if (!booking) {
       return { ok: false, message: "Không tìm thấy booking." };
     }
-    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+    if (!canOperateBookingInBranch(currentUser, booking.branchId, state.activeBranchId)) {
       return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
     }
     if (!hasSupabase) {
@@ -1454,6 +1511,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
     }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
+    }
     if (!hasSupabase) {
       return { ok: false, message: "Chưa kết nối Supabase." };
     }
@@ -1464,7 +1525,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!booking) {
       return { ok: false, message: "Không tìm thấy booking." };
     }
-    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+    if (!canOperateBookingInBranch(currentUser, booking.branchId, state.activeBranchId)) {
       return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
     }
     const revertPatch: Partial<Booking> = {
@@ -1516,6 +1577,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
     }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
+    }
     if (!hasSupabase) {
       return { ok: false, message: "Chưa kết nối Supabase." };
     }
@@ -1527,7 +1592,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!booking) {
       return { ok: false, message: "Không tìm thấy booking." };
     }
-    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+    if (!canOperateBookingInBranch(currentUser, booking.branchId, state.activeBranchId)) {
       return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
     }
     const editedAt = dayjs().toISOString();
@@ -1593,7 +1658,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!booking) {
       throw new Error("Không tìm thấy booking.");
     }
-    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+    if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+      throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
+    }
+    if (!canOperateBookingInBranch(currentUser, booking.branchId, state.activeBranchId)) {
       throw new Error("Bạn không có quyền chỉnh booking của chi nhánh này.");
     }
     if (isEmployeeUser(currentUser)) {
@@ -1653,12 +1721,15 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       throw new Error(EMPLOYEE_MUTATION_BLOCKED);
     }
+    if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+      throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
+    }
     const booking =
       state.bookings.find((item) => item.id === bookingId) ?? seedBooking;
     if (!booking) {
       throw new Error("Không tìm thấy booking.");
     }
-    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+    if (!canOperateBookingInBranch(currentUser, booking.branchId, state.activeBranchId)) {
       throw new Error("Bạn không có quyền chỉnh booking của chi nhánh này.");
     }
     if (booking.mergeGroupId) {
@@ -1708,12 +1779,16 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
     }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
+    }
     const booking =
       state.bookings.find((item) => item.id === bookingId) ?? seedBooking;
     if (!booking) {
       return { ok: false, message: "Không tìm thấy booking." };
     }
-    if (!canOperateBookingInBranch(currentUser, booking.branchId)) {
+    if (!canOperateBookingInBranch(currentUser, booking.branchId, state.activeBranchId)) {
       return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
     }
     if (!canQueueBooking(booking)) {
@@ -1769,6 +1844,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const deleteCustomers = async (customerIds: string[]) => {
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
     }
     const ids = customerIds.filter((id) => id.trim().length > 0);
     if (ids.length === 0) {
@@ -1863,6 +1942,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       throw new Error(EMPLOYEE_MUTATION_BLOCKED);
     }
+    if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+      throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
+    }
     if (!hasSupabase) {
       return;
     }
@@ -1874,6 +1956,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       throw new Error(EMPLOYEE_MUTATION_BLOCKED);
     }
+    if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+      throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
+    }
     if (!hasSupabase || tables.length === 0) {
       return;
     }
@@ -1884,6 +1969,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const updateTableStatus = async (tableId: string, status: TableStatus) => {
     if (isEmployeeUser(currentUser)) {
       throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+    }
+    if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+      throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
     }
     if (!hasSupabase) {
       return;
@@ -1919,6 +2007,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       throw new Error(EMPLOYEE_MUTATION_BLOCKED);
     }
+    if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+      throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
+    }
     if (!hasSupabase) {
       return;
     }
@@ -1935,6 +2026,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const deleteTables = async (tableIds: string[]) => {
     if (isEmployeeUser(currentUser)) {
       throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+    }
+    if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+      throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
     }
     if (!hasSupabase || tableIds.length === 0) {
       return;
@@ -1964,6 +2058,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       throw new Error(EMPLOYEE_MUTATION_BLOCKED);
     }
+    if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+      throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
+    }
     updateLocalTablePosition(tableId, x, y);
     if (!hasSupabase) {
       return;
@@ -1974,6 +2071,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const addArea = async (branchId: string, name: string) => {
     if (isEmployeeUser(currentUser)) {
       throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+    }
+    if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+      throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
     }
     if (!hasSupabase) {
       return;
@@ -1988,6 +2088,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   ) => {
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
     }
     const applyLocal = () => {
       setState((prev) => ({
@@ -2038,6 +2142,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
     }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
+    }
     const tablesInArea = state.tables.filter((t) => t.areaId === areaId);
     const bookingsInArea = state.bookings.filter((b) => b.areaId === areaId);
     if (!hasSupabase) {
@@ -2073,6 +2181,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
     }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
+    }
     if (currentUser?.role === "general_manager" && payload.role === "admin") {
       return {
         ok: false,
@@ -2105,6 +2217,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   ) => {
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
     }
     const target = state.users.find((u) => u.id === userId);
     if (!target) {
@@ -2257,6 +2373,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
     }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
+    }
     if (userId === currentUser?.id) {
       return { ok: false, message: "Không thể xóa tài khoản đang đăng nhập." };
     }
@@ -2286,6 +2406,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (isEmployeeUser(currentUser)) {
       return;
     }
+    if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+      return;
+    }
     if (!hasSupabase) {
       setState((prev) => ({
         ...prev,
@@ -2306,6 +2429,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
 
   const markAllScopedNotificationsRead = useCallback(async () => {
     if (isEmployeeUser(currentUser)) {
+      return;
+    }
+    if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
       return;
     }
     const ids = state.notifications
@@ -2344,6 +2470,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       options?: { layoutDate?: string }
     ) => {
       if (isEmployeeUser(currentUser)) {
+        return;
+      }
+      if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
         return;
       }
       const floorGridColumns = Math.min(24, Math.max(4, Math.round(columns)));
@@ -2396,6 +2525,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     ) => {
       if (isEmployeeUser(currentUser)) {
         throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+      }
+      if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+        throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
       }
       const floorGridColumns = Math.min(24, Math.max(4, Math.round(input.floorGridColumns)));
       const floorGridRows = Math.min(18, Math.max(4, Math.round(input.floorGridRows)));
@@ -2467,6 +2599,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       if (isEmployeeUser(currentUser)) {
         throw new Error(EMPLOYEE_MUTATION_BLOCKED);
       }
+      if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+        throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
+      }
       if (!hasSupabase) {
         return;
       }
@@ -2490,6 +2625,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       if (isEmployeeUser(currentUser)) {
         throw new Error(EMPLOYEE_MUTATION_BLOCKED);
       }
+      if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+        throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
+      }
       if (!hasSupabase || !currentUser) {
         throw new Error("Chưa kết nối Supabase hoặc chưa đăng nhập.");
       }
@@ -2508,6 +2646,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       if (isEmployeeUser(currentUser)) {
         throw new Error(EMPLOYEE_MUTATION_BLOCKED);
       }
+      if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+        throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
+      }
       if (!hasSupabase) {
         return;
       }
@@ -2520,6 +2661,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     async (templateId: string, areaId: string, layoutDate: string) => {
       if (isEmployeeUser(currentUser)) {
         throw new Error(EMPLOYEE_MUTATION_BLOCKED);
+      }
+      if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+        throw new Error(MANAGER_VIEW_ONLY_BLOCKED);
       }
       if (!hasSupabase) {
         throw new Error("Chưa kết nối Supabase.");
@@ -2541,6 +2685,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       if (isEmployeeUser(currentUser)) {
         return { ok: false as const, holderFullName: "Tài khoản nhân viên" };
       }
+      if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+        return { ok: false as const, holderFullName: "Chế độ chỉ xem" };
+      }
       if (!hasSupabase || !currentUser) {
         return { ok: true as const };
       }
@@ -2554,6 +2701,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       if (isEmployeeUser(currentUser)) {
         return;
       }
+      if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
+        return;
+      }
       if (!hasSupabase || !currentUser) {
         return;
       }
@@ -2565,6 +2715,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   const releaseFloorLayoutEditLock = useCallback(
     async (areaId: string) => {
       if (isEmployeeUser(currentUser)) {
+        return;
+      }
+      if (isManagerViewOnlyBranch(currentUser, state.activeBranchId)) {
         return;
       }
       if (!hasSupabase || !currentUser) {
@@ -2593,6 +2746,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }) => {
       if (isEmployeeUser(currentUser)) {
         return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+      }
+      const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+      if (viewOnlyBlock) {
+        return viewOnlyBlock;
       }
       if (!hasSupabase) {
         return { ok: false, message: "Chưa kết nối Supabase." };
@@ -2630,6 +2787,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       if (isEmployeeUser(currentUser)) {
         return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
       }
+      const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+      if (viewOnlyBlock) {
+        return viewOnlyBlock;
+      }
       if (!hasSupabase) {
         return { ok: false, message: "Chưa kết nối Supabase." };
       }
@@ -2666,6 +2827,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       if (isEmployeeUser(currentUser)) {
         return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
       }
+      const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+      if (viewOnlyBlock) {
+        return viewOnlyBlock;
+      }
       if (!hasSupabase) {
         return { ok: false, message: "Chưa kết nối Supabase." };
       }
@@ -2688,6 +2853,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       if (isEmployeeUser(currentUser)) {
         return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
       }
+      const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+      if (viewOnlyBlock) {
+        return viewOnlyBlock;
+      }
       if (!hasSupabase) {
         return { ok: false, message: "Chưa kết nối Supabase." };
       }
@@ -2704,6 +2873,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     async (input: { groupId: string }) => {
       if (isEmployeeUser(currentUser)) {
         return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+      }
+      const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+      if (viewOnlyBlock) {
+        return viewOnlyBlock;
       }
       if (!hasSupabase) {
         return { ok: false, message: "Chưa kết nối Supabase." };
@@ -2722,6 +2895,10 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       if (isEmployeeUser(currentUser)) {
         return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
       }
+      const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+      if (viewOnlyBlock) {
+        return viewOnlyBlock;
+      }
       if (!hasSupabase) {
         return { ok: false, message: "Chưa kết nối Supabase." };
       }
@@ -2738,6 +2915,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     state,
     currentUser,
     filteredBranchIds,
+    canEditActiveBranch,
     isLoading,
     hasSupabase,
     login,

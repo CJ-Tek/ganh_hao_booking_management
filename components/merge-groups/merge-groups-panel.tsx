@@ -35,6 +35,8 @@ export interface MergeGroupsPanelProps {
   initialAreaFilter?: string | null;
   /** Omit outer section card when embedded in a modal. */
   embedded?: boolean;
+  /** Hide release actions (view-only branch). */
+  readOnly?: boolean;
 }
 
 export function MergeGroupsPanel({
@@ -49,6 +51,7 @@ export function MergeGroupsPanel({
   onRowSelect,
   initialAreaFilter = null,
   embedded = false,
+  readOnly = false,
 }: MergeGroupsPanelProps) {
   const [search, setSearch] = useState("");
   const [areaFilter, setAreaFilter] = useState<string | null>(initialAreaFilter);
@@ -251,6 +254,7 @@ export function MergeGroupsPanel({
               <Text size="xs" c="dimmed" lineClamp={3}>
                 {memberNames}
               </Text>
+              {!readOnly ? (
               <Button
                 color="red"
                 variant="light"
@@ -263,6 +267,7 @@ export function MergeGroupsPanel({
               >
                 Bỏ gộp
               </Button>
+              ) : null}
             </Stack>
           </Card>
         );
@@ -335,28 +340,32 @@ export function MergeGroupsPanel({
             </Badge>
           ),
         },
-        {
-          accessor: "actions",
-          title: "",
-          width: 100,
-          noWrap: true,
-          textAlign: "center",
-          render: (group) => (
-            <Button
-              color="red"
-              variant="light"
-              size="compact-sm"
-              loading={busyGroupId === group.id}
-              onClick={(event) => {
-                event.stopPropagation();
-                onRequestRelease(group.id);
-              }}
-              style={{ whiteSpace: "nowrap" }}
-            >
-              Bỏ gộp
-            </Button>
-          ),
-        },
+        ...(readOnly
+          ? []
+          : [
+              {
+                accessor: "actions",
+                title: "",
+                width: 100,
+                noWrap: true,
+                textAlign: "center" as const,
+                render: (group: TableMergeGroup) => (
+                  <Button
+                    color="red"
+                    variant="light"
+                    size="compact-sm"
+                    loading={busyGroupId === group.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRequestRelease(group.id);
+                    }}
+                    style={{ whiteSpace: "nowrap" }}
+                  >
+                    Bỏ gộp
+                  </Button>
+                ),
+              },
+            ]),
       ]}
     />
   );

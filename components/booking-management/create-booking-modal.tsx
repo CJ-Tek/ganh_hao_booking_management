@@ -119,14 +119,14 @@ export function CreateBookingModal({
   );
 
   const duplicateCandidates = useMemo(() => {
-    if (!branchId || !selectedBookingSlot || !normalizedCustomerPhone) {
+    if (!createBranchId || !selectedBookingSlot || !normalizedCustomerPhone) {
       return [];
     }
     if (!isPlausibleVietnamPhone(normalizedCustomerPhone)) {
       return [];
     }
     return state.bookings
-      .filter((booking) => booking.branchId === branchId)
+      .filter((booking) => booking.branchId === createBranchId)
       .filter((booking) => !["cancelled", "completed", "no_show", "late"].includes(booking.status))
       .map((booking) => {
         const customer = state.customers.find((item) => item.id === booking.customerId);
@@ -158,7 +158,7 @@ export function CreateBookingModal({
           a.booking.id.localeCompare(b.booking.id)
       );
   }, [
-    branchId,
+    createBranchId,
     normalizedCustomerPhone,
     selectedBookingSlot,
     state.bookings,
@@ -184,6 +184,21 @@ export function CreateBookingModal({
 
   const createBranchName =
     createBranchId ? state.branches.find((b) => b.id === createBranchId)?.name ?? "—" : "—";
+  const assignedBranchNames = useMemo(() => {
+    const ids = currentUser?.branchIds ?? [];
+    if (ids.length === 0) {
+      return "—";
+    }
+    const names = ids
+      .map((id) => state.branches.find((branch) => branch.id === id)?.name)
+      .filter((name): name is string => Boolean(name));
+    return names.length > 0 ? names.join(", ") : "—";
+  }, [currentUser?.branchIds, state.branches]);
+  const activeBranchName =
+    branchId != null ? state.branches.find((b) => b.id === branchId)?.name : undefined;
+  const creatingForOtherBranch = Boolean(
+    branchId && createBranchId && createBranchId !== branchId
+  );
   const createBranchOptions = useMemo(
     () => state.branches.map((branch) => ({ value: branch.id, label: branch.name })),
     [state.branches]
@@ -359,7 +374,7 @@ export function CreateBookingModal({
       <PortalSectionCard>
         <Stack gap="sm">
           <Text size="sm" c="dimmed">
-            Chi nhánh đang tạo booking: <strong>{createBranchName}</strong>
+            Chi nhánh của bạn: <strong>{assignedBranchNames}</strong>
           </Text>
           <Select
             label="Chi nhánh booking"
@@ -370,6 +385,19 @@ export function CreateBookingModal({
             disabled={createFormDisabled}
             size={isCompact ? "md" : "sm"}
           />
+          {creatingForOtherBranch ? (
+            <Alert color="blue" variant="light" title="Tạo booking ở chi nhánh khác">
+              Booking sẽ được tạo tại <strong>{createBranchName}</strong>, khác với chi nhánh
+              {activeBranchName ? (
+                <>
+                  {" "}
+                  <strong>{activeBranchName}</strong>
+                  {" "}
+                </>
+              ) : null}
+              của bạn.
+            </Alert>
+          ) : null}
           {opened ? (
           <VoiceBookingAssistant
             key={createBranchId ?? "no-branch"}

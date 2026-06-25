@@ -22,6 +22,7 @@ export type FloorMapBookingToolbarProps = {
   isCompact: boolean;
   isEditMode: boolean;
   activeAreaBranchId: string | null | undefined;
+  canCreateBooking?: boolean;
   onCreateBooking: () => void;
   onOpenDayList: () => void;
   onOpenLateList: () => void;
@@ -57,6 +58,7 @@ export function FloorMapBookingToolbar({
   isCompact,
   isEditMode,
   activeAreaBranchId,
+  canCreateBooking = true,
   onCreateBooking,
   onOpenDayList,
   onOpenLateList,
@@ -68,13 +70,17 @@ export function FloorMapBookingToolbar({
 
   const actions = useMemo<BookingToolbarAction[]>(
     () => [
-      {
-        id: "create",
-        label: "Tạo booking",
-        color: "brand",
-        disabled: isEditMode,
-        onClick: onCreateBooking,
-      },
+      ...(canCreateBooking
+        ? [
+            {
+              id: "create" as const,
+              label: "Tạo booking",
+              color: "brand",
+              disabled: isEditMode,
+              onClick: onCreateBooking,
+            },
+          ]
+        : []),
       {
         id: "dayList",
         label: "Danh sách booking",
@@ -106,6 +112,7 @@ export function FloorMapBookingToolbar({
     ],
     [
       activeAreaBranchId,
+      canCreateBooking,
       isEditMode,
       onCreateBooking,
       onOpenDayList,

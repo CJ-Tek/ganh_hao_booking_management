@@ -38,27 +38,73 @@ export function clearStoredActiveBranch(userId: string): void {
   localStorage.removeItem(activeBranchStorageKey(userId));
 }
 
-export function readStoredActiveBranch(user: AppUser): string | undefined {
+export function readStoredActiveBranch(
+  user: AppUser,
+  allBranchIds?: readonly string[]
+): string | undefined {
   if (typeof window === "undefined") {
     return undefined;
   }
   const raw = localStorage.getItem(activeBranchStorageKey(user.id));
-  if (raw && user.branchIds.includes(raw)) {
+  if (!raw) {
+    return undefined;
+  }
+  if (user.role === "manager") {
+    if (allBranchIds && allBranchIds.length > 0) {
+      return allBranchIds.includes(raw) ? raw : undefined;
+    }
+    return raw;
+  }
+  if (user.branchIds.includes(raw)) {
     return raw;
   }
   return undefined;
+}
+
+export function resolveActiveBranchIdForUser(
+  user: AppUser,
+  options?: {
+    allBranchIds?: readonly string[];
+    /** When true, only restore a branch assigned to the user (e.g. on login / account switch). */
+    assignedOnly?: boolean;
+  }
+): string | undefined {
+  if (shouldPickBranchOnLogin(user.role) && isBranchPickRequired()) {
+    return undefined;
+  }
+  if (user.branchIds.length === 0) {
+    return undefined;
+  }
+
+  const stored = readStoredActiveBranch(user, options?.allBranchIds);
+
+  if (options?.assignedOnly) {
+    if (stored && user.branchIds.includes(stored)) {
+      return stored;
+    }
+    return user.branchIds[0];
+  }
+
+  if (stored) {
+    return stored;
+  }
+
+  return user.branchIds[0];
 }
 
 export function persistActiveBranch(user: AppUser, branchId: string): void {
   if (typeof window === "undefined") {
     return;
   }
+  if (user.role === "manager") {
+    localStorage.setItem(activeBranchStorageKey(user.id), branchId);
+    return;
+  }
   if (!user.branchIds.includes(branchId)) {
     return;
   }
-  const persistForManagerMulti =
-    (user.role === "manager" || user.role === "employee") && user.branchIds.length > 1;
-  if (shouldPickBranchOnLogin(user.role) || persistForManagerMulti) {
+  const persistForEmployeeMulti = user.role === "employee" && user.branchIds.length > 1;
+  if (shouldPickBranchOnLogin(user.role) || persistForEmployeeMulti) {
     localStorage.setItem(activeBranchStorageKey(user.id), branchId);
   }
 }

@@ -97,10 +97,11 @@ export const BookingCalendarPanel = forwardRef<
     showCreateBookingButton: showCreateBookingButtonProp,
   } = props;
 
-  const { state, filteredBranchIds, currentUser } = useAppContext();
+  const { state, filteredBranchIds, currentUser, canEditActiveBranch } = useAppContext();
   const isEmployee = currentUser?.role === "employee";
   const showCreateBookingButton =
-    showCreateBookingButtonProp ?? (showHeader && !embedded && !isEmployee);
+    showCreateBookingButtonProp ??
+    (showHeader && !embedded && !isEmployee && canEditActiveBranch);
 
   const isCompact = usePortalCompact();
 

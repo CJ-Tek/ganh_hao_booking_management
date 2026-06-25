@@ -103,7 +103,7 @@ export function BookingOrderDetailModal(props: BookingOrderDetailModalProps) {
     onQueue,
   } = props;
 
-  const { state } = useAppContext();
+  const { state, canEditActiveBranch } = useAppContext();
   const isCompact = usePortalCompact();
 
   const bookingLive = useMemo(() => {
@@ -167,6 +167,7 @@ export function BookingOrderDetailModal(props: BookingOrderDetailModalProps) {
         const phone = displayCustomerPhone(customer?.phone);
         const bookingAt = dayjs(bookingLive.bookingAt);
         const showActions =
+          canEditActiveBranch &&
           bookingLive.status !== "cancelled" &&
           bookingLive.status !== "completed" &&
           bookingLive.status !== "no_show";

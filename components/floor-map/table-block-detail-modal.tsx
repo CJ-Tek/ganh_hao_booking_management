@@ -63,6 +63,8 @@ export type TableBlockDetailModalProps = {
   onQueueBooking?: () => void;
   /** Opens merge-group member management (view mode; non-employees only). */
   onOpenMergeGroupManage?: () => void;
+  /** View-only branch — hide booking and table management actions. */
+  readOnly?: boolean;
 };
 
 export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
@@ -86,6 +88,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     onCancelBooking,
     onQueueBooking,
     onOpenMergeGroupManage,
+    readOnly = false,
   } = props;
 
   const { state } = useAppContext();
@@ -160,7 +163,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     >
       {targetReady ? (
         <Stack gap="md">
-          {!isEmployee ? (
+          {!isEmployee && !readOnly ? (
             <Group justify="space-between" align="center" wrap="wrap" gap="xs" w="100%">
               <Group gap="xs" wrap="wrap">
                 {displayStatus === "occupied" || displayStatus === "hold" ? (
@@ -283,7 +286,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                       </Text>
                     </Text>
 
-                    {!isEmployee ? (
+                    {!isEmployee && !readOnly ? (
                       <>
                         <Divider />
 

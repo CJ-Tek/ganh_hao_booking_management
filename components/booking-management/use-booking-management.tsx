@@ -64,6 +64,7 @@ export function useBookingManagement() {
     checkInBooking,
     queueBooking,
     hasSupabase,
+    canEditActiveBranch,
   } = useAppContext();
   const isCompact = usePortalCompact();
   const {
@@ -557,7 +558,11 @@ export function useBookingManagement() {
   );
 
   const renderBookingActions = useCallback(
-    (booking: Booking) => (
+    (booking: Booking) => {
+      if (!canEditActiveBranch) {
+        return null;
+      }
+      return (
       <BookingRowActions
         booking={booking}
         busy={isBookingRowBusy(booking.id)}
@@ -569,8 +574,10 @@ export function useBookingManagement() {
         onCancel={openCancelBookingConfirm}
         onQueue={openQueueBookingConfirm}
       />
-    ),
+      );
+    },
     [
+      canEditActiveBranch,
       isBookingRowBusy,
       openManualAssignModal,
       openCancelBookingConfirm,
