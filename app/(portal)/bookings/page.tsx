@@ -1199,7 +1199,7 @@ function BookingsPageContent() {
   );
 
   const todaySectionTitle = useMemo(
-    () => `Booking hôm nay (${todaySortedBookings.length})`,
+    () => `Booking hôm nay (${todaySortedBookings.length}) · ${dayjs().format("DD/MM/YYYY")}`,
     [todaySortedBookings.length]
   );
 

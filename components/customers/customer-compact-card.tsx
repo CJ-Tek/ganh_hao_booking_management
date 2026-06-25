@@ -24,7 +24,6 @@ export function CustomerCompactCard(props: {
     <BookingSummaryCompactCard
       showTimeColumn={false}
       title={row.fullName}
-      titleSuffix={{ bold: phone, normal: "" }}
       badge={{
         label: `${row.bookingCount} booking`,
         color: row.bookingCount > 0 ? "green" : "gray",
@@ -32,11 +31,15 @@ export function CustomerCompactCard(props: {
       metaSegments={
         row.latestBooking
           ? [
+              { text: phone, emphasize: true },
               { text: "Booking gần nhất", emphasize: false },
               { text: dayjs(row.latestBooking).format("HH:mm"), emphasize: false },
               { text: dayjs(row.latestBooking).format("DD/MM/YYYY"), emphasize: false },
             ]
-          : [{ text: "Chưa có booking", emphasize: false }]
+          : [
+              { text: phone, emphasize: true },
+              { text: "Chưa có booking", emphasize: false },
+            ]
       }
       note={row.note?.trim() ? row.note : null}
       onClick={onClick}

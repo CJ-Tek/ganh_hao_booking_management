@@ -40,9 +40,13 @@ export function getBookingCompactCardProps(props: {
     customerPhone,
   } = props;
 
-  const titleSuffix = isGuestCountSpecified(booking)
-    ? { bold: String(booking.guestCount), normal: " khách" }
-    : { bold: "", normal: "Chưa rõ số khách" };
+  const arrivalDateLabel = dayjs(resolveBookingArrivalTime(booking)).format("DD/MM/YYYY");
+  const guestCountLabel = isGuestCountSpecified(booking)
+    ? `${booking.guestCount} khách`
+    : "Chưa rõ số khách";
+
+  const titleSuffix =
+    variant === "list" ? { bold: "", normal: arrivalDateLabel } : undefined;
 
   const createdBy = {
     name: creatorName,
@@ -52,6 +56,10 @@ export function getBookingCompactCardProps(props: {
   const metaSegments: BookingSummaryMetaSegment[] =
     variant === "today"
       ? [
+          {
+            text: guestCountLabel,
+            emphasize: isGuestCountSpecified(booking),
+          },
           { text: getGuestTypeLabel?.(booking) ?? "Khách thường", emphasize: true },
           {
             text: formatTodayBookingAreaTable(booking, bookingAreaTableLookup),
@@ -59,7 +67,10 @@ export function getBookingCompactCardProps(props: {
           },
         ]
       : [
-          { text: dayjs(resolveBookingArrivalTime(booking)).format("DD/MM/YYYY") },
+          {
+            text: guestCountLabel,
+            emphasize: isGuestCountSpecified(booking),
+          },
           {
             text: formatBookingAreaTable(booking, bookingAreaTableLookup, {
               tableNamePrefix: true,

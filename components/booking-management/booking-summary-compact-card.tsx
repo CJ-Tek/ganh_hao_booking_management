@@ -1,6 +1,6 @@
 "use client";
 
-import { Badge, Card, Group, Stack, Text } from "@mantine/core";
+import { Badge, Box, Card, Group, Stack, Text } from "@mantine/core";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { Fragment, type CSSProperties, type ReactNode } from "react";
 
@@ -15,7 +15,7 @@ export type BookingSummaryCompactCardProps = {
   /** When false, the leading time column is omitted (e.g. customer cards). */
   showTimeColumn?: boolean;
   title: string;
-  /** Shown beside the title (e.g. guest count — only `bold` is emphasized). */
+  /** Shown beside the title (e.g. arrival date — only `bold` is emphasized). */
   titleSuffix?: { bold: string; normal: string };
   badge: { label: string; color: string };
   /** Creator on the meta row: bold name + " tạo đơn lúc [time]". */
@@ -49,10 +49,50 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
   } = props;
 
   const isCompact = usePortalCompact();
-  const hasMetaBlock =
-    metaSegments.length > 0 || Boolean(createdBy) || Boolean(note);
+  const hasTitleSuffix = Boolean(titleSuffix?.bold || titleSuffix?.normal);
+  const hasMetaBlock = metaSegments.length > 0 || Boolean(createdBy) || Boolean(note);
   const creatorAlign = isCompact ? "flex-start" : "flex-end";
   const creatorTextAlign = isCompact ? "left" : "right";
+
+  const titleSuffixContent = hasTitleSuffix ? (
+    <>
+      {titleSuffix?.bold ? (
+        <Text component="span" fw={700} size="sm" style={{ flexShrink: 0 }}>
+          {titleSuffix.bold}
+        </Text>
+      ) : null}
+      {titleSuffix?.normal ? (
+        <Text
+          component="span"
+          size="sm"
+          fw={500}
+          c={titleSuffix?.bold ? undefined : "dimmed"}
+          style={{ flexShrink: 0 }}
+        >
+          {titleSuffix.normal}
+        </Text>
+      ) : null}
+    </>
+  ) : null;
+
+  const highlightedNote = note ? (
+    <Box
+      px="xs"
+      py={6}
+      style={{
+        borderRadius: "var(--mantine-radius-sm)",
+        backgroundColor: "var(--mantine-color-yellow-0)",
+        borderLeft: "3px solid var(--mantine-color-yellow-6)",
+      }}
+    >
+      <Text size="sm" fw={600} lh={1.45} style={{ wordBreak: "break-word" }}>
+        <Text component="span" c="yellow.9" fw={700}>
+          Ghi chú:{" "}
+        </Text>
+        {note}
+      </Text>
+    </Box>
+  ) : null;
 
   return (
     <Card
@@ -76,21 +116,12 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
               <Text fw={700} size="sm" c="brand" style={{ minWidth: 0, wordBreak: "break-word" }}>
                 {title}
               </Text>
-              {titleSuffix && (titleSuffix.bold || titleSuffix.normal) ? (
+              {hasTitleSuffix ? (
                 <>
                   <Text component="span" c="dimmed" fw={500} style={{ flexShrink: 0 }}>
                     ·
                   </Text>
-                  {titleSuffix.bold ? (
-                    <Text component="span" fw={700} size="sm" style={{ flexShrink: 0 }}>
-                      {titleSuffix.bold}
-                    </Text>
-                  ) : null}
-                  {titleSuffix.normal ? (
-                    <Text component="span" size="sm" fw={500} style={{ flexShrink: 0 }}>
-                      {titleSuffix.normal}
-                    </Text>
-                  ) : null}
+                  {titleSuffixContent}
                 </>
               ) : null}
             </Group>
@@ -100,6 +131,7 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
           </Group>
           {hasMetaBlock ? (
             <Stack gap={4}>
+              {highlightedNote}
               {metaSegments.length > 0 ? (
                 <Text
                   size="xs"
@@ -122,16 +154,6 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
                       </Text>
                     </Fragment>
                   ))}
-                </Text>
-              ) : null}
-              {note ? (
-                <Text size="xs" lh={1.35} style={{ wordBreak: "break-word" }}>
-                  <Text component="span" fw={700}>
-                    Ghi chú:{" "}
-                  </Text>
-                  <Text component="span" c="dimmed" fw={500}>
-                    {note}
-                  </Text>
                 </Text>
               ) : null}
               {createdBy ? (
