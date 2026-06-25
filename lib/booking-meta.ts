@@ -561,8 +561,9 @@ export function isMergeGroupBookingOnMemberTable(
 
 /**
  * Floor-map preview for a merge member: show that table's own bookings first (walk-in / non-overlapping).
- * Cluster reservations stored on a member table_id do not change the block. When the cluster guest
- * has arrived and the member has no separate booking, mirror the cluster status.
+ * Cluster reservations stored on a member table_id do not change the block. When the cluster has an
+ * active hold or seated booking and the member has no separate booking, mirror the cluster status.
+ * A future individual reserve on the member does not override cluster Đã ngồi after check-in.
  */
 export function deriveMergeMemberTableStatusFromDayBookings(
   table: Pick<DiningTable, "id" | "status">,
@@ -575,6 +576,21 @@ export function deriveMergeMemberTableStatusFromDayBookings(
   const bookingsExcludingMergeFallback = dayBookings.filter(
     (booking) => !isMergeGroupBookingOnMemberTable(booking, table.id, mergeGroupId)
   );
+
+  const memberOwnSeated = bookingsExcludingMergeFallback.some(
+    (booking) =>
+      booking.tableId === table.id &&
+      (booking.status === "seated" || booking.status === "checked_in")
+  );
+  if (memberOwnSeated) {
+    return "occupied";
+  }
+
+  const groupStatus = deriveMergeGroupStatusFromDayBookings(mergeGroupId, dayBookings);
+  if (groupStatus === "occupied") {
+    return "occupied";
+  }
+
   const memberOwnStatus = deriveTableStatusFromDayBookings(
     table,
     bookingsExcludingMergeFallback
@@ -582,8 +598,8 @@ export function deriveMergeMemberTableStatusFromDayBookings(
   if (memberOwnStatus !== "available") {
     return memberOwnStatus;
   }
-  if (mergeGroupPrimaryGuestHasArrived(mergeGroupId, dayBookings)) {
-    return deriveMergeGroupStatusFromDayBookings(mergeGroupId, dayBookings);
+  if (groupStatus !== "available") {
+    return groupStatus;
   }
   return "available";
 }
@@ -594,15 +610,116 @@ export function pickPrimaryBookingOnTableForFloorDisplay(
   bookings: readonly Booking[],
   options?: { excludeMergeGroupId?: string | null }
 ): Booking | null {
-  const primary = pickPrimaryBookingOnTable(tableId, bookings);
-  if (
-    !primary ||
-    !options?.excludeMergeGroupId ||
-    !isMergeGroupBookingOnMemberTable(primary, tableId, options.excludeMergeGroupId)
-  ) {
-    return primary;
+  const eligible = bookings.filter(
+    (booking) =>
+      booking.tableId === tableId &&
+      booking.status !== "cancelled" &&
+      booking.status !== "completed" &&
+      booking.status !== "no_show" &&
+      booking.status !== "late" &&
+      !(
+        options?.excludeMergeGroupId &&
+        isMergeGroupBookingOnMemberTable(booking, tableId, options.excludeMergeGroupId)
+      )
+  );
+  if (eligible.length === 0) {
+    return null;
   }
-  return null;
+  const checkedIn = eligible.filter(
+    (booking) => booking.status === "checked_in" || booking.status === "seated"
+  );
+  const pool =
+    checkedIn.length > 0
+      ? checkedIn
+      : eligible.filter((booking) => booking.status === "confirmed");
+  const finalPool = pool.length > 0 ? pool : eligible;
+  const sorted = [...finalPool].sort((a, b) => slotStartMs(a) - slotStartMs(b));
+  if (checkedIn.length > 0) {
+    return sorted[sorted.length - 1] ?? null;
+  }
+  return sorted[0] ?? null;
+}
+
+/**
+ * Primary booking for a floor-map table block or its detail modal.
+ * Merge members: seated walk-in on the table wins; else soonest active slot between
+ * that table's own bookings and the cluster booking.
+ */
+export function pickPrimaryBookingForFloorTableBlock(
+  tableId: string,
+  bookings: readonly Booking[],
+  options?: { mergeGroupId?: string | null }
+): Booking | null {
+  const mergeGroupId = options?.mergeGroupId;
+  const memberOwn = mergeGroupId
+    ? pickPrimaryBookingOnTableForFloorDisplay(tableId, bookings, {
+        excludeMergeGroupId: mergeGroupId,
+      })
+    : pickPrimaryBookingOnTable(tableId, bookings);
+  const mergeBooking = mergeGroupId
+    ? pickPrimaryBookingOnMergeGroup(mergeGroupId, bookings)
+    : null;
+
+  if (!mergeGroupId) {
+    return memberOwn;
+  }
+
+  if (
+    memberOwn &&
+    (memberOwn.status === "checked_in" || memberOwn.status === "seated")
+  ) {
+    return memberOwn;
+  }
+  if (
+    mergeBooking &&
+    (mergeBooking.status === "checked_in" || mergeBooking.status === "seated")
+  ) {
+    return mergeBooking;
+  }
+
+  const candidates = [memberOwn, mergeBooking].filter(
+    (booking): booking is Booking => booking != null
+  );
+  if (candidates.length === 0) {
+    return null;
+  }
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+  return [...candidates].sort((a, b) => slotStartMs(a) - slotStartMs(b))[0] ?? null;
+}
+
+/**
+ * All active bookings shown in a merge-member table block detail schedule:
+ * that table's own reservations (excluding cluster fallback rows) plus cluster bookings.
+ */
+export function listFloorTableBlockScheduleBookings(
+  bookings: readonly Booking[],
+  options: { tableId?: string | null; mergeGroupId?: string | null }
+): Booking[] {
+  const { tableId, mergeGroupId } = options;
+  const byId = new Map<string, Booking>();
+
+  for (const booking of bookings) {
+    if (!isActiveFloorBooking(booking)) {
+      continue;
+    }
+    if (
+      tableId &&
+      booking.tableId === tableId &&
+      !(
+        mergeGroupId &&
+        isMergeGroupBookingOnMemberTable(booking, tableId, mergeGroupId)
+      )
+    ) {
+      byId.set(booking.id, booking);
+    }
+    if (mergeGroupId && booking.mergeGroupId === mergeGroupId) {
+      byId.set(booking.id, booking);
+    }
+  }
+
+  return [...byId.values()].sort((a, b) => slotStartMs(a) - slotStartMs(b));
 }
 
 /** Floor-map calendar preview: derive merge-bar color from bookings on the selected day. */
@@ -911,6 +1028,31 @@ export function getAssignableCandidateTables(
   });
 }
 
+function mergeGroupClusterBookingBlocksAssignableSlot(item: Booking): boolean {
+  return (
+    item.status === "confirmed" ||
+    item.status === "seated" ||
+    item.status === "checked_in" ||
+    item.status === "pending"
+  );
+}
+
+function bookingBlocksAssignableSlotOnMergeGroup(
+  item: Booking,
+  group: Pick<TableMergeGroup, "id" | "tableIds">,
+  memberIds: ReadonlySet<string>
+): boolean {
+  const onMemberTable = item.tableId != null && memberIds.has(item.tableId);
+  const onSameGroup = item.mergeGroupId === group.id;
+  if (!onMemberTable && !onSameGroup) {
+    return false;
+  }
+  if (onMemberTable) {
+    return reservationBlocksAssignableSlot(item);
+  }
+  return mergeGroupClusterBookingBlocksAssignableSlot(item);
+}
+
 /**
  * True when the candidate booking overlaps another active reservation on the merge group
  * or on a member table (member tables only block overlapping slots, not the whole day).
@@ -925,22 +1067,7 @@ export function hasAssignableSlotConflictAtMergeGroup(
     if (item.id === candidate.id) {
       return false;
     }
-    if (!reservationBlocksAssignableSlot(item) && item.mergeGroupId !== group.id) {
-      // Only "reservationBlocksAssignableSlot" filters items with tableId set.
-      // A booking on the merge group itself has tableId === null, so include it here.
-      const onGroup = item.mergeGroupId === group.id;
-      const activeStatus =
-        item.status === "confirmed" ||
-        item.status === "seated" ||
-        item.status === "checked_in" ||
-        item.status === "pending";
-      if (!onGroup || !activeStatus) {
-        return false;
-      }
-    }
-    const onMemberTable = item.tableId != null && memberIds.has(item.tableId);
-    const onSameGroup = item.mergeGroupId === group.id;
-    if (!onMemberTable && !onSameGroup) {
+    if (!bookingBlocksAssignableSlotOnMergeGroup(item, group, memberIds)) {
       return false;
     }
     return bookingsTimeSlotsOverlap(candidate, item);

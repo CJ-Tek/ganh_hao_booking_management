@@ -281,9 +281,15 @@ export function buildBookingTablePickerLayout(input: {
 
   const tableById = mergeBboxTableInputFromPlacedTables(placedTables);
 
+  const memberPositions = new Map<string, { row: number; col: number }>();
+  for (const table of placedTables) {
+    memberPositions.set(table.id, { row: table.row, col: table.col });
+  }
+
   const mergeBboxes = computeMergeGroupBboxes({
     groups: activeGroups,
     tableById,
+    memberPositions,
     compactHeader: true,
   });
 

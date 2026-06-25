@@ -141,6 +141,7 @@ export function BookingTablePickerMap(props: BookingTablePickerMapProps) {
         mergeGroupId === table.mergeGroupId &&
         !tableId;
       const highlighted = !readOnly && highlightTableId === table.id;
+      const isMergeMember = Boolean(table.mergeGroupId);
       const style = tableStatusKonvaStyle[table.status];
       const fill = readOnly || selectable ? style.fill : pickerDisabledFill;
       const stroke = selectedAsTable
@@ -149,11 +150,22 @@ export function BookingTablePickerMap(props: BookingTablePickerMapProps) {
           ? pickerHoverStroke
           : !readOnly && hoveredTableId === table.id && selectable
             ? pickerHoverStroke
-            : readOnly || selectable
-              ? style.stroke
-              : pickerDisabledStroke;
-      const strokeWidth =
-        selectedAsTable || highlighted ? 3 : selectedAsMergeMember ? 2 : 1.5;
+            : isMergeMember
+              ? "transparent"
+              : readOnly || selectable
+                ? style.stroke
+                : pickerDisabledStroke;
+      const strokeWidth = isMergeMember
+        ? selectedAsTable || highlighted
+          ? 3
+          : selectedAsMergeMember
+            ? 2
+            : 0
+        : selectedAsTable || highlighted
+          ? 3
+          : selectedAsMergeMember
+            ? 2
+            : 1.5;
       const halfW = PICKER_TABLE_WIDTH_PX / 2;
       const halfH = PICKER_TABLE_HEIGHT_PX / 2;
 
@@ -352,8 +364,6 @@ function renderMergeBbox(
         width={bbox.width}
         height={bbox.headerHeight}
         fill={style.fill}
-        stroke={stroke}
-        strokeWidth={1}
         cornerRadius={[8, 8, 0, 0]}
         listening={false}
       />
@@ -363,11 +373,14 @@ function renderMergeBbox(
         y={0}
         width={bbox.width - PICKER_TEXT_INSET_PX * 2}
         height={bbox.headerHeight}
-        fontSize={PICKER_MERGE_LABEL_FONT_SIZE}
+        fontSize={
+          bbox.layout === "vertical" ? Math.min(PICKER_MERGE_LABEL_FONT_SIZE, 14) : PICKER_MERGE_LABEL_FONT_SIZE
+        }
         fontStyle="bold"
         fill={style.label}
         align="center"
         verticalAlign="middle"
+        wrap="word"
         ellipsis
         listening={false}
       />

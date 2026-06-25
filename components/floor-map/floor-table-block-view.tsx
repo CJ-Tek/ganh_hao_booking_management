@@ -108,6 +108,7 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
   const guestBadgeBooking = bookingGuestBadge ?? displayBooking;
   const isAvailableEmpty = table.status === "available";
   const useStackedFooter = table.status === "hold" || table.status === "occupied";
+  const hideMergeMemberAvailableExtras = isMergeMember && isAvailableEmpty;
 
   const statusFooter = (
     <div
@@ -143,18 +144,23 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
       <Badge color={tableStatusColor[table.status]} variant="light" size="xs">
         {tableStatusLabel[table.status]}
       </Badge>
-      <TableBlockGuestBadge booking={guestBadgeBooking} />
+      {!hideMergeMemberAvailableExtras ? (
+        <TableBlockGuestBadge booking={guestBadgeBooking} />
+      ) : null}
     </Group>
   );
 
-  const showCustomerName = Boolean(customerName || displayBooking);
+  const showCustomerName = Boolean(customerName);
   const showBookingPeek =
-    !hideBookingPeek && table.status !== "hold" && table.status !== "occupied";
+    !hideBookingPeek &&
+    table.status !== "hold" &&
+    table.status !== "occupied" &&
+    Boolean(displayBooking);
 
   return (
     <div
       className={`${classes.tableFloorAnchor} ${isMergeMember ? classes.tableBlockMergeMember : ""}`}
-      style={style}
+      style={isMergeMember ? undefined : style}
     >
       <div
         data-table-block="true"
@@ -165,10 +171,11 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
           isDragging ? classes.tableBlockDragging : ""
         } ${isGridSelected ? classes.tableBlockMergeSelected : ""} ${
           onGridSelect ? classes.tableBlockGridSelectable : ""
-        }`}
+        } ${isMergeMember ? classes.tableBlockMergeMemberSurface : ""}`}
         style={{
           ...bookingRowBusyStyle(isBusy),
           ...(isAvailableEmpty ? { minHeight: FLOOR_TABLE_BLOCK_AVAILABLE_EMPTY_HEIGHT_PX } : null),
+          ...(isMergeMember ? style : null),
         }}
         onPointerUp={(event) => {
           if (event.button !== 0) {
@@ -198,6 +205,11 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
             >
               {table.name}
             </Text>
+            {customerName && !hideMergeMemberAvailableExtras ? (
+              <Text className={classes.tableBlockCustomerName} lineClamp={2}>
+                {customerName}
+              </Text>
+            ) : null}
             {availableStatusRow}
           </Stack>
         ) : (
@@ -244,8 +256,9 @@ function propsAreEqual(prev: FloorTableBlockViewProps, next: FloorTableBlockView
     prev.displayBooking?.note === next.displayBooking?.note &&
     prev.displayBooking?.checkedInAt === next.displayBooking?.checkedInAt &&
     prev.customerName === next.customerName &&
-    prev.style.left === next.style.left &&
-    prev.style.top === next.style.top &&
+    (prev.isMergeMember
+      ? JSON.stringify(prev.style) === JSON.stringify(next.style)
+      : prev.style.left === next.style.left && prev.style.top === next.style.top) &&
     prev.bookingGuestBadge?.id === next.bookingGuestBadge?.id &&
     prev.bookingGuestBadge?.guestCount === next.bookingGuestBadge?.guestCount &&
     prev.hideBookingPeek === next.hideBookingPeek &&

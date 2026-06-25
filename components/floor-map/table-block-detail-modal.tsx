@@ -50,6 +50,8 @@ export type TableBlockDetailModalProps = {
   mergeMemberOccupiedTableNames?: string[];
   blockState: TableBlockState | null;
   blockLoading: boolean;
+  /** When set, overrides blockState.confirmedSchedule (e.g. merge-member table union). */
+  scheduleBookings?: Booking[] | null;
   activeBooking: Booking | null;
   activeBookingCustomerName: string;
   isEmployee: boolean;
@@ -76,6 +78,8 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     mergeStatus = "available",
     mergeMemberOccupiedTableNames = [],
     blockState,
+    blockLoading,
+    scheduleBookings = null,
     activeBooking,
     activeBookingCustomerName,
     isEmployee,
@@ -135,12 +139,14 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
 
   const targetReady = Boolean(table || mergeGroup);
 
+  const confirmedSchedule = scheduleBookings ?? blockState?.confirmedSchedule ?? [];
+
   const upcomingScheduleRecords = useMemo(
     () =>
-      (blockState?.confirmedSchedule ?? []).filter(
+      confirmedSchedule.filter(
         (booking) => !activeBooking || booking.id !== activeBooking.id
       ),
-    [activeBooking, blockState?.confirmedSchedule]
+    [activeBooking, confirmedSchedule]
   );
 
   const mergeMemberOccupiedNotice =

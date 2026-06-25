@@ -1136,6 +1136,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 700;
+  color: #334155;
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupContainerBookingCustomer {
+  color: #cbd5e1;
 }
 
 .mergeGroupContainerBookingTimes {
@@ -1275,6 +1281,120 @@ button.mergeGroupContainerHeaderClickable:hover .mergeGroupContainerTitle {
 
 .tableBlockMergeMember {
   z-index: 6;
+}
+
+.tableBlockMergeMemberSurface.tableBlock {
+  border: none;
+  overflow: hidden;
+}
+
+.tableBlockMergeMemberSurface .tableBlockAvailableTitle {
+  font-size: 35px;
+  line-height: 1.1;
+}
+
+.tableBlockMergeMemberSurface .tableBlockAvailableBody .tableBlockCustomerName {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.tableBlockMergeMemberSurface .tableBlockCustomerName,
+.tableBlockMergeMemberSurface.statusSurface_hold .tableBlockCustomerName,
+.tableBlockMergeMemberSurface.statusSurface_occupied .tableBlockCustomerName {
+  font-size: 21px;
+  line-height: 1.2;
+}
+
+.tableBlockMergeMemberSurface .tableBlockTableName,
+.tableBlockMergeMemberSurface.statusSurface_hold .tableBlockTableName,
+.tableBlockMergeMemberSurface.statusSurface_occupied .tableBlockTableName {
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.tableBlockMergeMemberSurface .tableBlockTableNameFooter {
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.tableBlockMergeMemberSurface .tableBlockOccupiedFooterStacked {
+  gap: 4px;
+}
+
+.mergeGroupContainerVertical,
+.mergeGroupContainerMixed {
+  border-radius: 14px;
+}
+
+.mergeGroupContainerHeaderVertical {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 2px;
+  padding-inline: 6px;
+}
+
+.mergeGroupContainerHeaderVertical .mergeGroupContainerHeaderPrimary {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+}
+
+.mergeGroupContainerHeaderVertical .mergeGroupContainerHeaderTitleRow {
+  width: 100%;
+  flex-wrap: wrap;
+}
+
+.mergeGroupContainerHeaderVertical .mergeGroupContainerTitle {
+  white-space: normal;
+  line-height: 1.15;
+  font-size: 0.76rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mergeGroupContainerHeaderVertical .mergeGroupContainerHeaderTrailing {
+  margin-left: 0;
+  align-self: flex-start;
+  flex-wrap: wrap;
+}
+
+.mergeGroupContainerHeaderVertical .mergeGroupContainerHeaderMeta {
+  width: 100%;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.mergeGroupContainerHeaderVertical .mergeGroupContainerDateRange {
+  white-space: normal;
+  line-height: 1.2;
+  font-size: 0.68rem;
+}
+
+.mergeGroupContainerHeaderVertical .mergeGroupContainerHeaderBookingRow {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.mergeGroupContainerHeaderVertical .mergeGroupContainerCustomerTimes {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  width: 100%;
+}
+
+.mergeGroupContainerHeaderVertical .mergeGroupContainerBookingCustomer,
+.mergeGroupContainerHeaderVertical .mergeGroupContainerBookingTimes {
+  white-space: normal;
+  line-height: 1.2;
+}
+
+.mergeGroupContainerHeaderVertical .mergeGroupContainerCapacity {
+  font-size: 0.68rem;
+  white-space: normal;
+  line-height: 1.2;
 }
 
 .tableBlockMergeMemberLocked {
