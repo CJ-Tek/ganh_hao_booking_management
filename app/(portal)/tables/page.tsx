@@ -812,7 +812,7 @@ function TablesPageContent() {
         <Stack gap="md">
           <Text size="sm">
             Hệ thống sẽ cố gắng chuyển các booking đang giữ cụm này về bàn lẻ phù hợp. Nếu có booking
-            vượt quá sức chứa của mọi bàn thành viên (over-exceed) và chưa kết thúc / huỷ / no-show,
+            vượt quá sức chứa của mọi bàn thành viên và chưa kết thúc / huỷ / không đến,
             thao tác sẽ bị chặn.
           </Text>
           <Group justify="flex-end">

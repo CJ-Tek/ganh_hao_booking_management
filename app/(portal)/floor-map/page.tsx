@@ -5635,11 +5635,15 @@ export default function FloorMapPage() {
         onConfirm={handleSubmitChangeTable}
       />
 
-      <Modal
+      <PortalStandardModal
         opened={mergeGroupsListModalOpen}
-        onClose={() => setMergeGroupsListModalOpen(false)}
+        onClose={() => {
+          setMergeGroupsListModalOpen(false);
+          setOpenedMergeGroupId(null);
+        }}
         title="Danh sách bàn gộp"
         size="xl"
+        centered
       >
         <MergeGroupsPanel
           key={areaId ?? "all-areas"}
@@ -5663,11 +5667,11 @@ export default function FloorMapPage() {
             }
             setDetailTable(null);
             setDetailMergeGroup(null);
-            setMergeGroupsListModalOpen(false);
+            setOpenedMergeGroupId(group.id);
           }}
           readOnly={!canEditActiveBranch}
         />
-      </Modal>
+      </PortalStandardModal>
 
       <PortalStandardModal
         opened={lateListModalOpen}
@@ -6062,7 +6066,7 @@ export default function FloorMapPage() {
         <Stack gap="md">
           <Text size="sm">
             Hệ thống sẽ cố gắng chuyển các booking đang giữ cụm này về bàn lẻ phù hợp. Nếu có booking
-            vượt quá sức chứa của mọi bàn thành viên (over-exceed) và chưa kết thúc / huỷ / no-show,
+            vượt quá sức chứa của mọi bàn thành viên và chưa kết thúc / huỷ / không đến,
             thao tác sẽ bị chặn.
           </Text>
           <Group justify="flex-end">
@@ -6243,7 +6247,13 @@ function MergeGroupDetailModal({
   };
 
   return (
-    <Modal opened={Boolean(groupId)} onClose={onClose} title={group.mergedName} size="md">
+    <PortalStandardModal
+      opened={Boolean(groupId)}
+      onClose={onClose}
+      title={group.mergedName}
+      size="md"
+      centered
+    >
       <Stack gap="md">
         <Group justify="space-between" align="flex-end">
           <Stack gap={2}>
@@ -6399,7 +6409,7 @@ function MergeGroupDetailModal({
         />
         ) : null}
       </Stack>
-    </Modal>
+    </PortalStandardModal>
   );
 }
 

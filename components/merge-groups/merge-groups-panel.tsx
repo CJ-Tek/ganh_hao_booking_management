@@ -211,9 +211,6 @@ export function MergeGroupsPanel({
       noRecordsText="Chưa có cụm gộp nào trong phạm vi đang chọn."
       mobileCardRender={(group) => {
         const cardBusy = bookingCardBusyProps(busyGroupId === group.id);
-        const memberNames = group.tableIds
-          .map((id) => tableNameById.get(id) ?? "—")
-          .join(" + ");
         return (
           <Card
             key={group.id}
@@ -237,23 +234,26 @@ export function MergeGroupsPanel({
                     {branchNameById.get(group.branchId) ?? "—"} · {areaNameById.get(group.areaId) ?? "—"}
                   </Text>
                 </div>
-                <Badge color="blue" variant="light" size="lg">
-                  Đang gộp
-                </Badge>
+                <Stack gap={2} align="flex-end" style={{ flexShrink: 0 }}>
+                  <Text size="xs" c="dimmed" lh={1.2}>
+                    Khả dụng
+                  </Text>
+                  <Text size="sm" fw={600} lh={1.3} ta="right">
+                    {formatMergeGroupDateRange(group.startDate, group.endDate)}
+                  </Text>
+                  <Text size="xs" c="dimmed" lh={1.2} ta="right">
+                    Gộp lúc {formatNotificationTime(group.createdAt)}
+                  </Text>
+                </Stack>
               </Group>
-              <Text size="sm">
-                {formatMergeGroupDateRange(group.startDate, group.endDate)}
-              </Text>
-              <Text size="xs" c="dimmed">
-                Gộp lúc {formatNotificationTime(group.createdAt)}
-              </Text>
-              <Text size="sm">
-                {group.tableIds.length} bàn ·{" "}
-                {activeBookingCountByGroup.get(group.id) ?? 0} booking đang giữ
-              </Text>
-              <Text size="xs" c="dimmed" lineClamp={3}>
-                {memberNames}
-              </Text>
+              <Group justify="space-between" align="center" wrap="nowrap" gap="sm">
+                <Text size="sm" fw={500} style={{ minWidth: 0, flex: 1 }}>
+                  {group.tableIds.length} bàn
+                </Text>
+                <Text size="sm" ta="right" style={{ flexShrink: 0 }}>
+                  {activeBookingCountByGroup.get(group.id) ?? 0} booking đang giữ
+                </Text>
+              </Group>
               {!readOnly ? (
               <Button
                 color="red"
