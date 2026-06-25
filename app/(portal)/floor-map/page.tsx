@@ -4518,6 +4518,7 @@ export default function FloorMapPage() {
         >
           <div
             ref={viewportRef}
+            data-allow-pinch-zoom
             className={`${classes.canvasViewport} ${isEditMode ? classes.canvasViewportEdit : classes.canvasViewportView}`}
             onPointerDown={handleViewportPointerDown}
             onPointerMove={handlePointerMove}

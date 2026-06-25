@@ -22,6 +22,7 @@ import {
 import { DatePickerInput, DatesProvider } from "@mantine/dates";
 import { Notifications } from "@mantine/notifications";
 import { AppContextProvider } from "@/contexts/app-context";
+import { PwaZoomGuard } from "@/components/pwa-zoom-guard";
 import { PortalModalsProvider } from "@/components/portal-modals-provider";
 import {
   PORTAL_MODAL_POPOVER_Z_INDEX,
@@ -155,6 +156,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <MantineProvider theme={theme} defaultColorScheme="light">
       <DatesProvider settings={{ locale: "vi" }}>
         <PortalModalsProvider>
+          <PwaZoomGuard />
           <Notifications zIndex={PORTAL_MODAL_POPOVER_Z_INDEX + 100} />
           <AppContextProvider>{children}</AppContextProvider>
         </PortalModalsProvider>
