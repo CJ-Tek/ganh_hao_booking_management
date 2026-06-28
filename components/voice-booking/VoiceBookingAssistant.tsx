@@ -26,7 +26,7 @@ import {
 import { DUPLICATE_BOOKING_CODE } from "@/lib/booking-duplicate";
 import { normalizeGuestTypeHint } from "@/lib/voice-booking/guest-type";
 import { matchAreaId, matchTableId, type AreaLite, type TableLite } from "@/lib/voice-booking/match";
-import { appendVoiceTranscriptSession, finalizeCustomerName, sanitizeCustomerName } from "@/lib/voice-booking/format";
+import { appendVoiceTranscriptSession, finalizeCustomerName, formatVietnameseCustomerName, sanitizeCustomerName } from "@/lib/voice-booking/format";
 import { warmUpMicrophoneForSpeech } from "@/lib/voice-booking/mic-warmup";
 import { tableStatusLabel } from "@/lib/display";
 import { usePortalModalLayoutProps } from "@/lib/use-portal-modal-layout";
@@ -485,7 +485,7 @@ export function VoiceBookingAssistant(props: {
 
   const applyParsedDraft = (data: Extract<VoiceBookingResponse, { draft: unknown }>) => {
     const d = data.draft;
-    if (d.customerName) setCustomerName(finalizeCustomerName(d.customerName));
+    if (d.customerName) setCustomerName(finalizeCustomerName(formatVietnameseCustomerName(d.customerName)));
     if (d.customerPhone) setCustomerPhone(d.customerPhone);
     if (typeof d.guestCount === "number" && Number.isFinite(d.guestCount)) setGuestCount(d.guestCount);
     if (d.bookingAtLocal) setBookingAt(d.bookingAtLocal);
@@ -784,7 +784,7 @@ export function VoiceBookingAssistant(props: {
               placeholder={
                 showArrivalModeRadios && arrivalMode === "immediate"
                   ? `Để trống → ${WALK_IN_CUSTOMER_NAME}`
-                  : "Nguyễn Văn A"
+                  : "Anh Huy / Nguyễn Văn A"
               }
               value={customerName}
               onChange={(e) => setCustomerName(sanitizeCustomerName(e.currentTarget.value))}

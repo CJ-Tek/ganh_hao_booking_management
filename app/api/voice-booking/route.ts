@@ -5,7 +5,11 @@ import { z } from "zod";
 import { BOOKING_GUEST_TYPE_OPTIONS } from "@/lib/booking-meta";
 import { normalizeGuestTypeHint } from "@/lib/voice-booking/guest-type";
 import { buildRestaurantTimeContext } from "@/lib/restaurant-time";
-import { finalizeFormattedTranscript } from "@/lib/voice-booking/format";
+import {
+  CUSTOMER_NAME_HONORIFIC_PREFIXES,
+  finalizeFormattedTranscript,
+  formatVietnameseCustomerName,
+} from "@/lib/voice-booking/format";
 import { correctBookingAtLocalDate } from "@/lib/voice-booking/resolve-booking-time";
 
 export const runtime = "nodejs";
@@ -99,8 +103,12 @@ function buildVoiceBookingResponse(
         input.transcript
       )
     : undefined;
+  const customerName = draftFields.customerName?.trim()
+    ? formatVietnameseCustomerName(draftFields.customerName.trim())
+    : undefined;
   const draft = {
     ...draftFields,
+    ...(customerName ? { customerName } : {}),
     ...(bookingAtLocal ? { bookingAtLocal } : {}),
     ...(guestType ? { guestType } : {}),
   };
@@ -146,6 +154,7 @@ function buildParseSystemPrompt(nowIso: string): string {
     "Do NOT invent table IDs. Only return tableNameHint / areaNameHint as plain strings when mentioned.",
     buildRestaurantTimeContext(nowIso),
     "Phone, guestCount, area, table, guestType and note are optional.",
+    `customerName: when the speaker uses an honorific before the name, include it in customerName (e.g. "Anh Huy", "Chị Lan", "Cô Mai"). Common prefixes: ${CUSTOMER_NAME_HONORIFIC_PREFIXES.join(", ")}.`,
     "guestType: set only when the speaker clearly indicates customer type (VIP, sinh nhật, đoàn, khách quen, đặt món trước). Use a short Vietnamese label; otherwise omit.",
     `Preferred guestType labels: ${BOOKING_GUEST_TYPE_OPTIONS.join(", ")}.`,
     "clarificationQuestion: optional soft hint only (e.g. suggest adding phone or time) — never treat as blocking analysis.",
@@ -159,10 +168,11 @@ function buildFormatSystemPrompt(nowIso: string): string {
     "You normalize raw Vietnamese speech-to-text or typed booking notes into a clean, structured transcript for a restaurant booking system.",
     "Be direct. No politeness. No greetings. No filler.",
     "Your job: rewrite ONLY what is already present in the transcript. Never invent or guess missing fields.",
-    "Fix obvious STT noise: extra fillers (ừ, à, em, anh/chị when not part of a name), broken spacing, duplicate words.",
+    "Fix obvious STT noise: extra fillers (ừ, à), broken spacing, duplicate words.",
     "Use a consistent field order when info is present: Tên → SĐT → Số khách → Giờ → Khu → Bàn → Loại khách → Ghi chú.",
-    "Prefer short labeled clauses separated by periods, e.g. 'Tên: Nguyễn Văn Anh. SĐT: 0912345678. Số khách: 4. Giờ: 2026-06-18T19:30. Khu: A. Bàn: 3. Ghi chú: sinh nhật, dị ứng, ghế em bé.'",
+    "Prefer short labeled clauses separated by periods, e.g. 'Tên: Anh Huy. SĐT: 0912345678. Số khách: 4. Giờ: 2026-06-18T19:30. Khu: A. Bàn: 3. Ghi chú: sinh nhật, dị ứng, ghế em bé.'",
     "Ghi chú: when multiple note items are present, separate them with commas inside the clause (not periods), e.g. 'Ghi chú: sinh nhật, dị ứng, ghế em bé.'",
+    `Customer names (Tên): keep honorific prefixes when they precede a guest name (e.g. "anh Huy" → "Anh Huy", "chị Lan" → "Chị Lan"). Common prefixes: ${CUSTOMER_NAME_HONORIFIC_PREFIXES.join(", ")}. Only drop standalone anh/chị/em when clearly addressing staff, not naming a guest.`,
     "Customer names (Tên): use correct Vietnamese spelling and grammar. Capitalize each name part: 'Nguyên' not 'nguyen', 'Văn Anh' not 'vănanh'. Split glued STT syllables into separate words with spaces. Restore diacritics when clearly inferable (Nguyễn, Văn, Anh). Do not lowercase name parts.",
     "Include only clauses for fields actually mentioned or clearly implied. Omit clauses for fields not in the source.",
     buildRestaurantTimeContext(nowIso),

@@ -3,6 +3,22 @@ const CUSTOMER_NAME_DISALLOWED = /[^\p{L}\s\-,.]/gu;
 
 const VIETNAMESE_LOCALE = "vi-VN";
 
+/** Honorific prefixes often spoken before a guest name (Anh Huy, Chị Lan, …). */
+export const CUSTOMER_NAME_HONORIFIC_PREFIXES = [
+  "Anh",
+  "Chị",
+  "Em",
+  "Cô",
+  "Chú",
+  "Bác",
+  "Ông",
+  "Bà",
+  "Cậu",
+  "Dì",
+  "Thím",
+  "Mợ",
+] as const;
+
 /**
  * Keep only allowed customer-name characters while preserving user casing.
  * Allowed: letters, spaces, `-`, `,`, `.`
