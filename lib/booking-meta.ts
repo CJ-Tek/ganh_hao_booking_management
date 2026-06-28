@@ -1,7 +1,7 @@
 import dayjs from "dayjs";
 
 import { DEFAULT_BOOKING_RUNTIME_SETTINGS } from "@/lib/booking-runtime-defaults";
-import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
+import { bookingStatusColor, bookingStatusLabel, BOOKING_PENDING_TABLE_LABEL } from "@/lib/display";
 import {
   type Booking,
   type BookingRuntimeSettings,
@@ -368,7 +368,7 @@ export function formatBookingAreaTable(
     tableNamePrefix?: boolean;
   }
 ): string {
-  const pendingLabel = options?.pendingLabel ?? "Chờ xếp bàn";
+  const pendingLabel = options?.pendingLabel ?? BOOKING_PENDING_TABLE_LABEL;
   if (!isBookingTableAssigned(booking)) {
     return pendingLabel;
   }
@@ -393,7 +393,7 @@ export function bookingAreaTableSortKey(
   booking: Pick<Booking, "areaId" | "tableId" | "mergeGroupId">,
   lookup: BookingAreaTableLookup
 ): string {
-  return formatBookingAreaTable(booking, lookup, { pendingLabel: "Chờ xếp bàn" });
+  return formatBookingAreaTable(booking, lookup);
 }
 
 /** Nhãn khu/bàn trên màn hôm nay — rút gọn khi chưa gán. */
@@ -401,7 +401,43 @@ export function formatTodayBookingAreaTable(
   booking: Pick<Booking, "areaId" | "tableId" | "mergeGroupId">,
   lookup: BookingAreaTableLookup
 ): string {
-  return formatBookingAreaTable(booking, lookup, { pendingLabel: "Chờ xếp" });
+  return formatBookingAreaTable(booking, lookup);
+}
+
+/** Leading column on booking compact cards: table name on top, area underneath. */
+export function resolveBookingLeadingColumn(
+  booking: Pick<Booking, "areaId" | "tableId" | "mergeGroupId">,
+  lookup: BookingAreaTableLookup,
+  options?: { pendingLabel?: string }
+): { primary: string; secondary?: string } {
+  const pendingLabel = options?.pendingLabel ?? BOOKING_PENDING_TABLE_LABEL;
+  if (!isBookingTableAssigned(booking)) {
+    return { primary: pendingLabel };
+  }
+  if (booking.mergeGroupId) {
+    const group = lookup.mergeGroups.find((item) => item.id === booking.mergeGroupId);
+    const areaName =
+      (booking.areaId
+        ? lookup.areas.find((item) => item.id === booking.areaId)?.name
+        : null) ??
+      (group ? lookup.areas.find((item) => item.id === group.areaId)?.name : null) ??
+      "—";
+    return {
+      primary: group?.mergedName ?? "Bàn gộp",
+      secondary: areaName,
+    };
+  }
+  const areaName = lookup.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
+  const tableName = lookup.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
+  return { primary: tableName, secondary: areaName };
+}
+
+/** @deprecated Use {@link resolveBookingLeadingColumn}. */
+export function resolveTodayBookingLeadingColumn(
+  booking: Pick<Booking, "areaId" | "tableId" | "mergeGroupId">,
+  lookup: BookingAreaTableLookup
+): { primary: string; secondary?: string } {
+  return resolveBookingLeadingColumn(booking, lookup);
 }
 
 function slotStartMs(booking: Pick<Booking, "startTime" | "bookingAt">): number {
@@ -431,7 +467,7 @@ export function canAssignBookingFromQueue(booking: Pick<Booking, "status">): boo
   return status === "pending" || status === "late";
 }
 
-/** Manager may release table and move booking back to the assignment queue (Chờ xếp bàn). */
+/** Manager may release table and move booking back to the assignment queue (Chờ xếp). */
 export function canQueueBooking(
   booking: Pick<Booking, "status" | "tableId" | "mergeGroupId">
 ): boolean {

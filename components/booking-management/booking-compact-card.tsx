@@ -12,6 +12,7 @@ import type {
   BookingAreaTableLookup,
   ReceptionThresholdSettings,
 } from "@/lib/booking-meta";
+import { useBookingGuestTypeLabel } from "@/lib/use-booking-guest-type-label";
 import { type Booking } from "@/lib/types";
 import type { CSSProperties, ReactNode } from "react";
 
@@ -52,6 +53,9 @@ export function BookingCompactCard(
     showTimeColumn,
   } = props;
 
+  const resolveGuestTypeLabel = useBookingGuestTypeLabel();
+  const guestTypeLabel = getGuestTypeLabel ?? resolveGuestTypeLabel;
+
   return (
     <BookingSummaryCompactCard
       {...getBookingCompactCardProps({
@@ -61,7 +65,7 @@ export function BookingCompactCard(
         creatorName,
         bookingAreaTableLookup,
         receptionThresholds,
-        getGuestTypeLabel,
+        getGuestTypeLabel: guestTypeLabel,
         lastEditorName,
         customerPhone,
       })}

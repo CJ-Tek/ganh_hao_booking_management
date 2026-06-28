@@ -49,6 +49,7 @@ import {
 } from "@/lib/booking-meta";
 import { bookingRowBusyStyle } from "@/lib/busy-row-style";
 import { useBusyId } from "@/lib/use-busy-id";
+import { BOOKING_PENDING_TABLE_LABEL } from "@/lib/display";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
 
@@ -202,14 +203,14 @@ export function useBookingManagement() {
       const name = customer?.fullName ?? "—";
       const hadTable = Boolean(booking.tableId || booking.mergeGroupId);
       openPortalModalsConfirmModal({
-        title: "Chuyển về chờ xếp bàn",
+        title: `Chuyển về ${BOOKING_PENDING_TABLE_LABEL.toLowerCase()}`,
         children: (
           <Text size="sm">
-            Chuyển booking của <strong>{name}</strong> về <strong>Chờ xếp bàn</strong>
+            Chuyển booking của <strong>{name}</strong> về <strong>{BOOKING_PENDING_TABLE_LABEL}</strong>
             {hadTable ? " và giải phóng bàn hiện tại" : ""}? Khách có thể được gán bàn lại sau.
           </Text>
         ),
-        labels: { cancel: "Quay lại", confirm: "Chuyển chờ xếp bàn" },
+        labels: { cancel: "Quay lại", confirm: `Chuyển ${BOOKING_PENDING_TABLE_LABEL.toLowerCase()}` },
         confirmProps: { color: "yellow" },
         onConfirm: async () => {
           if (!hasSupabase) {

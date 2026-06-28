@@ -14,8 +14,10 @@ export const tableStatusColor: Record<TableStatus, string> = {
   locked: "gray",
 };
 
+export const BOOKING_PENDING_TABLE_LABEL = "Chờ bàn";
+
 export const bookingStatusLabel: Record<BookingStatus, string> = {
-  pending: "Chờ xếp bàn",
+  pending: BOOKING_PENDING_TABLE_LABEL,
   confirmed: "Đã xác nhận",
   cancelled: "Đã hủy",
   seated: "Đã vào bàn",

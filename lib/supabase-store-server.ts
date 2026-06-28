@@ -8,6 +8,7 @@ import {
   updateAppUserServer,
 } from "./app-users-server";
 import { DEFAULT_BOOKING_RUNTIME_SETTINGS } from "./booking-runtime-defaults";
+import { BOOKING_PENDING_TABLE_LABEL } from "./display";
 import type { Database } from "./database.types";
 import { initialState } from "./initial-state";
 import { createSupabaseAdmin } from "./supabase-admin";
@@ -455,7 +456,7 @@ async function findBookingDuplicatesByPhoneSlotInSupabase(
         receiverFullName: creatorJoin?.full_name ?? "Không rõ",
         receiverUserId: row.created_by_user_id ?? undefined,
         customerName: customerJoin?.full_name ?? undefined,
-        tableLabel: row.table_id ? `Bàn ${row.table_id.slice(0, 8)}` : "Chờ xếp bàn",
+        tableLabel: row.table_id ? `Bàn ${row.table_id.slice(0, 8)}` : BOOKING_PENDING_TABLE_LABEL,
       };
     });
 }

@@ -61,6 +61,7 @@ import {
   defaultBookingStatusFilters,
   bookingStatusColor,
   bookingStatusLabel,
+  BOOKING_PENDING_TABLE_LABEL,
 } from "@/lib/display";
 import { useBookingStatusFiltersWithSearch } from "@/lib/use-booking-status-filters-with-search";
 import {
@@ -267,14 +268,14 @@ function BookingsPageContent() {
     const name = customer?.fullName ?? "—";
     const hadTable = Boolean(booking.tableId || booking.mergeGroupId);
     openPortalModalsConfirmModal({
-      title: "Chuyển về chờ xếp bàn",
+      title: `Chuyển về ${BOOKING_PENDING_TABLE_LABEL.toLowerCase()}`,
       children: (
         <Text size="sm">
-          Chuyển booking của <strong>{name}</strong> về <strong>Chờ xếp bàn</strong>
+          Chuyển booking của <strong>{name}</strong> về <strong>{BOOKING_PENDING_TABLE_LABEL}</strong>
           {hadTable ? " và giải phóng bàn hiện tại" : ""}? Khách có thể được gán bàn lại sau.
         </Text>
       ),
-      labels: { cancel: "Quay lại", confirm: "Chuyển chờ xếp bàn" },
+      labels: { cancel: "Quay lại", confirm: `Chuyển ${BOOKING_PENDING_TABLE_LABEL.toLowerCase()}` },
       confirmProps: { color: "yellow" },
       onConfirm: async () => {
         if (!hasSupabase) {
@@ -357,6 +358,27 @@ function BookingsPageContent() {
   const branchBookings = useMemo(
     () => state.bookings.filter((booking) => filteredBranchIds.includes(booking.branchId)),
     [filteredBranchIds, state.bookings]
+  );
+
+  const completedBookingsByCustomer = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const booking of branchBookings) {
+      if (booking.status !== "completed") {
+        continue;
+      }
+      counts.set(booking.customerId, (counts.get(booking.customerId) ?? 0) + 1);
+    }
+    return counts;
+  }, [branchBookings]);
+
+  const getGuestTypeLabel = useCallback(
+    (booking: Booking) =>
+      inferGuestTypeLabel(booking, {
+        completedBookingCountForCustomer:
+          completedBookingsByCustomer.get(booking.customerId) ?? 0,
+        thresholds: receptionThresholds,
+      }),
+    [completedBookingsByCustomer, receptionThresholds]
   );
 
   const bookingAreaTableLookup = useMemo(
@@ -926,6 +948,7 @@ function BookingsPageContent() {
         String(booking.guestCount),
         area?.name ?? "",
         table?.name ?? "",
+        getGuestTypeLabel(booking),
         bookingStatusLabel[booking.status],
         noteText,
       ]
@@ -933,7 +956,14 @@ function BookingsPageContent() {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [pipelineFilteredBookings, searchQuery, state.areas, state.customers, state.tables]);
+  }, [
+    getGuestTypeLabel,
+    pipelineFilteredBookings,
+    searchQuery,
+    state.areas,
+    state.customers,
+    state.tables,
+  ]);
 
   const getListBookingSearchValue = useCallback(
     (booking: Booking) => {
@@ -951,13 +981,14 @@ function BookingsPageContent() {
         "giờ check-in",
         String(booking.guestCount),
         bookingAreaTableSortKey(booking, bookingAreaTableLookup),
+        getGuestTypeLabel(booking),
         bookingStatusLabel[booking.status],
         noteText,
       ]
         .join(" ")
         .toLowerCase();
     },
-    [bookingAreaTableLookup, state.customers]
+    [bookingAreaTableLookup, getGuestTypeLabel, state.customers]
   );
 
   const sortListBookings = useCallback(
@@ -969,6 +1000,9 @@ function BookingsPageContent() {
         }
         if (acc === "guestCount") {
           return booking.guestCount;
+        }
+        if (acc === "guestType") {
+          return getGuestTypeLabel(booking);
         }
         if (acc === "areaTable") {
           return bookingAreaTableSortKey(booking, bookingAreaTableLookup);
@@ -1009,7 +1043,7 @@ function BookingsPageContent() {
         return sortStatus.direction === "asc" ? compare : -compare;
       });
     },
-    [bookingAreaTableLookup, receptionThresholds, state.customers, state.users]
+    [bookingAreaTableLookup, getGuestTypeLabel, receptionThresholds, state.customers, state.users]
   );
 
   const sortedBookings = useMemo(
@@ -1025,17 +1059,6 @@ function BookingsPageContent() {
       : `Danh sách booking (${count})`;
   }, [listRangeEnd, listRangeStart, sortedBookings.length]);
 
-  const completedBookingsByCustomer = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const booking of branchBookings) {
-      if (booking.status !== "completed") {
-        continue;
-      }
-      counts.set(booking.customerId, (counts.get(booking.customerId) ?? 0) + 1);
-    }
-    return counts;
-  }, [branchBookings]);
-
   const todayBookings = useMemo(() => {
     const todayStart = dayjs().startOf("day");
     const todayEnd = todayStart.endOf("day");
@@ -1048,16 +1071,6 @@ function BookingsPageContent() {
       );
     });
   }, [branchBookings]);
-
-  const getTodayGuestTypeLabel = useCallback(
-    (booking: Booking) =>
-      inferGuestTypeLabel(booking, {
-        completedBookingCountForCustomer:
-          completedBookingsByCustomer.get(booking.customerId) ?? 0,
-        thresholds: receptionThresholds,
-      }),
-    [completedBookingsByCustomer, receptionThresholds]
-  );
 
   const getTodayReceptionStatusLabel = useCallback(
     (booking: Booking) => getReceptionBookingStatus(booking, receptionThresholds).label,
@@ -1090,7 +1103,7 @@ function BookingsPageContent() {
         dayjs(resolveBookingCreatedAt(booking)).format("DD/MM/YYYY HH:mm"),
         String(booking.guestCount),
         formatTodayBookingAreaTable(booking, bookingAreaTableLookup),
-        getTodayGuestTypeLabel(booking),
+        getGuestTypeLabel(booking),
         getTodayReceptionStatusLabel(booking),
         bookingStatusLabel[booking.status],
         state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "",
@@ -1102,7 +1115,7 @@ function BookingsPageContent() {
     });
   }, [
     bookingAreaTableLookup,
-    getTodayGuestTypeLabel,
+    getGuestTypeLabel,
     getTodayReceptionStatusLabel,
     state.customers,
     state.users,
@@ -1123,7 +1136,7 @@ function BookingsPageContent() {
         dayjs(resolveBookingCreatedAt(booking)).format("DD/MM/YYYY HH:mm"),
         String(booking.guestCount),
         formatTodayBookingAreaTable(booking, bookingAreaTableLookup),
-        getTodayGuestTypeLabel(booking),
+        getGuestTypeLabel(booking),
         getTodayReceptionStatusLabel(booking),
         bookingStatusLabel[booking.status],
         state.users.find((item) => item.id === booking.createdByUserId)?.fullName ?? "",
@@ -1134,7 +1147,7 @@ function BookingsPageContent() {
     },
     [
       bookingAreaTableLookup,
-      getTodayGuestTypeLabel,
+      getGuestTypeLabel,
       getTodayReceptionStatusLabel,
       state.customers,
       state.users,
@@ -1152,7 +1165,7 @@ function BookingsPageContent() {
           return booking.guestCount;
         }
         if (acc === "guestType") {
-          return getTodayGuestTypeLabel(booking);
+          return getGuestTypeLabel(booking);
         }
         if (acc === "areaTable") {
           return formatTodayBookingAreaTable(booking, bookingAreaTableLookup);
@@ -1186,7 +1199,7 @@ function BookingsPageContent() {
     },
     [
       bookingAreaTableLookup,
-      getTodayGuestTypeLabel,
+      getGuestTypeLabel,
       getTodayReceptionStatusLabel,
       state.customers,
       state.users,
@@ -1333,7 +1346,7 @@ function BookingsPageContent() {
   }, [listFocusBookingId]);
 
   const bookingsSearchPlaceholder =
-    "Tìm theo khách, SĐT, giờ đến, giờ check-in, khu, bàn, trạng thái...";
+    "Tìm theo khách, SĐT, giờ đến, giờ check-in, loại khách, khu, bàn, trạng thái...";
 
   const listDefaultSort = useMemo<DataTableSortStatus<Booking>>(
     () => ({ columnAccessor: "bookingAt", direction: "desc" }),
@@ -1666,6 +1679,12 @@ function BookingsPageContent() {
               ),
           },
           {
+            accessor: "guestType",
+            title: "Loại khách",
+            sortable: true,
+            render: (booking) => getGuestTypeLabel(booking),
+          },
+          {
             accessor: "createdByUserId",
             title: "Người tạo",
             sortable: true,
@@ -1783,7 +1802,7 @@ function BookingsPageContent() {
         creatorName={creator}
         bookingAreaTableLookup={bookingAreaTableLookup}
         receptionThresholds={receptionThresholds}
-        getGuestTypeLabel={getTodayGuestTypeLabel}
+        getGuestTypeLabel={getGuestTypeLabel}
         onClick={() => openMobileBookingDetail(booking, "today")}
       />
     );
@@ -1889,7 +1908,7 @@ function BookingsPageContent() {
             accessor: "guestType",
             title: "Loại khách",
             sortable: true,
-            render: (booking) => getTodayGuestTypeLabel(booking),
+            render: (booking) => getGuestTypeLabel(booking),
           },
           {
             accessor: "areaTable",

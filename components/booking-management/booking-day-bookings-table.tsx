@@ -26,6 +26,7 @@ import {
   bookingListDefaultCreatedSort,
   sortBookingsForDataTable,
 } from "@/lib/booking-list-sort";
+import { useBookingGuestTypeLabel } from "@/lib/use-booking-guest-type-label";
 import { type Booking, type BookingStatus } from "@/lib/types";
 import { useBookingStatusFiltersWithSearch } from "@/lib/use-booking-status-filters-with-search";
 import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from "react";
@@ -76,6 +77,7 @@ export function BookingDayBookingsTable(props: {
     setStatusFilters
   );
   const { state } = useAppContext();
+  const getGuestTypeLabel = useBookingGuestTypeLabel(records);
   const { sortStatus, setSortStatus, defaultSort, timeSortFilters } = useBookingListTimeSort(
     bookingListDefaultCreatedSort
   );
@@ -95,8 +97,9 @@ export function BookingDayBookingsTable(props: {
         customers: state.customers,
         users: state.users,
         bookingAreaTableLookup,
+        getGuestTypeLabel,
       }),
-    [bookingAreaTableLookup, state.customers, state.users]
+    [bookingAreaTableLookup, getGuestTypeLabel, state.customers, state.users]
   );
 
   const statusFilterChips = (
@@ -224,21 +227,27 @@ export function BookingDayBookingsTable(props: {
           sortable: true,
           render: (booking) => formatBookingAreaTable(booking, bookingAreaTableLookup),
         },
-        {
-          accessor: "guestCount",
-          title: "Số khách",
-          sortable: true,
-          render: (booking) =>
-            isGuestCountSpecified(booking) ? (
-              <Text size="sm">{booking.guestCount}</Text>
-            ) : (
-              <Text size="sm" c="dimmed">
-                Chưa rõ
-              </Text>
-            ),
-        },
-        {
-          accessor: "createdByUserId",
+          {
+            accessor: "guestCount",
+            title: "Số khách",
+            sortable: true,
+            render: (booking) =>
+              isGuestCountSpecified(booking) ? (
+                <Text size="sm">{booking.guestCount}</Text>
+              ) : (
+                <Text size="sm" c="dimmed">
+                  Chưa rõ
+                </Text>
+              ),
+          },
+          {
+            accessor: "guestType",
+            title: "Loại khách",
+            sortable: true,
+            render: (booking) => getGuestTypeLabel(booking),
+          },
+          {
+            accessor: "createdByUserId",
           title: "Người tạo",
           sortable: true,
           render: (booking) =>

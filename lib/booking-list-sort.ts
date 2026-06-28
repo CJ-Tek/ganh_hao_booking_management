@@ -25,6 +25,7 @@ export type BookingListSortOptions = {
   users?: readonly { id: string; fullName: string }[];
   bookingAreaTableLookup?: BookingAreaTableLookup;
   getStatusLabel?: (booking: Booking) => string;
+  getGuestTypeLabel?: (booking: Booking) => string;
   getLastEditorName?: (booking: Booking) => string;
   getAreaTableSortKey?: (booking: Booking) => string;
 };
@@ -39,6 +40,7 @@ export function sortBookingsForDataTable(
     users = [],
     bookingAreaTableLookup,
     getStatusLabel,
+    getGuestTypeLabel,
     getLastEditorName,
     getAreaTableSortKey,
   } = options;
@@ -50,6 +52,9 @@ export function sortBookingsForDataTable(
     }
     if (acc === "guestCount") {
       return booking.guestCount;
+    }
+    if (acc === "guestType") {
+      return getGuestTypeLabel?.(booking) ?? "";
     }
     if (acc === "areaTable") {
       if (getAreaTableSortKey) {

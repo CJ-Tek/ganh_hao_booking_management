@@ -10,8 +10,15 @@ export type BookingSummaryMetaSegment = {
   emphasize?: boolean;
 };
 
+export type BookingSummaryLeadingColumn = {
+  primary: string;
+  secondary?: string;
+};
+
 export type BookingSummaryCompactCardProps = {
   timeLabel?: string;
+  /** When set, replaces the time column (table on top, area below). */
+  leadingColumn?: BookingSummaryLeadingColumn;
   /** When false, the leading time column is omitted (e.g. customer cards). */
   showTimeColumn?: boolean;
   title: string;
@@ -34,6 +41,7 @@ export type BookingSummaryCompactCardProps = {
 export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps) {
   const {
     timeLabel = "",
+    leadingColumn,
     showTimeColumn = true,
     title,
     titleSuffix,
@@ -61,12 +69,13 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
           {titleSuffix.bold}
         </Text>
       ) : null}
+      {titleSuffix?.bold && titleSuffix?.normal ? " " : null}
       {titleSuffix?.normal ? (
         <Text
           component="span"
           size="sm"
           fw={500}
-          c={titleSuffix?.bold ? undefined : "dimmed"}
+          c="dimmed"
           style={{ flexShrink: 0 }}
         >
           {titleSuffix.normal}
@@ -105,7 +114,18 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
     >
       <Group wrap="nowrap" align="flex-start" gap="sm">
         {leadingSlot}
-        {showTimeColumn ? (
+        {leadingColumn ? (
+          <Stack gap={0} style={{ flexShrink: 0, minWidth: "2.75rem" }}>
+            <Text size="md" fw={700} lh={1.2}>
+              {leadingColumn.primary}
+            </Text>
+            {leadingColumn.secondary ? (
+              <Text size="xs" fw={500} c="dimmed" lh={1.2}>
+                {leadingColumn.secondary}
+              </Text>
+            ) : null}
+          </Stack>
+        ) : showTimeColumn ? (
           <Text size="md" fw={700} lh={1.2} style={{ flexShrink: 0, minWidth: "2.75rem" }}>
             {timeLabel}
           </Text>
@@ -113,7 +133,7 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
         <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
           <Group justify="space-between" wrap="wrap" gap="xs" align="flex-start">
             <Group gap={6} wrap="wrap" align="center" style={{ flex: "1 1 12rem", minWidth: 0 }}>
-              <Text fw={700} size="sm" c="brand" style={{ minWidth: 0, wordBreak: "break-word" }}>
+              <Text fw={700} size="md" c="brand" style={{ minWidth: 0, wordBreak: "break-word" }}>
                 {title}
               </Text>
               {hasTitleSuffix ? (

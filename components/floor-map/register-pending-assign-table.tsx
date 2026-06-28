@@ -20,6 +20,7 @@ import {
   sortBookingsForDataTable,
 } from "@/lib/booking-list-sort";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
+import { useBookingGuestTypeLabel } from "@/lib/use-booking-guest-type-label";
 import { type Booking, type TableMergeGroup } from "@/lib/types";
 
 export function RegisterPendingAssignTable(props: {
@@ -41,6 +42,7 @@ export function RegisterPendingAssignTable(props: {
     disabled,
   } = props;
   const { state } = useAppContext();
+  const getGuestTypeLabel = useBookingGuestTypeLabel(records);
   const { sortStatus, setSortStatus, defaultSort, timeSortFilters } = useBookingListTimeSort(
     bookingListDefaultCreatedSort
   );
@@ -90,6 +92,7 @@ export function RegisterPendingAssignTable(props: {
         customer?.fullName,
         displayCustomerPhone(customer?.phone),
         booking.guestCount,
+        getGuestTypeLabel(booking),
         area,
         table,
         bookingStatusLabel[booking.status],
@@ -98,13 +101,14 @@ export function RegisterPendingAssignTable(props: {
         .filter(Boolean)
         .join(" ");
     },
-    [state.areas, state.customers, state.tables]
+    [getGuestTypeLabel, state.areas, state.customers, state.tables]
   );
 
   const sortRecords = useCallback(
     (rows: Booking[], nextSortStatus: typeof sortStatus) =>
       sortBookingsForDataTable(rows, nextSortStatus, {
         customers: state.customers,
+        getGuestTypeLabel,
         getAreaTableSortKey: (booking) => {
           if (!booking.areaId && !booking.tableId) {
             return "";
@@ -114,7 +118,7 @@ export function RegisterPendingAssignTable(props: {
           return `${area} ${table}`;
         },
       }),
-    [state.areas, state.customers, state.tables]
+    [getGuestTypeLabel, state.areas, state.customers, state.tables]
   );
 
   const assignableIds = useMemo(
@@ -295,6 +299,12 @@ export function RegisterPendingAssignTable(props: {
             accessor: "guestCount",
             title: "Số khách",
             sortable: true,
+          },
+          {
+            accessor: "guestType",
+            title: "Loại khách",
+            sortable: true,
+            render: (booking) => getGuestTypeLabel(booking),
           },
           {
             accessor: "areaTable",

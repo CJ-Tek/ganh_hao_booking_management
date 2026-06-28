@@ -2,9 +2,8 @@ import dayjs from "dayjs";
 import type { BookingSummaryMetaSegment } from "@/components/booking-management/booking-summary-compact-card";
 import { bookingStatusColor, bookingStatusLabel } from "@/lib/display";
 import {
-  formatBookingAreaTable,
-  formatTodayBookingAreaTable,
   getReceptionBookingStatus,
+  resolveBookingLeadingColumn,
   isGuestCountSpecified,
   resolveBookingArrivalTime,
   resolveBookingCreatedAt,
@@ -40,44 +39,33 @@ export function getBookingCompactCardProps(props: {
     customerPhone,
   } = props;
 
+  const arrivalTimeLabel = dayjs(resolveBookingArrivalTime(booking)).format("HH:mm");
   const arrivalDateLabel = dayjs(resolveBookingArrivalTime(booking)).format("DD/MM/YYYY");
   const guestCountLabel = isGuestCountSpecified(booking)
     ? `${booking.guestCount} khách`
     : "Chưa rõ số khách";
 
   const titleSuffix =
-    variant === "list" ? { bold: "", normal: arrivalDateLabel } : undefined;
+    variant === "today"
+      ? { bold: arrivalTimeLabel, normal: "" }
+      : { bold: arrivalTimeLabel, normal: arrivalDateLabel };
 
   const createdBy = {
     name: creatorName,
     time: dayjs(resolveBookingCreatedAt(booking)).format("HH:mm DD/MM/YYYY"),
   };
 
-  const metaSegments: BookingSummaryMetaSegment[] =
-    variant === "today"
-      ? [
-          {
-            text: guestCountLabel,
-            emphasize: isGuestCountSpecified(booking),
-          },
-          { text: getGuestTypeLabel?.(booking) ?? "Khách thường", emphasize: true },
-          {
-            text: formatTodayBookingAreaTable(booking, bookingAreaTableLookup),
-            emphasize: true,
-          },
-        ]
-      : [
-          {
-            text: guestCountLabel,
-            emphasize: isGuestCountSpecified(booking),
-          },
-          {
-            text: formatBookingAreaTable(booking, bookingAreaTableLookup, {
-              tableNamePrefix: true,
-            }),
-            emphasize: true,
-          },
-        ];
+  const metaSegments: BookingSummaryMetaSegment[] = [
+    {
+      text: guestCountLabel,
+      emphasize: isGuestCountSpecified(booking),
+    },
+  ];
+
+  metaSegments.push({
+    text: getGuestTypeLabel?.(booking) ?? "Khách thường",
+    emphasize: true,
+  });
 
   if (variant === "list" && booking.checkedInAt) {
     metaSegments.splice(1, 0, {
@@ -110,7 +98,8 @@ export function getBookingCompactCardProps(props: {
         };
 
   return {
-    timeLabel: dayjs(resolveBookingArrivalTime(booking)).format("HH:mm"),
+    timeLabel: arrivalTimeLabel,
+    leadingColumn: resolveBookingLeadingColumn(booking, bookingAreaTableLookup),
     title: customerName,
     titleSuffix,
     createdBy,

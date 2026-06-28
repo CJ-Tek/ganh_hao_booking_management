@@ -19,6 +19,7 @@ import {
   minutesLateForBooking,
   resolveBookingArrivalTime,
 } from "@/lib/booking-meta";
+import { useBookingGuestTypeLabel } from "@/lib/use-booking-guest-type-label";
 import { type Booking, type Customer } from "@/lib/types";
 
 export type BookingLateListPanelProps = {
@@ -51,6 +52,7 @@ export function BookingLateListPanel({
   onRowClick,
 }: BookingLateListPanelProps) {
   const { state } = useAppContext();
+  const getGuestTypeLabel = useBookingGuestTypeLabel(bookings);
   const [sortStatus, setSortStatus] = useState<DataTableSortStatus<Booking>>({
     columnAccessor: "lateMinutes",
     direction: "desc",
@@ -106,13 +108,14 @@ export function BookingLateListPanel({
         dayjs(resolveBookingArrivalTime(booking)).format("HH:mm DD/MM/YYYY"),
         `${minutesLateForBooking(booking)} phút`,
         formatBookingAreaTable(booking, lookup, { pendingLabel: "Chưa gán" }),
+        getGuestTypeLabel(booking),
         bookingStatusLabel.late,
         String(booking.guestCount),
       ]
         .join(" ")
         .toLowerCase();
     },
-    [customerById, lookup]
+    [customerById, getGuestTypeLabel, lookup]
   );
 
   const handleSaveConfig = async () => {
@@ -222,6 +225,11 @@ export function BookingLateListPanel({
             accessor: "guestCount",
             title: "Số khách",
             render: (row) => (isGuestCountSpecified(row) ? row.guestCount : "—"),
+          },
+          {
+            accessor: "guestType",
+            title: "Loại khách",
+            render: (row) => getGuestTypeLabel(row),
           },
           {
             accessor: "arrival",

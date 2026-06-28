@@ -9,6 +9,7 @@ import { useCallback, useMemo, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { useAppContext } from "@/contexts/app-context";
 import { getReceptionBookingStatus } from "@/lib/booking-meta";
+import { useBookingGuestTypeLabel } from "@/lib/use-booking-guest-type-label";
 import {
   bookingMatchesStatusFilters,
   bookingScheduleSearchStatusFilters,
@@ -32,6 +33,7 @@ function formatScheduleVisitDate(iso: string): string {
 export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) {
   const { records } = props;
   const { state } = useAppContext();
+  const getGuestTypeLabel = useBookingGuestTypeLabel(records);
   const [statusFilters, setStatusFilters] = useState<BookingStatus[]>(defaultScheduleStatusFilters);
   const [searchQuery, setSearchQuery] = useState("");
   const isSearchActive = useBookingStatusFiltersWithSearch(searchQuery, statusFilters, setStatusFilters, {
@@ -71,12 +73,13 @@ export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) 
         dayjs(booking.endTime).format("HH:mm"),
         customer?.fullName,
         booking.guestCount,
+        getGuestTypeLabel(booking),
         getReceptionBookingStatus(booking, receptionThresholds).label,
       ]
         .filter(Boolean)
         .join(" ");
     },
-    [receptionThresholds, state.customers]
+    [getGuestTypeLabel, receptionThresholds, state.customers]
   );
 
   const sortRecords = useCallback(
@@ -94,6 +97,9 @@ export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) 
         if (sortStatus.columnAccessor === "guestCount") {
           return booking.guestCount;
         }
+        if (sortStatus.columnAccessor === "guestType") {
+          return getGuestTypeLabel(booking);
+        }
         if (sortStatus.columnAccessor === "status") {
           return getReceptionBookingStatus(booking, receptionThresholds).label;
         }
@@ -109,7 +115,7 @@ export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) 
         return sortStatus.direction === "asc" ? compare : -compare;
       });
     },
-    [receptionThresholds, state.customers]
+    [getGuestTypeLabel, receptionThresholds, state.customers]
   );
 
   return (
@@ -182,6 +188,12 @@ export function TableBlockConfirmedScheduleTable(props: { records: Booking[] }) 
             accessor: "guestCount",
             title: "Số khách",
             sortable: true,
+          },
+          {
+            accessor: "guestType",
+            title: "Loại khách",
+            sortable: true,
+            render: (booking) => getGuestTypeLabel(booking),
           },
           {
             accessor: "status",

@@ -1,6 +1,7 @@
 "use client";
 
 import dayjs from "dayjs";
+import { BOOKING_PENDING_TABLE_LABEL } from "@/lib/display";
 import {
   Alert,
   Button,
@@ -433,7 +434,7 @@ export function CreateBookingModal({
             </Alert>
           ) : null}
           <Text size="sm" c="dimmed">
-            Booking tạo từ đây sẽ ở trạng thái <strong>Chờ xếp bàn</strong> (trừ khi đã chọn khu/bàn).
+            Booking tạo từ đây sẽ ở trạng thái <strong>{BOOKING_PENDING_TABLE_LABEL}</strong> (trừ khi đã chọn khu/bàn).
           </Text>
         </Stack>
       </PortalSectionCard>
