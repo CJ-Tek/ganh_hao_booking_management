@@ -183,7 +183,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   );
   const shownNavItems = useMemo(() => {
     if (currentUser?.role === "employee") {
-      return navItems.filter((item) => item.href === "/floor-map");
+      return navItems.filter((item) => item.href === "/bookings");
     }
     if (currentUser?.role === "manager") {
       return MANAGER_SECTION_HREFS.map((href) => navItems.find((item) => item.href === href)).filter(
@@ -198,7 +198,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   }, [currentUser]);
 
   /** Bottom quick nav on narrow viewports (sync with `usePortalCompact` / navbar `breakpoint: "md"`).
-   *  Enabled for branch managers, general_manager, and admin — not employees (single floor-map page). */
+   *  Enabled for branch managers, general_manager, and admin — not employees (single Đặt bàn page). */
   const usesMobileDock =
     currentUser?.role === "manager" ||
     currentUser?.role === "general_manager" ||

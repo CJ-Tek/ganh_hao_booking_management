@@ -4,9 +4,10 @@ import { Alert, Anchor } from "@mantine/core";
 import { Eye } from "lucide-react";
 import { useMemo } from "react";
 import { useAppContext } from "@/contexts/app-context";
+import { isManagerViewOnlyBranch } from "@/lib/manager-branch-access";
 
 export function ViewOnlyBranchBanner() {
-  const { state, currentUser, canEditActiveBranch, setActiveBranchId } = useAppContext();
+  const { state, currentUser, setActiveBranchId } = useAppContext();
 
   const assignedBranch = useMemo(() => {
     if (!currentUser) {
@@ -20,7 +21,7 @@ export function ViewOnlyBranchBanner() {
       : undefined;
   }, [currentUser, state.branches]);
 
-  if (canEditActiveBranch) {
+  if (!isManagerViewOnlyBranch(currentUser, state.activeBranchId ?? undefined)) {
     return null;
   }
 

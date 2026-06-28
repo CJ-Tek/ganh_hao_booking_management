@@ -40,7 +40,7 @@ export default function SelectBranchPage() {
       return;
     }
     if (currentUser.role === "employee" && currentUser.branchIds.length <= 1) {
-      router.replace("/floor-map");
+      router.replace("/bookings");
       return;
     }
     if (currentUser.role === "manager") {
@@ -75,7 +75,7 @@ export default function SelectBranchPage() {
     }
     router.replace(
       currentUser?.role === "employee"
-        ? "/floor-map"
+        ? "/bookings"
         : currentUser?.role === "manager"
           ? "/bookings"
           : "/dashboard"

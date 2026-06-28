@@ -14,6 +14,8 @@ export function BookingRowActions(props: {
   layout?: "inline" | "drawer";
   /** When false, hides the edit control (e.g. Booking hôm nay — edit lives in Danh sách booking). */
   showEdit?: boolean;
+  /** When true, only Hoàn thành is shown for seated/checked-in bookings. */
+  employeeMode?: boolean;
   onEdit: (booking: Booking) => void;
   onChangeTable?: (booking: Booking) => void;
   onAssign: (booking: Booking) => void;
@@ -28,6 +30,7 @@ export function BookingRowActions(props: {
     size = "compact-xs",
     layout = "inline",
     showEdit = true,
+    employeeMode = false,
     onEdit,
     onChangeTable,
     onAssign,
@@ -43,6 +46,24 @@ export function BookingRowActions(props: {
     booking.status === "no_show"
   ) {
     return null;
+  }
+
+  const completeAction =
+    booking.status === "checked_in" || booking.status === "seated" ? (
+      <Button
+        size={size}
+        variant="filled"
+        color="green"
+        disabled={busy}
+        fullWidth={layout === "drawer"}
+        onClick={() => onComplete(booking)}
+      >
+        Hoàn thành
+      </Button>
+    ) : null;
+
+  if (employeeMode) {
+    return completeAction;
   }
 
   const showCancel =
@@ -102,20 +123,6 @@ export function BookingRowActions(props: {
       fullWidth={layout === "drawer" && !showCancel && !queueAction}
     />
   );
-
-  const completeAction =
-    booking.status === "checked_in" || booking.status === "seated" ? (
-      <Button
-        size={size}
-        variant="filled"
-        color="green"
-        disabled={busy}
-        fullWidth={layout === "drawer"}
-        onClick={() => onComplete(booking)}
-      >
-        Hoàn thành
-      </Button>
-    ) : null;
 
   const cancelAction = showCancel ? (
     <Button

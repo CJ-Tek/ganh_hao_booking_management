@@ -6,7 +6,7 @@ import { useAppContext } from "@/contexts/app-context";
 
 function resolveHomeHref(role: string | undefined): string {
   if (role === "employee") {
-    return "/floor-map";
+    return "/bookings";
   }
   if (role === "manager") {
     return "/bookings";

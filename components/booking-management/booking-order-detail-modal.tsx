@@ -103,7 +103,8 @@ export function BookingOrderDetailModal(props: BookingOrderDetailModalProps) {
     onQueue,
   } = props;
 
-  const { state, canEditActiveBranch } = useAppContext();
+  const { state, canEditActiveBranch, currentUser } = useAppContext();
+  const isEmployee = currentUser?.role === "employee";
   const isCompact = usePortalCompact();
 
   const bookingLive = useMemo(() => {
@@ -167,7 +168,7 @@ export function BookingOrderDetailModal(props: BookingOrderDetailModalProps) {
         const phone = displayCustomerPhone(customer?.phone);
         const bookingAt = dayjs(bookingLive.bookingAt);
         const showActions =
-          canEditActiveBranch &&
+          (canEditActiveBranch || isEmployee) &&
           bookingLive.status !== "cancelled" &&
           bookingLive.status !== "completed" &&
           bookingLive.status !== "no_show";
@@ -176,7 +177,8 @@ export function BookingOrderDetailModal(props: BookingOrderDetailModalProps) {
             booking={bookingLive}
             size="sm"
             layout={isCompact ? "drawer" : "inline"}
-            showEdit={showEdit}
+            showEdit={showEdit && !isEmployee}
+            employeeMode={isEmployee}
             busy={isBookingRowBusy(bookingLive.id)}
             onEdit={onEdit}
             onChangeTable={onChangeTable}

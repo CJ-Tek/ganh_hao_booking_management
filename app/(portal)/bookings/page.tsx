@@ -47,6 +47,7 @@ import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-t
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { openPortalModalsConfirmModal } from "@/lib/portal-confirm-modal";
 import { useAppContext } from "@/contexts/app-context";
+import { EMPLOYEE_COMPLETABLE_BOOKING_STATUSES } from "@/lib/employee-access";
 import {
   bookingSlotKey,
   DUPLICATE_BOOKING_CODE,
@@ -131,6 +132,7 @@ function BookingsPageContent() {
   const {
     state,
     filteredBranchIds,
+    currentUser,
     assignBookingToTable,
     updateBookingGuestCount,
     updateBookingOrder,
@@ -141,6 +143,12 @@ function BookingsPageContent() {
     hasSupabase,
     createTableMergeGroup,
   } = useAppContext();
+
+  const isEmployee = currentUser?.role === "employee";
+  const employeeTodayStatusFilters = useMemo(
+    () => [...EMPLOYEE_COMPLETABLE_BOOKING_STATUSES],
+    []
+  );
 
   const isCompact = usePortalCompact();
   const {
@@ -1078,10 +1086,15 @@ function BookingsPageContent() {
   );
 
   const todayPipelineFilteredBookings = useMemo(() => {
-    return todayBookings.filter((booking) =>
-      bookingMatchesStatusFilters(booking.status, todayStatusFilters)
-    );
-  }, [todayBookings, todayStatusFilters]);
+    return todayBookings
+      .filter((booking) => bookingMatchesStatusFilters(booking.status, todayStatusFilters))
+      .filter(
+        (booking) =>
+          !isEmployee ||
+          booking.status === "seated" ||
+          booking.status === "checked_in"
+      );
+  }, [isEmployee, todayBookings, todayStatusFilters]);
 
   const todaySearchPlaceholder =
     "Tìm theo khách, SĐT, giờ, loại khách, khu, bàn, trạng thái, người nhận, ghi chú...";
@@ -1211,10 +1224,12 @@ function BookingsPageContent() {
     [sortTodayBookings, todaySearchedBookings, todaySortStatus]
   );
 
-  const todaySectionTitle = useMemo(
-    () => `Booking hôm nay (${todaySortedBookings.length}) · ${dayjs().format("DD/MM/YYYY")}`,
-    [todaySortedBookings.length]
-  );
+  const todaySectionTitle = useMemo(() => {
+    const countLabel = isEmployee
+      ? `Đã vào bàn (${todaySortedBookings.length})`
+      : `Booking hôm nay (${todaySortedBookings.length})`;
+    return `${countLabel} · ${dayjs().format("DD/MM/YYYY")}`;
+  }, [isEmployee, todaySortedBookings.length]);
 
   const totalTodayListPages = useMemo(
     () => Math.max(1, Math.ceil(todaySortedBookings.length / todayPageSize)),
@@ -1287,12 +1302,23 @@ function BookingsPageContent() {
   const tabFromUrl = searchParams.get("tab");
 
   useEffect(() => {
+    if (!isEmployee) {
+      return;
+    }
+    setActiveTab("today");
+    setTodayStatusFilters(employeeTodayStatusFilters);
+  }, [employeeTodayStatusFilters, isEmployee]);
+
+  useEffect(() => {
+    if (isEmployee) {
+      return;
+    }
     if (tabFromUrl === "completed") {
       setActiveTab("list");
       setListStatusFilters(["completed"]);
       setPage(1);
     }
-  }, [tabFromUrl]);
+  }, [isEmployee, tabFromUrl]);
 
   useEffect(() => {
     if (!focusBookingIdFromUrl || consumedFocusFromUrlRef.current === focusBookingIdFromUrl) {
@@ -1816,8 +1842,10 @@ function BookingsPageContent() {
         setTodayStatusFilters(value);
         setTodayPage(1);
       }}
-      statusFilterStatuses={bookingListStatusFilterStatuses}
-      statusFiltersLocked={isTodaySearchActive}
+      statusFilterStatuses={
+        isEmployee ? employeeTodayStatusFilters : bookingListStatusFilterStatuses
+      }
+      statusFiltersLocked={isEmployee || isTodaySearchActive}
       table={
         <PortalDataTable<Booking>
         records={todayPipelineFilteredBookings}
@@ -1858,9 +1886,11 @@ function BookingsPageContent() {
           })
         }
         noRecordsText={
-          todayBookings.length === 0
-            ? "Chưa có booking nào cho hôm nay."
-            : "Không có booking khớp bộ lọc hiện tại."
+          isEmployee
+            ? "Chưa có booking nào đang ở trạng thái Đã vào bàn cho hôm nay."
+            : todayBookings.length === 0
+              ? "Chưa có booking nào cho hôm nay."
+              : "Không có booking khớp bộ lọc hiện tại."
         }
         columns={[
           {
@@ -2086,74 +2116,82 @@ function BookingsPageContent() {
     return options;
   }, [editAreaId, editAssignCandidate, editMergeGroupId, state.bookings, state.mergeGroups]);
 
+  const todayEmptyMessage = isEmployee
+    ? "Chưa có booking nào đang ở trạng thái Đã vào bàn cho hôm nay."
+    : todayBookings.length === 0
+      ? "Chưa có booking nào cho hôm nay."
+      : "Không có booking khớp bộ lọc hiện tại.";
+
+  const todayBookingsPanel = isCompact ? (
+    <BookingListMobileView
+      title={todaySectionTitle}
+      statusFilters={todayStatusFilters}
+      onStatusFiltersChange={(value) => {
+        setTodayStatusFilters(value);
+        setTodayPage(1);
+      }}
+      statusFilterStatuses={
+        isEmployee ? employeeTodayStatusFilters : bookingListStatusFilterStatuses
+      }
+      statusFiltersLocked={isEmployee || isTodaySearchActive}
+      filtersToolbar={todayFiltersToolbar}
+      paginationBar={todayPaginationBar}
+      bookingsContent={
+        pagedTodayBookings.length === 0 ? (
+          <BookingListMobileEmptyState message={todayEmptyMessage} />
+        ) : (
+          pagedTodayBookings.map(renderTodayBookingCard)
+        )
+      }
+    />
+  ) : (
+    bookingsTodayTable
+  );
+
   return (
     <Stack gap="md">
       <PortalPageTitle order={isCompact ? 3 : 2} mb={0}>
         Đặt bàn
       </PortalPageTitle>
 
-      <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>
-        <Tabs.List grow>
-          <Tabs.Tab value="today">Booking hôm nay</Tabs.Tab>
-          <Tabs.Tab value="list">Danh sách booking</Tabs.Tab>
-        </Tabs.List>
-        <Tabs.Panel value="today" pt="md">
-          {isCompact ? (
-            <BookingListMobileView
-              title={todaySectionTitle}
-              statusFilters={todayStatusFilters}
-              onStatusFiltersChange={(value) => {
-                setTodayStatusFilters(value);
-                setTodayPage(1);
-              }}
-              statusFilterStatuses={bookingListStatusFilterStatuses}
-              statusFiltersLocked={isTodaySearchActive}
-              filtersToolbar={todayFiltersToolbar}
-              paginationBar={todayPaginationBar}
-              bookingsContent={
-                pagedTodayBookings.length === 0 ? (
-                  <BookingListMobileEmptyState
-                    message={
-                      todayBookings.length === 0
-                        ? "Chưa có booking nào cho hôm nay."
-                        : "Không có booking khớp bộ lọc hiện tại."
-                    }
-                  />
-                ) : (
-                  pagedTodayBookings.map(renderTodayBookingCard)
-                )
-              }
-            />
-          ) : (
-            bookingsTodayTable
-          )}
-        </Tabs.Panel>
-        <Tabs.Panel value="list" pt="md">
-          {isCompact ? (
-            <BookingListMobileView
-              title={listSectionTitle}
-              statusFilters={listStatusFilters}
-              onStatusFiltersChange={(value) => {
-                setListStatusFilters(value);
-                setPage(1);
-              }}
-              statusFilterStatuses={bookingListStatusFilterStatuses}
-              statusFiltersLocked={isListSearchActive}
-              filtersToolbar={listFiltersToolbar}
-              paginationBar={listPaginationBar}
-              bookingsContent={
-                pagedBookings.length === 0 ? (
-                  <BookingListMobileEmptyState message="Chưa có booking nào cho bộ lọc hiện tại." />
-                ) : (
-                  pagedBookings.map(renderListBookingCard)
-                )
-              }
-            />
-          ) : (
-            bookingsTable
-          )}
-        </Tabs.Panel>
-      </Tabs>
+      {isEmployee ? (
+        todayBookingsPanel
+      ) : (
+        <Tabs value={activeTab} onChange={setActiveTab} keepMounted={false}>
+          <Tabs.List grow>
+            <Tabs.Tab value="today">Booking hôm nay</Tabs.Tab>
+            <Tabs.Tab value="list">Danh sách booking</Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panel value="today" pt="md">
+            {todayBookingsPanel}
+          </Tabs.Panel>
+          <Tabs.Panel value="list" pt="md">
+            {isCompact ? (
+              <BookingListMobileView
+                title={listSectionTitle}
+                statusFilters={listStatusFilters}
+                onStatusFiltersChange={(value) => {
+                  setListStatusFilters(value);
+                  setPage(1);
+                }}
+                statusFilterStatuses={bookingListStatusFilterStatuses}
+                statusFiltersLocked={isListSearchActive}
+                filtersToolbar={listFiltersToolbar}
+                paginationBar={listPaginationBar}
+                bookingsContent={
+                  pagedBookings.length === 0 ? (
+                    <BookingListMobileEmptyState message="Chưa có booking nào cho bộ lọc hiện tại." />
+                  ) : (
+                    pagedBookings.map(renderListBookingCard)
+                  )
+                }
+              />
+            ) : (
+              bookingsTable
+            )}
+          </Tabs.Panel>
+        </Tabs>
+      )}
       <BookingOrderDetailModal
         booking={mobileDetailBookingLive}
         opened={mobileDetailBookingLive != null}

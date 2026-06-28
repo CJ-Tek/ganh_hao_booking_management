@@ -34,7 +34,7 @@ export default function DashboardPage() {
   const isEmployee = currentUser?.role === "employee";
   useEffect(() => {
     if (isEmployee) {
-      router.replace("/floor-map");
+      router.replace("/bookings");
     }
   }, [isEmployee, router]);
 

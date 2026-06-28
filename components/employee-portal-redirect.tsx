@@ -4,11 +4,9 @@ import { Loader, Stack, Text } from "@mantine/core";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useAppContext } from "@/contexts/app-context";
-import { isEmployeeUser } from "@/lib/employee-access";
+import { EMPLOYEE_PORTAL_HOME, isEmployeeUser } from "@/lib/employee-access";
 
-const EMPLOYEE_HOME = "/floor-map";
-
-const EMPLOYEE_ALLOWED_PREFIXES = [EMPLOYEE_HOME, "/settings/account"] as const;
+const EMPLOYEE_ALLOWED_PREFIXES = [EMPLOYEE_PORTAL_HOME, "/settings/account"] as const;
 
 function isEmployeeAllowedPath(pathname: string): boolean {
   return EMPLOYEE_ALLOWED_PREFIXES.some(
@@ -16,7 +14,7 @@ function isEmployeeAllowedPath(pathname: string): boolean {
   );
 }
 
-/** Keeps employee accounts on allowed portal routes (floor map, account settings). */
+/** Keeps employee accounts on allowed portal routes (Đặt bàn, account settings). */
 export function EmployeePortalRedirect({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -32,7 +30,7 @@ export function EmployeePortalRedirect({ children }: { children: React.ReactNode
     if (isEmployeeAllowedPath(pathname)) {
       return;
     }
-    router.replace(EMPLOYEE_HOME);
+    router.replace(EMPLOYEE_PORTAL_HOME);
   }, [currentUser, isLoading, pathname, router]);
 
   if (!isLoading && currentUser && isEmployeeUser(currentUser)) {
@@ -41,7 +39,7 @@ export function EmployeePortalRedirect({ children }: { children: React.ReactNode
         <Stack align="center" justify="center" mih="50vh" gap="sm">
           <Loader size="sm" />
           <Text size="sm" c="dimmed">
-            Đang chuyển tới Sơ đồ…
+            Đang chuyển tới Đặt bàn…
           </Text>
         </Stack>
       );

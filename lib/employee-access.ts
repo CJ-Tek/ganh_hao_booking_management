@@ -1,8 +1,14 @@
 import type { AppStateSnapshot, AppUser, BookingStatus } from "./types";
 
+/** Portal home for employee accounts. */
+export const EMPLOYEE_PORTAL_HOME = "/bookings";
+
 /** Shown when an employee attempts any mutation other than allowed completion. */
 export const EMPLOYEE_MUTATION_BLOCKED =
-  "Tài khoản nhân viên chỉ được dùng mục Sơ đồ và đánh dấu Hoàn thành cho bàn đang ở trạng thái Đã ngồi.";
+  "Tài khoản nhân viên chỉ được dùng mục Đặt bàn và đánh dấu Hoàn thành cho booking đang ở trạng thái Đã vào bàn.";
+
+/** Booking statuses an employee may complete from the Đặt bàn view. */
+export const EMPLOYEE_COMPLETABLE_BOOKING_STATUSES = ["seated", "checked_in"] as const satisfies readonly BookingStatus[];
 
 export function isEmployeeUser(user: AppUser | null | undefined): boolean {
   return user?.role === "employee";
@@ -10,7 +16,7 @@ export function isEmployeeUser(user: AppUser | null | undefined): boolean {
 
 /**
  * Employees may only set booking → completed when the table is occupied (Đã ngồi)
- * and the booking is already checked in (matches floor-map “Hoàn thành” flow).
+ * and the booking is already seated (matches Đặt bàn “Hoàn thành” flow).
  */
 export function assertEmployeeMaySetBookingStatus(
   snapshot: AppStateSnapshot,

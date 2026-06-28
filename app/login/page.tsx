@@ -41,7 +41,7 @@ export default function LoginPage() {
       if (user.role === "admin" || user.role === "general_manager") {
         router.replace("/select-branch");
       } else if (user.role === "employee") {
-        router.replace("/floor-map");
+        router.replace("/bookings");
       } else if (user.role === "manager") {
         router.replace("/bookings");
       }

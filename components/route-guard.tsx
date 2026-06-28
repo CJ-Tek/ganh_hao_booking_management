@@ -27,7 +27,7 @@ export function RouteGuard({
     if (allowedRoles && !allowedRoles.includes(currentUser.role)) {
       const fallback =
         currentUser.role === "employee"
-          ? "/floor-map"
+          ? "/bookings"
           : currentUser.role === "manager"
             ? "/bookings"
             : "/dashboard";
