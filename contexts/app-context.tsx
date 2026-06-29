@@ -142,6 +142,18 @@ function parseStoredSession(raw: string): AppUser | null {
   }
 }
 
+function readStoredSession(): AppUser | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const storedSession = window.localStorage.getItem(SESSION_KEY);
+    return storedSession ? parseStoredSession(storedSession) : null;
+  } catch {
+    return null;
+  }
+}
+
 type CreateBookingInput = {
   customerName: string;
   customerPhone?: string;
@@ -403,13 +415,8 @@ function managerViewOnlyResult(user: AppUser | null, activeBranchId?: string): A
 export function AppContextProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppStateSnapshot>(initialState);
   const [isLoading, setIsLoading] = useState(true);
-  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
-    if (typeof window === "undefined") {
-      return null;
-    }
-    const storedSession = window.localStorage.getItem(SESSION_KEY);
-    return storedSession ? parseStoredSession(storedSession) : null;
-  });
+  const [sessionReady, setSessionReady] = useState(false);
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const currentUserRef = useRef(currentUser);
   currentUserRef.current = currentUser;
 
@@ -498,6 +505,17 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   );
 
   useEffect(() => {
+    const storedUser = readStoredSession();
+    if (storedUser) {
+      setCurrentUser(storedUser);
+    }
+    setSessionReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!sessionReady) {
+      return;
+    }
     const run = async () => {
       try {
         await reload();
@@ -506,7 +524,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       }
     };
     void run();
-  }, [reload]);
+  }, [reload, sessionReady]);
 
   useEffect(() => {
     if (!hasSupabase) {
@@ -1212,12 +1230,11 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
   }, [filteredBranchIds, hasRealtime, hasSupabase, reload, currentUser?.id]);
 
   useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem(SESSION_KEY, JSON.stringify(userForSession(currentUser)));
-    } else {
-      localStorage.removeItem(SESSION_KEY);
+    if (!sessionReady || !currentUser) {
+      return;
     }
-  }, [currentUser]);
+    localStorage.setItem(SESSION_KEY, JSON.stringify(userForSession(currentUser)));
+  }, [currentUser, sessionReady]);
 
   const login = async (username: string, password: string) => {
     let user: AppUser | null = null;
@@ -1257,6 +1274,11 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     clearBranchPickRequired();
     setCurrentUser(null);
     setState((prev) => ({ ...prev, activeBranchId: undefined }));
+    try {
+      localStorage.removeItem(SESSION_KEY);
+    } catch {
+      // Ignore storage errors (private mode, etc.).
+    }
   };
 
   const setActiveBranchId = (branchId: string) => {
@@ -2916,7 +2938,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     currentUser,
     filteredBranchIds,
     canEditActiveBranch,
-    isLoading,
+    isLoading: isLoading || !sessionReady,
     hasSupabase,
     login,
     logout,

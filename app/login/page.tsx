@@ -7,6 +7,7 @@ import {
   Center,
   Container,
   Image,
+  Loader,
   PasswordInput,
   Stack,
   Text,
@@ -15,16 +16,30 @@ import {
 } from "@mantine/core";
 import { AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppContext } from "@/contexts/app-context";
+
+function resolvePostLoginPath(role: string): string {
+  if (role === "admin" || role === "general_manager") {
+    return "/select-branch";
+  }
+  return "/bookings";
+}
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login } = useAppContext();
+  const { login, currentUser, isLoading } = useAppContext();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (isLoading || !currentUser) {
+      return;
+    }
+    router.replace(resolvePostLoginPath(currentUser.role));
+  }, [currentUser, isLoading, router]);
 
   const handleLogin = async () => {
     if (isSubmitting) return;
@@ -38,17 +53,24 @@ export default function LoginPage() {
       return;
     }
     try {
-      if (user.role === "admin" || user.role === "general_manager") {
-        router.replace("/select-branch");
-      } else if (user.role === "employee") {
-        router.replace("/bookings");
-      } else if (user.role === "manager") {
-        router.replace("/bookings");
-      }
+      router.replace(resolvePostLoginPath(user.role));
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  if (isLoading || currentUser) {
+    return (
+      <Center mih="100dvh">
+        <Stack align="center" gap="sm">
+          <Loader />
+          <Text size="sm" c="dimmed">
+            Đang khôi phục phiên đăng nhập...
+          </Text>
+        </Stack>
+      </Center>
+    );
+  }
 
   return (
     <Center
