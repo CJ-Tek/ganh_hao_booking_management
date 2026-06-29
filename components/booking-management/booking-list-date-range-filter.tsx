@@ -1,9 +1,8 @@
 "use client";
 
-import dayjs from "dayjs";
-import { Group } from "@mantine/core";
-import { DatePickerInput } from "@mantine/dates";
-import { usePortalCompact } from "@/lib/use-portal-compact";
+import { useEffect, useState } from "react";
+import { Stack } from "@mantine/core";
+import { DatePicker } from "@mantine/dates";
 
 export function BookingListDateRangeFilter(props: {
   startDate: string;
@@ -23,61 +22,50 @@ export function BookingListDateRangeFilter(props: {
     disabled = false,
     layout = "default",
   } = props;
-  const isCompact = usePortalCompact();
   const isPanel = layout === "panel";
-  const isFluid = isCompact || isPanel;
-  const inputStyle = isFluid ? { flex: "1 1 0", minWidth: 0 } : { flexShrink: 0 };
-  const inputMinWidth = isCompact ? 0 : isPanel ? "6.5rem" : 148;
 
-  const handleStartChange = (value: string | null) => {
-    if (!value) {
+  const [pickerValue, setPickerValue] = useState<[string | null, string | null]>([
+    startDate || null,
+    endDate || null,
+  ]);
+
+  useEffect(() => {
+    setPickerValue([startDate || null, endDate || null]);
+  }, [startDate, endDate]);
+
+  const handleRangeChange = (value: [string | null, string | null]) => {
+    if (disabled) {
       return;
     }
-    onStartDateChange(value);
-    if (endDate && dayjs(endDate).isBefore(value, "day")) {
-      onEndDateChange(value);
-    }
-  };
 
-  const handleEndChange = (value: string | null) => {
-    if (!value) {
+    const [start, end] = value;
+    setPickerValue(value);
+
+    if (!start || !end) {
       return;
     }
-    onEndDateChange(value);
+
+    onStartDateChange(start);
+    onEndDateChange(end);
   };
 
   return (
-    <Group
-      gap="sm"
-      wrap="nowrap"
-      align="flex-end"
-      w={isCompact ? "100%" : undefined}
-      grow={isCompact}
-      style={isPanel ? { flex: "1 1 0", minWidth: 0 } : undefined}
+    <Stack
+      w={isPanel ? "auto" : "100%"}
+      style={{
+        ...(isPanel ? { flexShrink: 0 } : undefined),
+        ...(disabled ? { pointerEvents: "none", opacity: 0.6 } : undefined),
+      }}
+      aria-disabled={disabled || undefined}
     >
-      <DatePickerInput
-        label="Từ ngày"
-        value={startDate}
-        onChange={handleStartChange}
-        valueFormat="DD/MM/YYYY"
-        dropdownType="modal"
-        size={size}
-        disabled={disabled}
-        style={inputStyle}
-        miw={inputMinWidth}
+      <DatePicker
+        type="range"
+        value={pickerValue}
+        onChange={handleRangeChange}
+        allowSingleDateInRange
+        fullWidth={!isPanel}
+        size={isPanel ? "xs" : size}
       />
-      <DatePickerInput
-        label="Đến ngày"
-        value={endDate}
-        onChange={handleEndChange}
-        valueFormat="DD/MM/YYYY"
-        dropdownType="modal"
-        minDate={startDate ? dayjs(startDate).toDate() : undefined}
-        size={size}
-        disabled={disabled}
-        style={inputStyle}
-        miw={inputMinWidth}
-      />
-    </Group>
+    </Stack>
   );
 }

@@ -7,9 +7,9 @@ import { type BookingStatus } from "@/lib/types";
 
 export function BookingListMobileView(props: {
   title: string;
-  statusFilters: readonly BookingStatus[];
-  onStatusFiltersChange: (value: BookingStatus[]) => void;
-  statusFilterStatuses: readonly BookingStatus[];
+  statusFilters?: readonly BookingStatus[];
+  onStatusFiltersChange?: (value: BookingStatus[]) => void;
+  statusFilterStatuses?: readonly BookingStatus[];
   statusFiltersLocked?: boolean;
   filtersToolbar: ReactNode;
   paginationBar: ReactNode | null;
@@ -25,18 +25,22 @@ export function BookingListMobileView(props: {
     paginationBar,
     bookingsContent,
   } = props;
+  const showStatusHeader =
+    statusFilters != null && onStatusFiltersChange != null && statusFilterStatuses != null;
 
   return (
     <PortalListSectionMobile
       title={title}
       headerFilters={
-        <BookingStatusFilterChips
-          value={statusFilters}
-          onChange={onStatusFiltersChange}
-          statuses={statusFilterStatuses}
-          locked={statusFiltersLocked}
-          size="xs"
-        />
+        showStatusHeader ? (
+          <BookingStatusFilterChips
+            value={statusFilters}
+            onChange={onStatusFiltersChange}
+            statuses={statusFilterStatuses}
+            locked={statusFiltersLocked}
+            size="xs"
+          />
+        ) : undefined
       }
       filtersToolbar={filtersToolbar}
       paginationBar={paginationBar}

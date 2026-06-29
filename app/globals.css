@@ -135,19 +135,26 @@ body {
   min-height: 36px;
 }
 
+.filter-chip-scroll,
 .mobile-filter-chip-scroll {
   overflow-x: auto;
   overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+}
+
+.filter-chip-scroll--edge-bleed,
+.mobile-filter-chip-scroll {
   margin-inline: calc(-1 * var(--mantine-spacing-sm, 12px));
   padding-inline: var(--mantine-spacing-sm, 12px);
 }
 
+.filter-chip-scroll::-webkit-scrollbar,
 .mobile-filter-chip-scroll::-webkit-scrollbar {
   display: none;
 }
 
+.filter-chip-scroll > *,
 .mobile-filter-chip-scroll > * {
   flex-wrap: nowrap !important;
   width: max-content;

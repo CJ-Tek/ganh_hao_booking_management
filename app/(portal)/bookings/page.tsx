@@ -25,6 +25,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
+import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { GuestCountNumberInput } from "@/components/booking-management/guest-count-number-input";
 import { BookingOrderDetailModal } from "@/components/booking-management/booking-order-detail-modal";
 import { BookingModalContextBanner } from "@/components/booking-management/booking-modal-context-banner";
@@ -42,6 +43,7 @@ import {
   BookingListMobileView,
 } from "@/components/booking-management/booking-list-mobile-view";
 import { BookingListPaginationBar } from "@/components/booking-management/booking-list-pagination";
+import { BookingStatusFilterChips } from "@/components/booking-management/booking-status-filter-chips";
 import { BookingTablePicker } from "@/components/booking-table-picker/booking-table-picker";
 import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-table-modal";
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
@@ -190,7 +192,6 @@ function BookingsPageContent() {
   const [listRangeEnd, setListRangeEnd] = useState(
     () => getDefaultBookingListDateRange().endDate
   );
-  const [listFiltersOpen, setListFiltersOpen] = useState(false);
   const [listStatusFilters, setListStatusFilters] = useState<BookingStatus[]>(
     defaultBookingStatusFilters
   );
@@ -1226,7 +1227,7 @@ function BookingsPageContent() {
 
   const todaySectionTitle = useMemo(() => {
     const countLabel = isEmployee
-      ? `Đã vào bàn (${todaySortedBookings.length})`
+      ? `Danh sách booking (${todaySortedBookings.length})`
       : `Booking hôm nay (${todaySortedBookings.length})`;
     return `${countLabel} · ${dayjs().format("DD/MM/YYYY")}`;
   }, [isEmployee, todaySortedBookings.length]);
@@ -1441,21 +1442,19 @@ function BookingsPageContent() {
     sortedBookings.length,
   ]);
 
-  const listTimeSortFilters = (
-    <BookingListTimeSortFilters
-      sortStatus={sortStatus}
-      fallbackSort={listDefaultSort}
-      onSortStatusChange={(next) => {
-        setSortStatus(next);
-        setPage(1);
-      }}
-      size={isCompact ? "md" : "sm"}
-    />
-  );
-
-  const listAdvancedFiltersPanel = (
-    <Group gap="sm" wrap="nowrap" align="flex-end" w="100%" style={{ minWidth: 0 }}>
-      <Group gap="sm" wrap="nowrap" align="flex-end" style={{ flex: 1, minWidth: 0 }}>
+  const listBookingRangeFiltersPanel = (
+    <Stack gap="sm" w="100%">
+      <BookingStatusFilterChips
+        value={listStatusFilters}
+        onChange={(value) => {
+          setListStatusFilters(value);
+          setPage(1);
+        }}
+        statuses={bookingListStatusFilterStatuses}
+        locked={isListSearchActive}
+        size={isCompact ? "xs" : undefined}
+      />
+      <Group gap="md" align="flex-start" wrap="nowrap" w="100%" style={{ minWidth: 0 }}>
         <BookingListDateRangeFilter
           layout="panel"
           startDate={listRangeStart}
@@ -1470,71 +1469,44 @@ function BookingsPageContent() {
           }}
           size="sm"
         />
-        <BookingListTimeSortFilters
-          layout="panel"
-          sortStatus={sortStatus}
-          fallbackSort={listDefaultSort}
-          onSortStatusChange={(next) => {
-            setSortStatus(next);
-            setPage(1);
-          }}
-          size="sm"
-        />
+        <Stack gap="sm" w="100%" style={{ flex: "1 1 8rem", minWidth: 0 }}>
+          <TextInputWithVoice
+            placeholder={bookingsSearchPlaceholder}
+            value={searchQuery}
+            onChange={(event) => {
+              setSearchQuery(event.currentTarget.value);
+              setPage(1);
+            }}
+            size={isCompact ? "md" : "sm"}
+            voiceIconSize={isCompact ? "md" : "sm"}
+            style={{ width: "100%" }}
+          />
+          <BookingListTimeSortFilters
+            layout="panel"
+            sortStatus={sortStatus}
+            fallbackSort={listDefaultSort}
+            onSortStatusChange={(next) => {
+              setSortStatus(next);
+              setPage(1);
+            }}
+            size="sm"
+          />
+          <Button
+            variant="default"
+            size="sm"
+            leftSection={<FileSpreadsheet size={16} />}
+            onClick={handleExportListExcel}
+            disabled={!listDateRangeValidation.ok || sortedBookings.length === 0}
+            w="100%"
+          >
+            Xuất Excel
+          </Button>
+        </Stack>
       </Group>
-      <Button
-        variant="default"
-        size="sm"
-        leftSection={<FileSpreadsheet size={16} />}
-        onClick={handleExportListExcel}
-        disabled={!listDateRangeValidation.ok || sortedBookings.length === 0}
-        style={{ flexShrink: 0 }}
-      >
-        Xuất file
-      </Button>
-    </Group>
+    </Stack>
   );
 
-  const listInlineFilters = (
-    <Group gap="sm" wrap="wrap" align="flex-end" w="100%">
-      <BookingListDateRangeFilter
-        startDate={listRangeStart}
-        endDate={listRangeEnd}
-        onStartDateChange={(value) => {
-          setListRangeStart(value);
-          setPage(1);
-        }}
-        onEndDateChange={(value) => {
-          setListRangeEnd(value);
-          setPage(1);
-        }}
-        size="md"
-      />
-      {listTimeSortFilters}
-      <Button
-        variant="default"
-        size="md"
-        leftSection={<FileSpreadsheet size={16} />}
-        onClick={handleExportListExcel}
-        disabled={!listDateRangeValidation.ok || sortedBookings.length === 0}
-        style={{ flexShrink: 0 }}
-        ml="auto"
-      >
-        Xuất Excel
-      </Button>
-    </Group>
-  );
-
-  const listFiltersToolbar = (
-    <BookingListFiltersToolbar
-      searchQuery={searchQuery}
-      onSearchQueryChange={(value) => {
-        setSearchQuery(value);
-        setPage(1);
-      }}
-      searchPlaceholder={bookingsSearchPlaceholder}
-      inlineFilters={listInlineFilters}
-    />
-  );
+  const listFiltersPanel = listBookingRangeFiltersPanel;
 
   const listPaginationBar = (
     <BookingListPaginationBar
@@ -1587,15 +1559,10 @@ function BookingsPageContent() {
   const bookingsTable = (
     <BookingListDesktopSection
       title={listSectionTitle}
-      statusFilters={listStatusFilters}
-      onStatusFiltersChange={(value) => {
-        setListStatusFilters(value);
-        setPage(1);
-      }}
-      statusFilterStatuses={bookingListStatusFilterStatuses}
-      statusFiltersLocked={isListSearchActive}
       table={
-        <PortalDataTable<Booking>
+        <Stack gap="sm">
+          {listFiltersPanel}
+          <PortalDataTable<Booking>
         records={pipelineFilteredBookings}
         searchQuery={searchQuery}
         onSearchQueryChange={(value) => {
@@ -1618,10 +1585,8 @@ function BookingsPageContent() {
         }}
         recordsPerPageOptions={[...DESKTOP_BOOKINGS_PAGE_SIZE_OPTIONS]}
         defaultSort={listDefaultSort}
-        searchPlaceholder={bookingsSearchPlaceholder}
-        collapsibleFilters={listAdvancedFiltersPanel}
-        filtersOpen={listFiltersOpen}
-        onFiltersOpenChange={setListFiltersOpen}
+        withToolbar={false}
+        hideSearch
         minHeight={260}
         pinLastColumn
         onRowClick={({ record }) => {
@@ -1761,6 +1726,7 @@ function BookingsPageContent() {
           },
         ]}
       />
+        </Stack>
       }
     />
   );
@@ -2169,14 +2135,7 @@ function BookingsPageContent() {
             {isCompact ? (
               <BookingListMobileView
                 title={listSectionTitle}
-                statusFilters={listStatusFilters}
-                onStatusFiltersChange={(value) => {
-                  setListStatusFilters(value);
-                  setPage(1);
-                }}
-                statusFilterStatuses={bookingListStatusFilterStatuses}
-                statusFiltersLocked={isListSearchActive}
-                filtersToolbar={listFiltersToolbar}
+                filtersToolbar={listFiltersPanel}
                 paginationBar={listPaginationBar}
                 bookingsContent={
                   pagedBookings.length === 0 ? (

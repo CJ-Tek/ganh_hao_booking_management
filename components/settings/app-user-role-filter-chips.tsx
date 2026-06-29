@@ -2,6 +2,7 @@
 
 import { Button, Group } from "@mantine/core";
 import { useEffect, useRef } from "react";
+import { FilterChipScroll } from "@/components/filter-chip-scroll";
 import {
   APP_USER_ROLE_COLOR,
   APP_USER_ROLE_LABEL,
@@ -61,7 +62,7 @@ export function AppUserRoleFilterChips(props: AppUserRoleFilterChipsProps) {
   };
 
   const chipGroup = (
-    <Group gap="xs" wrap={isCompact ? "nowrap" : "wrap"} role="group" aria-label="Lọc vai trò">
+    <Group gap="xs" wrap="nowrap" role="group" aria-label="Lọc vai trò">
       {roles.map((role) => {
         const selected = value.includes(role);
         const color = APP_USER_ROLE_COLOR[role];
@@ -113,9 +114,9 @@ export function AppUserRoleFilterChips(props: AppUserRoleFilterChipsProps) {
     </Group>
   );
 
-  if (isCompact) {
-    return <div className="mobile-filter-chip-scroll">{chipGroup}</div>;
-  }
-
-  return chipGroup;
+  return (
+    <FilterChipScroll edgeBleed={isCompact}>
+      {chipGroup}
+    </FilterChipScroll>
+  );
 }

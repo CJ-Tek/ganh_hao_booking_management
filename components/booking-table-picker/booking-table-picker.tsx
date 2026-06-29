@@ -10,6 +10,7 @@ import {
   Text,
 } from "@mantine/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { FilterChipScroll } from "@/components/filter-chip-scroll";
 import { useAppContext } from "@/contexts/app-context";
 import {
   buildBookingTablePickerLayout,
@@ -291,7 +292,7 @@ export function BookingTablePicker(props: BookingTablePickerProps) {
         </Text>
       ) : (
         <>
-          <div className="mobile-filter-chip-scroll">
+          <FilterChipScroll>
             <Group gap="xs" wrap="nowrap" role="radiogroup" aria-label="Chọn khu vực">
               {branchAreas.map((area) => {
                 const selected = areaId === area.id;
@@ -321,7 +322,7 @@ export function BookingTablePicker(props: BookingTablePickerProps) {
                 );
               })}
             </Group>
-          </div>
+          </FilterChipScroll>
           {areaId ? (
             layoutLoading || !layoutModel ? (
               <Text size="sm" c="dimmed">

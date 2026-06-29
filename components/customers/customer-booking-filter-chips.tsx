@@ -1,6 +1,7 @@
 "use client";
 
 import { Button, Group } from "@mantine/core";
+import { FilterChipScroll } from "@/components/filter-chip-scroll";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 
 export type CustomerBookingFilter = "all" | "has_booking" | "no_booking";
@@ -29,7 +30,7 @@ export function CustomerBookingFilterChips(props: {
   const chips: CustomerBookingFilter[] = ["all", "has_booking", "no_booking"];
 
   const chipGroup = (
-    <Group gap="xs" wrap={isCompact ? "nowrap" : "wrap"} role="group" aria-label="Lọc khách hàng theo booking">
+    <Group gap="xs" wrap="nowrap" role="group" aria-label="Lọc khách hàng theo booking">
       {chips.map((chip) => {
         const selected = value === chip;
         const color = customerBookingFilterColor[chip];
@@ -58,9 +59,9 @@ export function CustomerBookingFilterChips(props: {
     </Group>
   );
 
-  if (isCompact) {
-    return <div className="mobile-filter-chip-scroll">{chipGroup}</div>;
-  }
-
-  return chipGroup;
+  return (
+    <FilterChipScroll edgeBleed={isCompact}>
+      {chipGroup}
+    </FilterChipScroll>
+  );
 }

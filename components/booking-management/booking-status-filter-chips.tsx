@@ -2,6 +2,7 @@
 
 import { Button, Group } from "@mantine/core";
 import { useEffect, useRef } from "react";
+import { FilterChipScroll } from "@/components/filter-chip-scroll";
 import {
   bookingCalendarStatusFilterStatuses,
   bookingStatusColor,
@@ -72,7 +73,7 @@ export function BookingStatusFilterChips(props: BookingStatusFilterChipsProps) {
   };
 
   const chipGroup = (
-    <Group gap="xs" wrap={isCompact ? "nowrap" : "wrap"} role="group" aria-label="Lọc trạng thái booking">
+    <Group gap="xs" wrap="nowrap" role="group" aria-label="Lọc trạng thái booking">
       {statuses.map((status) => {
         const selected = value.includes(status);
         const color = bookingStatusColor[status];
@@ -124,9 +125,9 @@ export function BookingStatusFilterChips(props: BookingStatusFilterChipsProps) {
     </Group>
   );
 
-  if (isCompact) {
-    return <div className="mobile-filter-chip-scroll">{chipGroup}</div>;
-  }
-
-  return chipGroup;
+  return (
+    <FilterChipScroll edgeBleed={isCompact}>
+      {chipGroup}
+    </FilterChipScroll>
+  );
 }

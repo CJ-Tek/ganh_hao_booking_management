@@ -8,6 +8,7 @@ import { useState } from "react";
 import { TextInputWithVoice } from "@/components/TextInputWithVoice";
 import { type Booking } from "@/lib/types";
 import { usePortalCompact } from "@/lib/use-portal-compact";
+import styles from "@/components/booking-management/booking-list-filters-toolbar.module.css";
 
 const ARRIVAL_SORT_DATA = [
   { value: "asc", label: "Sớm → Muộn" },
@@ -37,9 +38,13 @@ export function BookingListTimeSortFilters<T>(props: {
   const isPanel = layout === "panel";
   const isFluid = isCompact || isPanel;
   const columnAccessor = sortStatus.columnAccessor as string;
-  const selectStyle = isFluid ? { flex: "1 1 0", minWidth: 0 } : { flexShrink: 0 };
-  const selectWidth = isFluid ? undefined : 148;
-  const selectMinWidth = isCompact ? 0 : isPanel ? "6.5rem" : 148;
+  const selectStyle = isPanel
+    ? { flex: "1 1 0", minWidth: 0 }
+    : isFluid
+      ? { flex: "1 1 0", minWidth: 0 }
+      : { flexShrink: 0 };
+  const selectWidth = isFluid && !isPanel ? "100%" : undefined;
+  const selectMinWidth = isPanel ? undefined : isCompact ? 0 : 148;
 
   const applyArrivalSort = (direction: SortDirection | null) => {
     if (direction) {
@@ -96,6 +101,14 @@ export function BookingListTimeSortFilters<T>(props: {
     </>
   );
 
+  if (isPanel) {
+    return (
+      <div className={styles.panelSortFilters}>
+        <div className={styles.panelSortFiltersRow}>{selects}</div>
+      </div>
+    );
+  }
+
   return (
     <Group
       gap="sm"
@@ -103,7 +116,6 @@ export function BookingListTimeSortFilters<T>(props: {
       align="flex-end"
       w={isCompact ? "100%" : undefined}
       grow={isCompact}
-      style={isPanel ? { flex: "1 1 0", minWidth: 0 } : undefined}
     >
       {selects}
     </Group>
