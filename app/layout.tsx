@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Providers } from "./providers";
-import { ANDROID_PWA_ICONS, IOS_PWA_ICONS } from "@/lib/pwa-icons";
+import { FAVICON_ICONS, IOS_PWA_ICONS } from "@/lib/pwa-icons";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     title: "Gành Hào",
   },
   icons: {
-    icon: ANDROID_PWA_ICONS.map(({ src, sizes, type }) => ({ url: src, sizes, type })),
+    icon: FAVICON_ICONS.map(({ src, sizes, type }) => ({ url: src, sizes, type })),
     apple: IOS_PWA_ICONS.map(({ src, sizes, type }) => ({ url: src, sizes, type })),
   },
 };
