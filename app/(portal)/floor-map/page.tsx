@@ -1332,6 +1332,7 @@ export default function FloorMapPage() {
     return formatTableSlotConflictMessage(registerTableSlotConflicts, {
       tableName: registerTable.name,
       customerName: conflictCustomer,
+      candidateBookingAt: registerBookingCandidate?.bookingAt,
     });
   }, [registerTable, registerTableSlotConflicts, state.customers]);
 

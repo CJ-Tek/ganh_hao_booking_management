@@ -438,8 +438,9 @@ export function useBookingManagement() {
     return formatTableSlotConflictMessage(editTableSlotConflicts, {
       tableName,
       customerName: conflictCustomer,
+      candidateBookingAt: editBookingAt ?? undefined,
     });
-  }, [editTableId, editTableSlotConflicts, state.customers, state.tables]);
+  }, [editBookingAt, editTableId, editTableSlotConflicts, state.customers, state.tables]);
 
   const submitEditBooking = useCallback(
     async (options?: { allowDuplicate?: boolean }) => {

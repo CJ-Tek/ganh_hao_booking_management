@@ -522,8 +522,10 @@ function BookingsPageContent() {
     return formatTableSlotConflictMessage(editTableSlotConflicts, {
       tableName,
       customerName: conflictCustomer,
+      candidateBookingAt: editBookingAt ?? undefined,
     });
   }, [
+    editBookingAt,
     editMergeGroupId,
     editMergeGroupSlotBlocked,
     editTableId,

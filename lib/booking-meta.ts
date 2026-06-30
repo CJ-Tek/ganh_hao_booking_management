@@ -1031,23 +1031,51 @@ export function pickNonOverlappingBookingsForMergeGroup(
   return { assignable, skippedSelectionOverlap, skippedTableConflict };
 }
 
+function formatConflictSlotRange(
+  booking: Pick<Booking, "bookingAt" | "startTime" | "endTime">,
+  referenceDay?: dayjs.Dayjs
+): string {
+  const slot = normalizeBookingSlotMs(booking);
+  const start = dayjs(slot.startMs);
+  const end = dayjs(slot.endMs);
+  const ref = referenceDay ?? dayjs();
+  const startLabel = start.isSame(ref, "day")
+    ? start.format("HH:mm")
+    : `${start.format("DD/MM/YYYY")} ${start.format("HH:mm")}`;
+  const endLabel = end.isSame(start, "day") ? end.format("HH:mm") : end.format("DD/MM/YYYY HH:mm");
+  return `${startLabel}–${endLabel}`;
+}
+
 export function formatTableSlotConflictMessage(
-  conflicts: readonly Pick<Booking, "bookingAt" | "guestCount">[],
-  options?: { tableName?: string; customerName?: string }
+  conflicts: readonly Pick<Booking, "bookingAt" | "guestCount" | "startTime" | "endTime">[],
+  options?: {
+    tableName?: string;
+    customerName?: string;
+    /** Giờ đến của booking đang tạo/sửa — giúp giải thích vì sao bị chặn. */
+    candidateBookingAt?: string;
+  }
 ): string | null {
   if (conflicts.length === 0) {
     return null;
   }
   const first = conflicts[0];
-  const at = dayjs(first.bookingAt);
-  const slotLabel = at.isSame(dayjs(), "day")
-    ? `hôm nay lúc ${at.format("HH:mm")}`
-    : `${at.format("DD/MM/YYYY")} lúc ${at.format("HH:mm")}`;
-  const tablePart = options?.tableName ? ` trên bàn ${options.tableName}` : "";
-  const guestPart = options?.customerName ? ` (${options.customerName})` : "";
+  const conflictRange = formatConflictSlotRange(first, dayjs(first.bookingAt));
+  const tableLabel = options?.tableName ? `bàn ${options.tableName}` : "bàn này";
+  const guestPart = options?.customerName ? ` của ${options.customerName}` : "";
   const extraCount = conflicts.length - 1;
   const suffix = extraCount > 0 ? ` (+${extraCount} booking trùng khung)` : "";
-  return `Khung giờ mới trùng booking${tablePart}${guestPart}: ${slotLabel} · ${first.guestCount} khách.${suffix}`;
+
+  if (options?.candidateBookingAt) {
+    const candidateAt = dayjs(options.candidateBookingAt);
+    const candidateLabel = candidateAt.isSame(dayjs(), "day")
+      ? candidateAt.format("HH:mm")
+      : `${candidateAt.format("DD/MM/YYYY")} lúc ${candidateAt.format("HH:mm")}`;
+    const freeAfter = dayjs(normalizeBookingSlotMs(first).endMs).format("HH:mm");
+    return `Không thể đặt lúc ${candidateLabel} trên ${tableLabel}: đã có booking${guestPart} ${conflictRange} (${first.guestCount} khách). Chọn giờ sau ${freeAfter} hoặc bàn khác.${suffix}`;
+  }
+
+  const tablePart = options?.tableName ? ` trên bàn ${options.tableName}` : "";
+  return `Khung giờ mới trùng booking${tablePart}${guestPart}: ${conflictRange} · ${first.guestCount} khách.${suffix}`;
 }
 
 /** Tables that may receive this booking (branch, not locked, no slot conflicts). */

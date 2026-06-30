@@ -470,6 +470,85 @@ type TableSlotConflictRow = {
   customers: { full_name: string } | { full_name: string }[] | null;
 };
 
+function messageFromTableSlotConflictRows(
+  conflicts: TableSlotConflictRow[],
+  options: {
+    tableName?: string;
+    candidateBookingAt?: string;
+    fallbackMessage: string;
+  }
+): string {
+  if (conflicts.length === 0) {
+    return options.fallbackMessage;
+  }
+  const first = conflicts[0];
+  const customerJoin = first.customers;
+  const conflictCustomerName = Array.isArray(customerJoin)
+    ? customerJoin[0]?.full_name
+    : customerJoin?.full_name;
+  return (
+    formatTableSlotConflictMessage(
+      conflicts.map((row) => ({
+        bookingAt: row.booking_at,
+        startTime: row.start_time ?? row.booking_at,
+        endTime: row.end_time ?? undefined,
+        guestCount: row.guest_count,
+      })),
+      {
+        tableName: options.tableName,
+        customerName: conflictCustomerName,
+        candidateBookingAt: options.candidateBookingAt,
+      }
+    ) ?? options.fallbackMessage
+  );
+}
+
+async function findMergeGroupBookingsOnMemberTableInSupabase(
+  client: ReturnType<typeof ensureClient>,
+  tableId: string,
+  excludeBookingId: string
+): Promise<TableSlotConflictRow[]> {
+  const { data: memberRows, error: memberErr } = await (client as any)
+    .from("table_merge_members")
+    .select("group_id")
+    .eq("table_id", tableId);
+  if (memberErr) {
+    throw new Error(memberErr.message);
+  }
+  const groupIds = [
+    ...new Set(
+      ((memberRows ?? []) as Array<{ group_id: string }>).map((row) => row.group_id)
+    ),
+  ];
+  if (groupIds.length === 0) {
+    return [];
+  }
+
+  const { data: activeGroups, error: groupErr } = await (client as any)
+    .from("table_merge_groups")
+    .select("id")
+    .in("id", groupIds)
+    .eq("status", "active");
+  if (groupErr) {
+    throw new Error(groupErr.message);
+  }
+  const activeGroupIds = ((activeGroups ?? []) as Array<{ id: string }>).map((row) => row.id);
+  if (activeGroupIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await (client as any)
+    .from("bookings")
+    .select("id, booking_at, start_time, end_time, guest_count, customers(full_name)")
+    .in("merge_group_id", activeGroupIds)
+    .neq("id", excludeBookingId)
+    .in("status", TABLE_RESERVATION_BOOKING_STATUSES);
+  if (error) {
+    throw new Error(error.message);
+  }
+  return (data ?? []) as TableSlotConflictRow[];
+}
+
 async function findTableBookingSlotConflictsInSupabase(
   client: ReturnType<typeof ensureClient>,
   input: {
@@ -479,6 +558,18 @@ async function findTableBookingSlotConflictsInSupabase(
     endTime: string;
   }
 ): Promise<TableSlotConflictRow[]> {
+  const candidate = {
+    bookingAt: input.startTime,
+    startTime: input.startTime,
+    endTime: input.endTime,
+  };
+  const overlapsCandidate = (row: TableSlotConflictRow) =>
+    bookingsTimeSlotsOverlap(candidate, {
+      bookingAt: row.booking_at,
+      startTime: row.start_time ?? row.booking_at,
+      endTime: row.end_time ?? input.endTime,
+    });
+
   const { data, error } = await (client as any)
     .from("bookings")
     .select("id, booking_at, start_time, end_time, guest_count, customers(full_name)")
@@ -489,19 +580,76 @@ async function findTableBookingSlotConflictsInSupabase(
     throw new Error(error.message);
   }
 
+  const directConflicts = ((data ?? []) as TableSlotConflictRow[]).filter(overlapsCandidate);
+  if (directConflicts.length > 0) {
+    return directConflicts;
+  }
+
+  const mergeRows = await findMergeGroupBookingsOnMemberTableInSupabase(
+    client,
+    input.tableId,
+    input.bookingId
+  );
+  return mergeRows.filter(overlapsCandidate);
+}
+
+async function findMergeGroupSlotConflictsInSupabase(
+  client: ReturnType<typeof ensureClient>,
+  input: {
+    bookingId: string;
+    mergeGroupId: string;
+    memberTableIds: string[];
+    startTime: string;
+    endTime: string;
+  }
+): Promise<{ conflicts: TableSlotConflictRow[]; tableName?: string } | null> {
   const candidate = {
     bookingAt: input.startTime,
     startTime: input.startTime,
     endTime: input.endTime,
   };
-
-  return ((data ?? []) as TableSlotConflictRow[]).filter((row) =>
+  const overlapsCandidate = (row: TableSlotConflictRow) =>
     bookingsTimeSlotsOverlap(candidate, {
       bookingAt: row.booking_at,
       startTime: row.start_time ?? row.booking_at,
       endTime: row.end_time ?? input.endTime,
-    })
-  );
+    });
+
+  const { data: groupBookings, error: groupBookingsErr } = await (client as any)
+    .from("bookings")
+    .select("id, booking_at, start_time, end_time, guest_count, customers(full_name)")
+    .eq("merge_group_id", input.mergeGroupId)
+    .neq("id", input.bookingId)
+    .in("status", TABLE_RESERVATION_BOOKING_STATUSES);
+  if (groupBookingsErr) {
+    throw new Error(groupBookingsErr.message);
+  }
+  const groupConflict = ((groupBookings ?? []) as TableSlotConflictRow[]).find(overlapsCandidate);
+  if (groupConflict) {
+    return { conflicts: [groupConflict] };
+  }
+
+  for (const memberTableId of input.memberTableIds) {
+    const memberConflicts = await findTableBookingSlotConflictsInSupabase(client, {
+      bookingId: input.bookingId,
+      tableId: memberTableId,
+      startTime: input.startTime,
+      endTime: input.endTime,
+    });
+    if (memberConflicts.length > 0) {
+      const { data: tableRow } = await client
+        .from("tables")
+        .select("name")
+        .eq("id", memberTableId)
+        .maybeSingle();
+      return {
+        conflicts: memberConflicts,
+        tableName: tableRow?.name ?? "bàn thành viên",
+      };
+    }
+  }
+
+  return null;
 }
 
 function duplicateBookingResult(
@@ -1213,6 +1361,24 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
       return { ok: false, message: groupCheck.message };
     }
 
+    const mergeSlotConflict = await findMergeGroupSlotConflictsInSupabase(client, {
+      bookingId: "__new__",
+      mergeGroupId: input.mergeGroupId!,
+      memberTableIds: groupCheck.memberTableIds,
+      startTime: normalizedAt,
+      endTime: slotEnd,
+    });
+    if (mergeSlotConflict) {
+      return {
+        ok: false,
+        message: messageFromTableSlotConflictRows(mergeSlotConflict.conflicts, {
+          tableName: mergeSlotConflict.tableName ?? groupCheck.mergedName,
+          candidateBookingAt: normalizedAt,
+          fallbackMessage: "Khung giờ trùng với booking khác trên cụm bàn gộp.",
+        }),
+      };
+    }
+
     const { data: createData, error: createError } = await (client as any).rpc(
       "create_or_queue_booking",
       {
@@ -1284,7 +1450,7 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
   if (hasAssignedTable) {
     const { data: tableInfo, error: tableInfoError } = await client
       .from("tables")
-      .select("branch_id")
+      .select("branch_id, name")
       .eq("id", input.tableId!)
       .maybeSingle();
     if (tableInfoError || !tableInfo) {
@@ -1295,6 +1461,23 @@ export async function createBookingInSupabase(input: CreateBookingInput): Promis
     }
     if (tableInfo.branch_id !== input.branchId) {
       return { ok: false, message: "Bàn không thuộc cùng chi nhánh với booking." };
+    }
+
+    const tableConflicts = await findTableBookingSlotConflictsInSupabase(client, {
+      bookingId: "__new__",
+      tableId: input.tableId!,
+      startTime: normalizedAt,
+      endTime: slotEnd,
+    });
+    if (tableConflicts.length > 0) {
+      return {
+        ok: false,
+        message: messageFromTableSlotConflictRows(tableConflicts, {
+          tableName: tableInfo.name,
+          candidateBookingAt: normalizedAt,
+          fallbackMessage: "Khung giờ trùng với booking khác trên bàn này.",
+        }),
+      };
     }
 
     const { data: createData, error: createError } = await (client as any).rpc(
@@ -1450,6 +1633,24 @@ export async function assignBookingToTableInSupabase(input: {
       return { ok: false, message: groupCheck.message };
     }
 
+    const mergeSlotConflict = await findMergeGroupSlotConflictsInSupabase(client, {
+      bookingId,
+      mergeGroupId,
+      memberTableIds: groupCheck.memberTableIds,
+      startTime: normalizedStart,
+      endTime: normalizedEnd,
+    });
+    if (mergeSlotConflict) {
+      return {
+        ok: false,
+        message: messageFromTableSlotConflictRows(mergeSlotConflict.conflicts, {
+          tableName: mergeSlotConflict.tableName ?? groupCheck.mergedName,
+          candidateBookingAt: normalizedStart,
+          fallbackMessage: "Khung giờ trùng với booking khác trên cụm bàn gộp.",
+        }),
+      };
+    }
+
     const { data: assignData, error: assignErr } = await (client as any).rpc(
       "assign_or_queue_pending_booking",
       {
@@ -1505,7 +1706,7 @@ export async function assignBookingToTableInSupabase(input: {
 
   const { data: table, error: tableErr } = await client
     .from("tables")
-    .select("id, branch_id, status")
+    .select("id, branch_id, status, name")
     .eq("id", tableId)
     .maybeSingle();
   if (tableErr || !table) {
@@ -1513,6 +1714,23 @@ export async function assignBookingToTableInSupabase(input: {
   }
   if (table.branch_id !== booking.branch_id) {
     return { ok: false, message: "Bàn không thuộc cùng chi nhánh với booking." };
+  }
+
+  const tableConflicts = await findTableBookingSlotConflictsInSupabase(client, {
+    bookingId,
+    tableId,
+    startTime: normalizedStart,
+    endTime: normalizedEnd,
+  });
+  if (tableConflicts.length > 0) {
+    return {
+      ok: false,
+      message: messageFromTableSlotConflictRows(tableConflicts, {
+        tableName: table.name,
+        candidateBookingAt: normalizedStart,
+        fallbackMessage: "Khung giờ trùng với booking khác trên bàn này.",
+      }),
+    };
   }
 
   const { data: assignData, error: assignErr } = await (client as any).rpc(
@@ -1821,20 +2039,14 @@ export async function updateBookingOrderInSupabase(input: {
         endTime: slotEnd,
       });
       if (tableConflicts.length > 0) {
-        const firstConflict = tableConflicts[0];
-        const customerJoin = firstConflict.customers;
-        const conflictCustomerName = Array.isArray(customerJoin)
-          ? customerJoin[0]?.full_name
-          : customerJoin?.full_name;
-        const message =
-          formatTableSlotConflictMessage(
-            tableConflicts.map((row) => ({
-              bookingAt: row.booking_at,
-              guestCount: row.guest_count,
-            })),
-            { tableName: table.name, customerName: conflictCustomerName }
-          ) ?? "Khung giờ mới trùng với booking khác trên cùng bàn.";
-        return { ok: false, message };
+        return {
+          ok: false,
+          message: messageFromTableSlotConflictRows(tableConflicts, {
+            tableName: table.name,
+            candidateBookingAt: normalizedAt,
+            fallbackMessage: "Khung giờ mới trùng với booking khác trên cùng bàn.",
+          }),
+        };
       }
     }
   }
@@ -2124,22 +2336,13 @@ export async function changeBookingTableInSupabase(input: {
       })
     );
     if (groupConflict) {
-      const customerJoin = groupConflict.customers;
-      const conflictCustomerName = Array.isArray(customerJoin)
-        ? customerJoin[0]?.full_name
-        : customerJoin?.full_name;
       return {
         ok: false,
-        message:
-          formatTableSlotConflictMessage(
-            [
-              {
-                bookingAt: groupConflict.booking_at,
-                guestCount: groupConflict.guest_count,
-              },
-            ],
-            { tableName: mergeGroupContext.mergedName, customerName: conflictCustomerName }
-          ) ?? "Khung giờ trùng với booking khác trên cụm bàn gộp.",
+        message: messageFromTableSlotConflictRows([groupConflict], {
+          tableName: mergeGroupContext.mergedName,
+          candidateBookingAt: normalizedStart,
+          fallbackMessage: "Khung giờ trùng với booking khác trên cụm bàn gộp.",
+        }),
       };
     }
 
@@ -2151,11 +2354,6 @@ export async function changeBookingTableInSupabase(input: {
         endTime: normalizedEnd,
       });
       if (memberConflicts.length > 0) {
-        const firstConflict = memberConflicts[0];
-        const customerJoin = firstConflict.customers;
-        const conflictCustomerName = Array.isArray(customerJoin)
-          ? customerJoin[0]?.full_name
-          : customerJoin?.full_name;
         const { data: tableRow } = await client
           .from("tables")
           .select("name")
@@ -2163,14 +2361,11 @@ export async function changeBookingTableInSupabase(input: {
           .maybeSingle();
         return {
           ok: false,
-          message:
-            formatTableSlotConflictMessage(
-              memberConflicts.map((row) => ({
-                bookingAt: row.booking_at,
-                guestCount: row.guest_count,
-              })),
-              { tableName: tableRow?.name ?? "bàn thành viên", customerName: conflictCustomerName }
-            ) ?? "Khung giờ trùng với booking khác trên bàn trong cụm gộp.",
+          message: messageFromTableSlotConflictRows(memberConflicts, {
+            tableName: tableRow?.name ?? "bàn thành viên",
+            candidateBookingAt: normalizedStart,
+            fallbackMessage: "Khung giờ trùng với booking khác trên bàn trong cụm gộp.",
+          }),
         };
       }
     }
@@ -2202,21 +2397,13 @@ export async function changeBookingTableInSupabase(input: {
       endTime: normalizedEnd,
     });
     if (tableConflicts.length > 0) {
-      const firstConflict = tableConflicts[0];
-      const customerJoin = firstConflict.customers;
-      const conflictCustomerName = Array.isArray(customerJoin)
-        ? customerJoin[0]?.full_name
-        : customerJoin?.full_name;
       return {
         ok: false,
-        message:
-          formatTableSlotConflictMessage(
-            tableConflicts.map((row) => ({
-              bookingAt: row.booking_at,
-              guestCount: row.guest_count,
-            })),
-            { tableName: table.name, customerName: conflictCustomerName }
-          ) ?? "Khung giờ trùng với booking khác trên bàn đích.",
+        message: messageFromTableSlotConflictRows(tableConflicts, {
+          tableName: table.name,
+          candidateBookingAt: normalizedStart,
+          fallbackMessage: "Khung giờ trùng với booking khác trên bàn đích.",
+        }),
       };
     }
   }

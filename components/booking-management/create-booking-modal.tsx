@@ -32,6 +32,11 @@ import {
   normalizeVietnamPhone,
   type BookingDuplicateInfo,
 } from "@/lib/booking-duplicate";
+import {
+  findAssignableSlotConflictsAtTable,
+  formatTableSlotConflictMessage,
+  hasAssignableSlotConflictAtMergeGroup,
+} from "@/lib/booking-meta";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { type Booking } from "@/lib/types";
 import { finalizeCustomerName } from "@/lib/voice-booking/format";
@@ -217,6 +222,92 @@ export function CreateBookingModal({
     [createBranchId, state.mergeGroups]
   );
 
+  const createBookingCandidate = useMemo((): Booking | null => {
+    if (!createBranchId || !bookingAt) {
+      return null;
+    }
+    const startIso = dayjs(bookingAt).toISOString();
+    const endIso = dayjs(startIso)
+      .add(state.bookingRuntimeSettings.standardTurnaroundMinutes, "minute")
+      .toISOString();
+    return {
+      id: "__create_modal__",
+      customerId: "",
+      branchId: createBranchId,
+      areaId: areaId ?? "",
+      tableId: mergeGroupId ? null : tableId,
+      mergeGroupId: mergeGroupId ?? null,
+      guestCount: Math.max(1, guestCount ?? 1),
+      bookingAt: startIso,
+      startTime: startIso,
+      endTime: endIso,
+      status: "confirmed",
+      createdByUserId: "",
+    };
+  }, [
+    areaId,
+    bookingAt,
+    createBranchId,
+    guestCount,
+    mergeGroupId,
+    state.bookingRuntimeSettings.standardTurnaroundMinutes,
+    tableId,
+  ]);
+
+  const createTableSlotConflicts = useMemo(() => {
+    if (!createBookingCandidate?.tableId) {
+      return [];
+    }
+    return findAssignableSlotConflictsAtTable(
+      createBookingCandidate,
+      createBookingCandidate.tableId,
+      state.bookings
+    );
+  }, [createBookingCandidate, state.bookings]);
+
+  const createMergeGroupSlotBlocked = useMemo(() => {
+    if (!createBookingCandidate?.mergeGroupId) {
+      return false;
+    }
+    const group = createBranchMergeGroups.find((item) => item.id === createBookingCandidate.mergeGroupId);
+    if (!group) {
+      return false;
+    }
+    return hasAssignableSlotConflictAtMergeGroup(
+      createBookingCandidate,
+      group,
+      state.bookings
+    );
+  }, [createBookingCandidate, createBranchMergeGroups, state.bookings]);
+
+  const createSlotConflictMessage = useMemo(() => {
+    if (createTableSlotConflicts.length > 0) {
+      const table = createBranchTables.find((item) => item.id === tableId);
+      const conflictCustomer = state.customers.find(
+        (item) => item.id === createTableSlotConflicts[0]?.customerId
+      )?.fullName;
+      return formatTableSlotConflictMessage(createTableSlotConflicts, {
+        tableName: table?.name,
+        customerName: conflictCustomer,
+        candidateBookingAt: bookingAt ?? undefined,
+      });
+    }
+    if (createMergeGroupSlotBlocked && mergeGroupId) {
+      const group = createBranchMergeGroups.find((item) => item.id === mergeGroupId);
+      return `Không thể đặt lúc ${dayjs(bookingAt).format("HH:mm")} trên cụm ${group?.mergedName ?? "gộp"}: khung giờ trùng với booking khác trên cụm hoặc bàn thành viên.`;
+    }
+    return null;
+  }, [
+    bookingAt,
+    createBranchMergeGroups,
+    createBranchTables,
+    createMergeGroupSlotBlocked,
+    createTableSlotConflicts,
+    mergeGroupId,
+    state.customers,
+    tableId,
+  ]);
+
   const applyCreateFormTableSelection = useCallback(
     (selection: VoiceBookingFieldPatch) => {
       setVoiceFieldPatch(selection);
@@ -249,6 +340,10 @@ export function CreateBookingModal({
         message:
           "Số điện thoại không đúng định dạng Việt Nam (ví dụ 0912345678, +84912345678).",
       });
+      return;
+    }
+    if (createSlotConflictMessage) {
+      notifications.show({ color: "red", message: createSlotConflictMessage });
       return;
     }
     setIsCreating(true);
@@ -431,6 +526,11 @@ export function CreateBookingModal({
           {duplicateWarningMessage ? (
             <Alert color="orange" variant="light" title="Cảnh báo trùng booking">
               {duplicateWarningMessage}
+            </Alert>
+          ) : null}
+          {createSlotConflictMessage ? (
+            <Alert color="red" variant="light" title="Trùng khung giờ">
+              {createSlotConflictMessage}
             </Alert>
           ) : null}
           <Text size="sm" c="dimmed">

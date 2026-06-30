@@ -85,6 +85,7 @@ export function ChangeBookingTableModal(props: ChangeBookingTableModalProps) {
     return formatTableSlotConflictMessage(conflicts, {
       tableName,
       customerName: conflictCustomerName,
+      candidateBookingAt: booking?.bookingAt,
     });
   }, [booking, bookings, tableId, tables, customers]);
 
