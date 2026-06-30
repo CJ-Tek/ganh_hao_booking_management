@@ -901,6 +901,38 @@ async function refreshTablesTouchedByRecentNoShows(
   await Promise.all(ids.map((id) => refreshTableAvailabilityForBooking(client, id)));
 }
 
+/** Auto-late keeps table_id as a reminder; refresh so the physical table is freed on the floor map. */
+async function refreshTablesTouchedByRecentLateMarks(
+  client: ReturnType<typeof ensureClient>,
+  sinceIso: string
+): Promise<void> {
+  const { data: rows, error } = await client
+    .from("bookings")
+    .select("table_id, merge_group_id")
+    .eq("status", "late")
+    .gte("late_marked_at", sinceIso);
+  if (error || !rows?.length) {
+    return;
+  }
+
+  const tableIds = new Set<string>();
+  for (const row of rows as { table_id: string | null; merge_group_id: string | null }[]) {
+    if (row.table_id) {
+      tableIds.add(row.table_id);
+    }
+    if (row.merge_group_id) {
+      for (const memberTableId of await listMergeGroupMemberTableIds(
+        client,
+        row.merge_group_id
+      )) {
+        tableIds.add(memberTableId);
+      }
+    }
+  }
+
+  await Promise.all([...tableIds].map((id) => refreshTableAvailabilityForBooking(client, id)));
+}
+
 export async function updateBranchInSupabase(
   branchId: string,
   input: { name: string; address: string }
@@ -2496,9 +2528,7 @@ export async function updateBookingStatusInSupabase(
     normalizedStatus === "no_show" ||
     normalizedStatus === "late";
   const clearsTableAssignment =
-    normalizedStatus === "cancelled" ||
-    normalizedStatus === "no_show" ||
-    normalizedStatus === "late";
+    normalizedStatus === "cancelled" || normalizedStatus === "no_show";
   const { error } = await (client as any)
     .from("bookings")
     .update(
@@ -4247,7 +4277,6 @@ export async function listTableMergeGroupsInSupabase(branchId: string): Promise<
 
 export async function runBookingMaintenanceInSupabase(): Promise<Result> {
   const client = ensureClient();
-  const noShowWindowStart = dayjs().subtract(5, "minute").toISOString();
   const { data, error } = await (client as any).rpc("run_booking_maintenance");
   if (error) {
     return { ok: false, message: error.message };
@@ -4262,7 +4291,13 @@ export async function runBookingMaintenanceInSupabase(): Promise<Result> {
   const promotedCount = Number((payload as { promoted_count?: number }).promoted_count ?? 0);
 
   if (noShowCount > 0 || lateCount > 0) {
-    await refreshTablesTouchedByRecentNoShows(client, noShowWindowStart);
+    const maintenanceWindowStart = dayjs().subtract(5, "minute").toISOString();
+    await Promise.all([
+      refreshTablesTouchedByRecentNoShows(client, maintenanceWindowStart),
+      lateCount > 0
+        ? refreshTablesTouchedByRecentLateMarks(client, maintenanceWindowStart)
+        : Promise.resolve(),
+    ]);
   }
 
   const staleSeatedCompleted = await autoCompleteStaleSeatedBookings(client);

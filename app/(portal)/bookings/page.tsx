@@ -77,6 +77,7 @@ import {
   getAssignableCandidateTables,
   getReceptionBookingStatus,
   inferGuestTypeLabel,
+  isBookingTableAssigned,
   isGuestCountSpecified,
   isSyntheticPhoneValue,
   getAssignableMergeGroups,
@@ -784,9 +785,15 @@ function BookingsPageContent() {
           ? booking.guestCount
           : undefined;
     setAssignManualGuestCount(initialGuestCount);
-    setAssignAreaId(null);
-    setAssignTableId(null);
-    setAssignMergeGroupId(null);
+    if (booking.status === "late" && isBookingTableAssigned(booking)) {
+      setAssignAreaId(booking.areaId);
+      setAssignTableId(booking.mergeGroupId ? null : booking.tableId);
+      setAssignMergeGroupId(booking.mergeGroupId ?? null);
+    } else {
+      setAssignAreaId(null);
+      setAssignTableId(null);
+      setAssignMergeGroupId(null);
+    }
   };
 
   const openEditBookingModal = (booking: Booking) => {

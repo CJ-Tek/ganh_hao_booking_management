@@ -1703,9 +1703,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       ...(clearsCheckedInAt ? { checkedInAt: undefined } : {}),
       ...(status === "no_show" ? { noShowMarkedAt: dayjs().toISOString() } : {}),
       ...(status === "late" ? { lateMarkedAt: dayjs().toISOString() } : {}),
-      ...(status === "late" || status === "no_show"
-        ? { areaId: null, tableId: null, mergeGroupId: null }
-        : {}),
+      ...(status === "no_show" ? { areaId: null, tableId: null, mergeGroupId: null } : {}),
     };
 
     const revertPatch: Partial<Booking> = {

@@ -1,7 +1,12 @@
 import dayjs from "dayjs";
 
 import { DEFAULT_BOOKING_RUNTIME_SETTINGS } from "@/lib/booking-runtime-defaults";
-import { bookingStatusColor, bookingStatusLabel, BOOKING_PENDING_TABLE_LABEL } from "@/lib/display";
+import {
+  bookingStatusColor,
+  bookingStatusLabel,
+  BOOKING_LATE_TABLE_REMINDER_LABEL,
+  BOOKING_PENDING_TABLE_LABEL,
+} from "@/lib/display";
 import {
   type Booking,
   type BookingRuntimeSettings,
@@ -358,9 +363,11 @@ export function isBookingTableAssigned(
   return Boolean(booking.areaId && booking.tableId);
 }
 
-/** Display line for Khu vực / Bàn columns (list, detail, search). */
-export function formatBookingAreaTable(
-  booking: Pick<Booking, "areaId" | "tableId" | "mergeGroupId">,
+type BookingAreaTableDisplay = Pick<Booking, "areaId" | "tableId" | "mergeGroupId"> &
+  Partial<Pick<Booking, "status">>;
+
+function formatBookingAreaTableBase(
+  booking: BookingAreaTableDisplay,
   lookup: BookingAreaTableLookup,
   options?: {
     pendingLabel?: string;
@@ -388,6 +395,28 @@ export function formatBookingAreaTable(
   return `${areaName} · ${tablePart}`;
 }
 
+/** Display line for Khu vực / Bàn columns (list, detail, search). */
+export function formatBookingAreaTable(
+  booking: BookingAreaTableDisplay,
+  lookup: BookingAreaTableLookup,
+  options?: {
+    pendingLabel?: string;
+    /** Prefix single table with `Bàn ` (list mobile cards). */
+    tableNamePrefix?: boolean;
+  }
+): string {
+  const base = formatBookingAreaTableBase(booking, lookup, options);
+  const pendingLabel = options?.pendingLabel ?? BOOKING_PENDING_TABLE_LABEL;
+  if (
+    booking.status === "late" &&
+    base !== pendingLabel &&
+    isBookingTableAssigned(booking)
+  ) {
+    return `${base} · ${BOOKING_LATE_TABLE_REMINDER_LABEL}`;
+  }
+  return base;
+}
+
 /** Sort/search key for areaTable column — same labels as display. */
 export function bookingAreaTableSortKey(
   booking: Pick<Booking, "areaId" | "tableId" | "mergeGroupId">,
@@ -406,7 +435,7 @@ export function formatTodayBookingAreaTable(
 
 /** Leading column on booking compact cards: table name on top, area underneath. */
 export function resolveBookingLeadingColumn(
-  booking: Pick<Booking, "areaId" | "tableId" | "mergeGroupId">,
+  booking: BookingAreaTableDisplay,
   lookup: BookingAreaTableLookup,
   options?: { pendingLabel?: string }
 ): { primary: string; secondary?: string } {
@@ -422,14 +451,20 @@ export function resolveBookingLeadingColumn(
         : null) ??
       (group ? lookup.areas.find((item) => item.id === group.areaId)?.name : null) ??
       "—";
+    const primary =
+      booking.status === "late"
+        ? `${group?.mergedName ?? "Bàn gộp"} (${BOOKING_LATE_TABLE_REMINDER_LABEL})`
+        : (group?.mergedName ?? "Bàn gộp");
     return {
-      primary: group?.mergedName ?? "Bàn gộp",
+      primary,
       secondary: areaName,
     };
   }
   const areaName = lookup.areas.find((item) => item.id === booking.areaId)?.name ?? "—";
   const tableName = lookup.tables.find((item) => item.id === booking.tableId)?.name ?? "—";
-  return { primary: tableName, secondary: areaName };
+  const primary =
+    booking.status === "late" ? `${tableName} (${BOOKING_LATE_TABLE_REMINDER_LABEL})` : tableName;
+  return { primary, secondary: areaName };
 }
 
 /** @deprecated Use {@link resolveBookingLeadingColumn}. */

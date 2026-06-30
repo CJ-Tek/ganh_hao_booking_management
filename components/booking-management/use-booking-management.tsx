@@ -44,6 +44,7 @@ import {
   getAssignableCandidateTables,
   getAssignableMergeGroups,
   hasAssignableSlotConflictAtMergeGroup,
+  isBookingTableAssigned,
   isGuestCountSpecified,
   isSyntheticPhoneValue,
 } from "@/lib/booking-meta";
@@ -282,9 +283,15 @@ export function useBookingManagement() {
           ? booking.guestCount
           : undefined;
     setAssignManualGuestCount(initialGuestCount);
-    setAssignAreaId(null);
-    setAssignTableId(null);
-    setAssignMergeGroupId(null);
+    if (booking.status === "late" && isBookingTableAssigned(booking)) {
+      setAssignAreaId(booking.areaId);
+      setAssignTableId(booking.mergeGroupId ? null : booking.tableId);
+      setAssignMergeGroupId(booking.mergeGroupId ?? null);
+    } else {
+      setAssignAreaId(null);
+      setAssignTableId(null);
+      setAssignMergeGroupId(null);
+    }
   }, []);
 
   // Back-compat name: previously opened intermediate options modal.

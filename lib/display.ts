@@ -16,6 +16,9 @@ export const tableStatusColor: Record<TableStatus, string> = {
 
 export const BOOKING_PENDING_TABLE_LABEL = "Chờ bàn";
 
+/** Suffix on late bookings that still reference their pre-late table assignment. */
+export const BOOKING_LATE_TABLE_REMINDER_LABEL = "Bàn đã đặt";
+
 export const bookingStatusLabel: Record<BookingStatus, string> = {
   pending: BOOKING_PENDING_TABLE_LABEL,
   confirmed: "Đã xác nhận",
