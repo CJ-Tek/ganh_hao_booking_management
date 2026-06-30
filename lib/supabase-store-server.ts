@@ -488,12 +488,19 @@ function messageFromTableSlotConflictRows(
     : customerJoin?.full_name;
   return (
     formatTableSlotConflictMessage(
-      conflicts.map((row) => ({
-        bookingAt: row.booking_at,
-        startTime: row.start_time ?? row.booking_at,
-        endTime: row.end_time ?? undefined,
-        guestCount: row.guest_count,
-      })),
+      conflicts.map((row) => {
+        const startTime = row.start_time ?? row.booking_at;
+        return {
+          bookingAt: row.booking_at,
+          startTime,
+          endTime:
+            row.end_time ??
+            dayjs(startTime)
+              .add(DEFAULT_BOOKING_RUNTIME_SETTINGS.standardTurnaroundMinutes, "minute")
+              .toISOString(),
+          guestCount: row.guest_count,
+        };
+      }),
       {
         tableName: options.tableName,
         customerName: conflictCustomerName,
