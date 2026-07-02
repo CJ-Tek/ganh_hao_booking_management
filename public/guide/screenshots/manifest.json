@@ -1,0 +1,20 @@
+{
+  "capturedAt": "2026-07-02T07:10:31.940Z",
+  "files": [
+    "select-branch",
+    "dashboard",
+    "floor-map",
+    "bookings",
+    "calendar",
+    "tables",
+    "customers",
+    "notifications",
+    "areas-tables",
+    "booking-rules",
+    "branches",
+    "users",
+    "account",
+    "guide",
+    "login"
+  ]
+}

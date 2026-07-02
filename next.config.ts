@@ -13,6 +13,7 @@ const withPWA = withPWAInit({
 const nextConfig: NextConfig = {
   // PWA plugin injects webpack config; acknowledge Turbopack for `next dev` (Next.js 16+).
   turbopack: {},
+  devIndicators: false,
 };
 
 export default withPWA(nextConfig);

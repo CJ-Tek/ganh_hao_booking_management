@@ -45,6 +45,7 @@ import {
   UserCircle,
   BookOpenText,
   Building2,
+  CircleHelp,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -79,6 +80,7 @@ const navItems: NavItem[] = [
   { label: "Lịch đặt bàn", href: "/calendar", icon: <CalendarDays size={20} /> },
   { label: "Quản lý bàn", href: "/tables", icon: <SquareMenu size={20} /> },
   { label: "Khách hàng", href: "/customers", icon: <Users size={20} /> },
+  { label: "Hướng dẫn", href: "/guide", icon: <CircleHelp size={20} /> },
   { label: "Khu vực", href: "/settings/areas-tables", icon: <Settings size={20} /> },
   {
     label: "Cấu hình Booking hôm nay",
@@ -182,13 +184,15 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     [scopedNotifications]
   );
   const shownNavItems = useMemo(() => {
+    const guideItem = navItems.find((item) => item.href === "/guide");
     if (currentUser?.role === "employee") {
-      return navItems.filter((item) => item.href === "/bookings");
+      return navItems.filter((item) => item.href === "/bookings" || item.href === "/guide");
     }
     if (currentUser?.role === "manager") {
-      return MANAGER_SECTION_HREFS.map((href) => navItems.find((item) => item.href === href)).filter(
-        (item): item is NavItem => Boolean(item)
-      );
+      const managerItems = MANAGER_SECTION_HREFS.map((href) =>
+        navItems.find((item) => item.href === href)
+      ).filter((item): item is NavItem => Boolean(item));
+      return guideItem ? [...managerItems, guideItem] : managerItems;
     }
     const base =
       currentUser?.role === "admin" || currentUser?.role === "general_manager"
