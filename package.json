@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "capture-guide-screenshots": "node scripts/capture-guide-screenshots.mjs",
+    "capture-guide-screenshots:prod": "npm run build && node scripts/capture-guide-screenshots.mjs"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.0",
@@ -33,6 +35,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

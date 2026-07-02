@@ -1,0 +1,32 @@
+.sidebarCol,
+.contentCol {
+  align-self: flex-start;
+}
+
+.sidebarSticky {
+  position: sticky;
+  top: 12px;
+  overflow: hidden;
+}
+
+.sidebarScroll,
+.contentScroll {
+  max-height: calc(100dvh - 280px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sidebarScroll {
+  padding: var(--mantine-spacing-md);
+}
+
+.contentScroll {
+  padding: var(--mantine-spacing-lg);
+}
+
+.sidebarScroll:focus-visible,
+.contentScroll:focus-visible {
+  outline: 2px solid var(--mantine-color-brand-outline);
+  outline-offset: 2px;
+}
