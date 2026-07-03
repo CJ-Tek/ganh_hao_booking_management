@@ -70,6 +70,122 @@ function bookingsContent(role: Role): GuideModuleContent {
   };
 }
 
+function bookingFlowContent(role: Role): GuideModuleContent {
+  if (role === "employee") {
+    return {
+      intro:
+        "Nhân viên dùng màn Đặt bàn để theo dõi suất trong ngày và hỗ trợ kết thúc phục vụ khi khách đã ngồi. Tạo hoặc sửa booking do quản lý ca thực hiện.",
+      steps: [
+        {
+          title: "Mở màn Đặt bàn",
+          body: "Sau đăng nhập, bạn vào thẳng Đặt bàn. Đây là màn hình chính của tài khoản nhân viên.",
+        },
+        {
+          title: "Tab Booking hôm nay",
+          body: "Xem danh sách suất trong ngày. Dùng bộ lọc trạng thái để tìm khách sắp đến (Chờ đến), đã xác nhận, hoặc đang ngồi.",
+        },
+        {
+          title: "Mở chi tiết một booking",
+          body: "Nhấn vào dòng booking để xem giờ đến, số khách, bàn, ghi chú và trạng thái hiện tại.",
+        },
+        {
+          title: "Khi khách đến",
+          body: "Nếu khách hỏi về bàn đã đặt, tìm booking theo tên hoặc SĐT. Báo quản lý ca để check-in hoặc xếp bàn nếu cần — nhân viên không tự tạo/sửa booking.",
+        },
+        {
+          title: "Đánh dấu Hoàn thành",
+          body: "Khi khách đã vào bàn và bàn ở trạng thái Đã ngồi, nhấn Hoàn thành để kết thúc phục vụ và giải phóng bàn.",
+        },
+        {
+          title: "Khi không thấy nút Hoàn thành",
+          body: "Booking có thể chưa check-in hoặc bàn chưa chuyển Đã ngồi. Nhờ quản lý ca xử lý trước khi bạn nhấn Hoàn thành.",
+        },
+        {
+          title: "Khách muốn đặt bàn mới",
+          body: "Chuyển cho quản lý chi nhánh hoặc nhân sự có quyền tạo booking. Bạn có thể ghi chú nhanh: tên, SĐT, số khách, giờ đến để họ nhập vào hệ thống.",
+        },
+      ],
+      tips: [
+        "Luôn đọc Ghi chú trên booking — có thể có yêu cầu đặc biệt (sinh nhật, đoàn, đặt món trước…).",
+        "Kiểm tra đúng booking trước khi nhấn Hoàn thành, tránh nhầm khách.",
+      ],
+    };
+  }
+
+  return {
+    intro:
+      "Hướng dẫn đầy đủ quy trình đặt bàn: từ lúc nhận yêu cầu của khách, tạo booking, xếp bàn, check-in, cho đến khi hoàn thành hoặc hủy.",
+    steps: [
+      {
+        title: "Bước 0 — Kiểm tra chi nhánh",
+        body: "Trên thanh công cụ, xác nhận đúng chi nhánh đang làm việc. Mọi booking bạn tạo đều gắn với chi nhánh hiện tại.",
+      },
+      {
+        title: "Bước 1 — Chọn cách tạo booking",
+        body: "Có 3 cách phổ biến: (1) Nút Tạo booking trên thanh công cụ, (2) Chọn bàn trên Sơ đồ rồi tạo booking, (3) Đặt bàn bằng giọng nói (micro trên form) rồi kiểm tra và lưu.",
+      },
+      {
+        title: "Bước 2 — Điền thông tin khách",
+        body: "Bắt buộc: tên khách và giờ đến. Nên có: số điện thoại (để tìm lại và tránh trùng), số khách, ghi chú (yêu cầu đặc biệt, đặt món trước, sinh nhật…).",
+      },
+      {
+        title: "Bước 3 — Chọn hình thức đặt",
+        body: "Giữ chỗ: khách đến sau, chọn giờ trong tương lai — bàn chuyển Giữ chỗ. Vào bàn ngay: khách có mặt tại quầy — bàn chuyển Đã ngồi, booking chuyển Đã vào bàn.",
+      },
+      {
+        title: "Bước 4 — Gán bàn (hoặc để chờ)",
+        body: "Chọn khu vực + một bàn, hoặc cụm bàn gộp. Có thể để trống bàn → booking ở trạng thái Chờ xếp bàn, gán sau bằng Gán vào bàn hoặc trên Sơ đồ.",
+      },
+      {
+        title: "Bước 5 — Loại khách và ghi chú",
+        body: "Chọn loại khách phù hợp (Khách thường, Khách quen, Đoàn, Sinh nhật, VIP, Đặt món trước…). Ghi chú rõ ràng giúp ca sau nắm yêu cầu mà không cần hỏi lại.",
+      },
+      {
+        title: "Bước 6 — Lưu và xử lý trùng lịch",
+        body: "Nhấn Lưu. Nếu trùng SĐT hoặc trùng khung giờ trên một bàn, hệ thống cảnh báo — kiểm tra booking cũ trước khi tiếp tục tạo.",
+      },
+      {
+        title: "Bước 7 — Theo dõi trên Booking hôm nay",
+        body: "Mở Đặt bàn → tab Booking hôm nay. Lọc theo trạng thái và loại khách. Trạng thái Chờ đến giúp thấy khách sắp tới trong cửa sổ giờ cho phép.",
+      },
+      {
+        title: "Bước 8 — Khách đến đúng giờ: Check-in",
+        body: "Tìm booking (Chờ đến / Đã xác nhận) → nhấn Check-in. Bàn chuyển Đã ngồi; Sơ đồ và Lịch cập nhật; có thể có thông báo nội bộ.",
+      },
+      {
+        title: "Bước 9 — Chưa có bàn: Gán hoặc Chờ",
+        body: "Booking Chờ xếp bàn → Gán vào bàn (chọn bàn trên sơ đồ) hoặc đưa vào Chờ nếu chưa xếp được ngay.",
+      },
+      {
+        title: "Bước 10 — Khách muốn đổi bàn",
+        body: "Mở booking → Đổi bàn → chọn bàn mới trên Sơ đồ, giữ nguyên giờ đến.",
+      },
+      {
+        title: "Bước 11 — Kết thúc phục vụ",
+        body: "Khi khách rời đi, mở booking đang ngồi → Hoàn thành. Bàn trống nếu không còn booking active trên bàn đó.",
+      },
+      {
+        title: "Bước 12 — Hủy hoặc khách không đến",
+        body: "Trước giờ: Hủy bàn. Quá giờ trễ (cuối ngày): có thể chuyển Không đến theo quy tắc hệ thống.",
+      },
+      {
+        title: "Bước 13 — Sửa booking sau khi tạo",
+        body: "Tab Danh sách booking: lọc theo ngày, tìm theo tên/SĐT/bàn/ghi chú → Sửa (tên, SĐT, số khách, giờ, ghi chú). Chỉ sửa được khi booking còn ở trạng thái cho phép (Chờ xếp bàn, Đã xác nhận, Trễ).",
+      },
+      {
+        title: "Hiểu nhanh trạng thái booking",
+        body: "Chờ xếp bàn = chưa có bàn. Đã xác nhận = đã có bàn/giờ, chờ khách. Chờ đến = sắp tới giờ. Đã check-in / Đã vào bàn = khách đang phục vụ. Trễ = quá giờ chưa check-in. Hoàn thành / Đã hủy / Không đến = kết thúc.",
+      },
+    ],
+    tips: [
+      "Khách gọi đặt trước: Giữ chỗ + giờ → gán bàn trên Sơ đồ (hoặc Chờ xếp bàn).",
+      "Khách walk-in: Sơ đồ → bàn trống → Vào bàn ngay.",
+      "Dùng giọng nói khi bận nghe điện thoại — luôn đọc lại form trước khi Lưu.",
+      "Tab Danh sách booking + Xuất Excel hữu ích cho tra cứu và báo cáo.",
+    ],
+  };
+}
+
 function yourRoleContent(role: Role): GuideModuleContent {
   const descriptions: Record<Role, string> = {
     admin:
@@ -212,7 +328,10 @@ function tipsContent(role: Role): GuideModuleContent {
 }
 
 const STATIC_CONTENT: Record<
-  Exclude<GuideModuleId, "your-role" | "bookings" | "workflows" | "tips">,
+  Exclude<
+    GuideModuleId,
+    "your-role" | "bookings" | "booking-flow" | "workflows" | "tips"
+  >,
   GuideModuleContent
 > = {
   start: {
@@ -502,6 +621,9 @@ export function getGuideModuleContent(id: GuideModuleId, role: Role): GuideModul
   }
   if (id === "bookings") {
     return bookingsContent(role);
+  }
+  if (id === "booking-flow") {
+    return bookingFlowContent(role);
   }
   if (id === "workflows") {
     return workflowsContent(role);

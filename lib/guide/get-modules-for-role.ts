@@ -10,8 +10,10 @@ export function resolveGuideModuleId(
   modules: GuideModule[],
   requestedId: string | null | undefined
 ): GuideModuleId {
-  if (requestedId && modules.some((module) => module.id === requestedId)) {
-    return requestedId as GuideModuleId;
+  const normalizedId =
+    requestedId === "booking-order-flow" ? "booking-flow" : requestedId;
+  if (normalizedId && modules.some((module) => module.id === normalizedId)) {
+    return normalizedId as GuideModuleId;
   }
   return modules[0]?.id ?? "start";
 }

@@ -74,6 +74,16 @@ const MODULE_META: GuideModuleMeta[] = [
     screenshotCaption: "Màn Đặt bàn",
   },
   {
+    id: "booking-flow",
+    title: "Quy trình đặt bàn",
+    summary: "Hướng dẫn chi tiết từ tạo booking đến hoàn thành",
+    icon: "GitBranch",
+    roles: ["admin", "general_manager", "manager", "employee"],
+    readMinutes: 7,
+    screenshot: `${SCREENSHOT_BASE}/bookings.png`,
+    screenshotCaption: "Màn Đặt bàn — quản lý suất trong ngày",
+  },
+  {
     id: "calendar",
     title: "Lịch đặt bàn",
     summary: "Xem booking theo ngày hoặc tuần",
