@@ -8,6 +8,7 @@ export type GuideModuleId =
   | "dashboard"
   | "floor-map"
   | "bookings"
+  | "booking-flow"
   | "calendar"
   | "tables"
   | "customers"

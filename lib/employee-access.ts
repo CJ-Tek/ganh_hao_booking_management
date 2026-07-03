@@ -10,6 +10,16 @@ export const EMPLOYEE_MUTATION_BLOCKED =
 /** Booking statuses an employee may complete from the Đặt bàn view. */
 export const EMPLOYEE_COMPLETABLE_BOOKING_STATUSES = ["seated", "checked_in"] as const satisfies readonly BookingStatus[];
 
+/** Booking statuses shown in the employee Đặt bàn view (read-only except completion). */
+export const EMPLOYEE_VISIBLE_BOOKING_STATUSES = [
+  "pending",
+  ...EMPLOYEE_COMPLETABLE_BOOKING_STATUSES,
+] as const satisfies readonly BookingStatus[];
+
+export function isEmployeeVisibleBookingStatus(status: BookingStatus): boolean {
+  return (EMPLOYEE_VISIBLE_BOOKING_STATUSES as readonly BookingStatus[]).includes(status);
+}
+
 export function isEmployeeUser(user: AppUser | null | undefined): boolean {
   return user?.role === "employee";
 }

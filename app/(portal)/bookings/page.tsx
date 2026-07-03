@@ -49,7 +49,10 @@ import { ChangeBookingTableModal } from "@/components/floor-map/change-booking-t
 import { confirmDuplicateBookingSecond } from "@/components/booking-duplicate-confirm";
 import { openPortalModalsConfirmModal } from "@/lib/portal-confirm-modal";
 import { useAppContext } from "@/contexts/app-context";
-import { EMPLOYEE_COMPLETABLE_BOOKING_STATUSES } from "@/lib/employee-access";
+import {
+  EMPLOYEE_VISIBLE_BOOKING_STATUSES,
+  isEmployeeVisibleBookingStatus,
+} from "@/lib/employee-access";
 import {
   bookingSlotKey,
   DUPLICATE_BOOKING_CODE,
@@ -149,7 +152,7 @@ function BookingsPageContent() {
 
   const isEmployee = currentUser?.role === "employee";
   const employeeTodayStatusFilters = useMemo(
-    () => [...EMPLOYEE_COMPLETABLE_BOOKING_STATUSES],
+    () => [...EMPLOYEE_VISIBLE_BOOKING_STATUSES],
     []
   );
 
@@ -1099,10 +1102,7 @@ function BookingsPageContent() {
     return todayBookings
       .filter((booking) => bookingMatchesStatusFilters(booking.status, todayStatusFilters))
       .filter(
-        (booking) =>
-          !isEmployee ||
-          booking.status === "seated" ||
-          booking.status === "checked_in"
+        (booking) => !isEmployee || isEmployeeVisibleBookingStatus(booking.status)
       );
   }, [isEmployee, todayBookings, todayStatusFilters]);
 
@@ -1820,7 +1820,7 @@ function BookingsPageContent() {
       statusFilterStatuses={
         isEmployee ? employeeTodayStatusFilters : bookingListStatusFilterStatuses
       }
-      statusFiltersLocked={isEmployee || isTodaySearchActive}
+      statusFiltersLocked={isTodaySearchActive}
       table={
         <PortalDataTable<Booking>
         records={todayPipelineFilteredBookings}
@@ -1862,7 +1862,7 @@ function BookingsPageContent() {
         }
         noRecordsText={
           isEmployee
-            ? "Chưa có booking nào đang ở trạng thái Đã vào bàn cho hôm nay."
+            ? `Chưa có booking nào ở trạng thái ${BOOKING_PENDING_TABLE_LABEL} hoặc Đã vào bàn cho hôm nay.`
             : todayBookings.length === 0
               ? "Chưa có booking nào cho hôm nay."
               : "Không có booking khớp bộ lọc hiện tại."
@@ -2092,7 +2092,7 @@ function BookingsPageContent() {
   }, [editAreaId, editAssignCandidate, editMergeGroupId, state.bookings, state.mergeGroups]);
 
   const todayEmptyMessage = isEmployee
-    ? "Chưa có booking nào đang ở trạng thái Đã vào bàn cho hôm nay."
+    ? `Chưa có booking nào ở trạng thái ${BOOKING_PENDING_TABLE_LABEL} hoặc Đã vào bàn cho hôm nay.`
     : todayBookings.length === 0
       ? "Chưa có booking nào cho hôm nay."
       : "Không có booking khớp bộ lọc hiện tại.";
@@ -2108,7 +2108,7 @@ function BookingsPageContent() {
       statusFilterStatuses={
         isEmployee ? employeeTodayStatusFilters : bookingListStatusFilterStatuses
       }
-      statusFiltersLocked={isEmployee || isTodaySearchActive}
+      statusFiltersLocked={isTodaySearchActive}
       filtersToolbar={todayFiltersToolbar}
       paginationBar={todayPaginationBar}
       bookingsContent={
