@@ -3,6 +3,10 @@
     {
       "path": "/api/booking-maintenance",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/table-layout-maintenance",
+      "schedule": "59 16 * * *"
     }
   ]
 }

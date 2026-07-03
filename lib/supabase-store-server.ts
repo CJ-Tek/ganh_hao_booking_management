@@ -143,45 +143,21 @@ function parseConfirmedBookingRpcOutcome(
 }
 
 const ACTIVE_TABLE_SLOT_STATUSES: BookingStatus[] = ["confirmed", "seated", "checked_in"];
-const BOOKING_MAINTENANCE_INTERVAL_MS = 60_000;
-let lastBookingMaintenanceAt = 0;
+const ORPHAN_TABLE_RECONCILE_BATCH_SIZE = 64;
 let bookingMaintenanceInFlight: Promise<void> | null = null;
 
 async function maybeRunBookingMaintenance(force = false): Promise<void> {
-  if (
-    !force &&
-    Date.now() - lastBookingMaintenanceAt < BOOKING_MAINTENANCE_INTERVAL_MS
-  ) {
+  if (!force) {
     return;
   }
   if (bookingMaintenanceInFlight) {
     await bookingMaintenanceInFlight;
-    if (!force) {
-      return;
-    }
-  }
-  if (
-    !force &&
-    Date.now() - lastBookingMaintenanceAt < BOOKING_MAINTENANCE_INTERVAL_MS
-  ) {
     return;
   }
-  bookingMaintenanceInFlight = Promise.all([
-    runBookingMaintenanceInSupabase(),
-    releaseExpiredTableMergeGroupsInSupabase(),
-    deleteExpiredTableSplitClonesInSupabase(),
-  ])
-    .then(([bookingResult, mergeResult, splitResult]) => {
-      if (bookingResult.ok) {
-        lastBookingMaintenanceAt = Date.now();
-      } else {
-        console.warn("[booking-maintenance] failed:", bookingResult.message);
-      }
-      if (!mergeResult.ok) {
-        console.warn("[merge-expiry] failed:", mergeResult.message);
-      }
-      if (!splitResult.ok) {
-        console.warn("[split-expiry] failed:", splitResult.message);
+  bookingMaintenanceInFlight = runBookingMaintenanceInSupabase()
+    .then((result) => {
+      if (!result.ok) {
+        console.warn("[booking-maintenance] failed:", result.message);
       }
     })
     .finally(() => {
@@ -962,7 +938,9 @@ export async function fetchSnapshot(options?: {
     return initialState;
   }
 
-  await maybeRunBookingMaintenance(Boolean(options?.forceMaintenance));
+  if (options?.forceMaintenance) {
+    await maybeRunBookingMaintenance(true);
+  }
 
   const client = ensureClient();
   const usersPromise = listAppUsersServer().then((users) => {
@@ -1072,30 +1050,7 @@ export async function fetchSnapshot(options?: {
     mapTableMergeGroupFromRow(row as TableMergeGroupRowLike, membersByGroup.get(row.id) ?? [])
   );
 
-  let tablesRowList = tablesResult.data ?? [];
-  const orphanTableIds = tablesRowList
-    .filter((item) => {
-      const st = item.status as TableStatus;
-      if (st === "locked") {
-        return false;
-      }
-      if (st !== "hold" && st !== "occupied") {
-        return false;
-      }
-      return pickPrimaryBookingOnTable(item.id, bookings) === null;
-    })
-    .map((item) => item.id);
-
-  if (orphanTableIds.length > 0) {
-    const orphanBatch = orphanTableIds.slice(0, 32);
-    await Promise.all(
-      orphanBatch.map((id) => refreshTableAvailabilityForBooking(client, id))
-    );
-    const tablesRefetch = await client.from("tables").select("*");
-    if (!tablesRefetch.error && tablesRefetch.data) {
-      tablesRowList = tablesRefetch.data;
-    }
-  }
+  const tablesRowList = tablesResult.data ?? [];
 
   return {
     users,
@@ -1221,28 +1176,7 @@ export async function fetchFloorMapSliceInSupabase(
     mapTableMergeGroupFromRow(row as TableMergeGroupRowLike, membersByGroup.get(row.id) ?? [])
   );
 
-  let tablesRowList = tablesResult.data ?? [];
-  const orphanTableIds = tablesRowList
-    .filter((item) => {
-      const st = item.status as TableStatus;
-      return st === "hold" || st === "occupied";
-    })
-    .map((item) => item.id);
-
-  if (orphanTableIds.length > 0) {
-    const orphanBatch = orphanTableIds.slice(0, 32);
-    await Promise.all(
-      orphanBatch.map((id) => refreshTableAvailabilityForBooking(client, id))
-    );
-    let tablesRefetch = client.from("tables").select("*");
-    if (scopedBranches.length > 0) {
-      tablesRefetch = tablesRefetch.in("branch_id", scopedBranches);
-    }
-    const refetched = await tablesRefetch;
-    if (!refetched.error && refetched.data) {
-      tablesRowList = refetched.data;
-    }
-  }
+  const tablesRowList = tablesResult.data ?? [];
 
   return {
     areas:
@@ -4282,7 +4216,9 @@ export async function listTableMergeGroupsInSupabase(branchId: string): Promise<
   );
 }
 
-export async function runBookingMaintenanceInSupabase(): Promise<Result> {
+export async function runBookingMaintenanceInSupabase(): Promise<Result & {
+  reconciledTableCount?: number;
+}> {
   const client = ensureClient();
   const { data, error } = await (client as any).rpc("run_booking_maintenance");
   if (error) {
@@ -4290,7 +4226,14 @@ export async function runBookingMaintenanceInSupabase(): Promise<Result> {
   }
   const payload = Array.isArray(data) ? data[0] : data;
   if (!payload || typeof payload !== "object") {
-    return { ok: true, message: "Đã chạy tác vụ bảo trì booking." };
+    const reconcile = await reconcileOrphanTableStatusesInSupabase();
+    return {
+      ok: reconcile.ok,
+      reconciledTableCount: reconcile.reconciledCount,
+      message: reconcile.ok
+        ? `Đã chạy tác vụ bảo trì booking. ${reconcile.message}`
+        : reconcile.message,
+    };
   }
   const noShowCount = Number((payload as { no_show_count?: number }).no_show_count ?? 0);
   const lateCount = Number((payload as { late_count?: number }).late_count ?? 0);
@@ -4307,11 +4250,184 @@ export async function runBookingMaintenanceInSupabase(): Promise<Result> {
     ]);
   }
 
-  const staleSeatedCompleted = await autoCompleteStaleSeatedBookings(client);
+  const [staleSeatedCompleted, reconcile] = await Promise.all([
+    autoCompleteStaleSeatedBookings(client),
+    reconcileOrphanTableStatusesInSupabase(),
+  ]);
+
+  const reconcileNote = reconcile.reconciledCount
+    ? `, ${reconcile.reconciledCount} bàn trạng thái đã đồng bộ`
+    : "";
+
+  return {
+    ok: reconcile.ok,
+    reconciledTableCount: reconcile.reconciledCount,
+    message: reconcile.ok
+      ? `Bảo trì xong: ${lateCount} trễ, ${noShowCount} không đến (cuối ngày), ${expiredOfferCount} offer hết hạn, ${promotedCount} lượt promotion, ${staleSeatedCompleted} bàn Đã ngồi tự hoàn thành${reconcileNote}.`
+      : reconcile.message,
+  };
+}
+
+/** Fix tables stuck on hold/occupied with no active booking (cron-driven). */
+export async function reconcileOrphanTableStatusesInSupabase(): Promise<Result & {
+  reconciledCount?: number;
+}> {
+  const client = ensureClient();
+  const [{ data: tableRows, error: tablesError }, { data: bookingRows, error: bookingsError }] =
+    await Promise.all([
+      client.from("tables").select("id, status"),
+      client.from("bookings").select("id, table_id, status"),
+    ]);
+  if (tablesError) {
+    return { ok: false, message: tablesError.message };
+  }
+  if (bookingsError) {
+    return { ok: false, message: bookingsError.message };
+  }
+
+  const bookingsForPicker = ((bookingRows ?? []) as Array<{
+    id: string;
+    table_id: string | null;
+    status: BookingStatus;
+  }>).map(
+    (row): Booking => ({
+      id: row.id,
+      customerId: "",
+      branchId: "",
+      areaId: null,
+      tableId: row.table_id,
+      guestCount: 0,
+      bookingAt: "",
+      startTime: "",
+      endTime: "",
+      createdByUserId: "",
+      status: row.status,
+    })
+  );
+
+  const orphanTableIds = (tableRows ?? [])
+    .filter((item) => {
+      const status = item.status as TableStatus;
+      if (status === "locked") {
+        return false;
+      }
+      if (status !== "hold" && status !== "occupied") {
+        return false;
+      }
+      return pickPrimaryBookingOnTable(item.id, bookingsForPicker) === null;
+    })
+    .map((item) => item.id)
+    .slice(0, ORPHAN_TABLE_RECONCILE_BATCH_SIZE);
+
+  if (orphanTableIds.length === 0) {
+    return { ok: true, message: "Không có bàn trạng thái lệch.", reconciledCount: 0 };
+  }
+
+  await Promise.all(orphanTableIds.map((id) => refreshTableAvailabilityForBooking(client, id)));
+  return {
+    ok: true,
+    reconciledCount: orphanTableIds.length,
+    message: `Đã đồng bộ ${orphanTableIds.length} bàn trạng thái lệch.`,
+  };
+}
+
+export type TableLayoutMaintenanceResult = {
+  ok: boolean;
+  message: string;
+  merge: Result & { releasedCount?: number };
+  split: Result & { deletedCount?: number; skippedCount?: number };
+  locks: Result & { deletedCount?: number };
+  layouts: Result & { deletedCount?: number };
+};
+
+/** Dissolves expired merge groups, deletes expired split clones, and cleans layout debris. */
+export async function runTableLayoutExpiryMaintenance(): Promise<TableLayoutMaintenanceResult> {
+  const [merge, split, locks, layouts] = await Promise.all([
+    releaseExpiredTableMergeGroupsInSupabase(),
+    deleteExpiredTableSplitClonesInSupabase(),
+    deleteExpiredFloorLayoutLocksInSupabase(),
+    cleanupOrphanMergeManagedFloorLayoutsInSupabase(),
+  ]);
+  const ok = merge.ok && split.ok && locks.ok && layouts.ok;
+  const parts = [merge.message, split.message, locks.message, layouts.message].filter(Boolean);
+  return {
+    ok,
+    message: parts.join(" | "),
+    merge,
+    split,
+    locks,
+    layouts,
+  };
+}
+
+/** Remove edit locks past their TTL. */
+export async function deleteExpiredFloorLayoutLocksInSupabase(): Promise<Result & {
+  deletedCount?: number;
+}> {
+  const client = ensureClient();
+  const { data, error } = await client
+    .from("floor_layout_edit_locks")
+    .delete()
+    .lt("expires_at", new Date().toISOString())
+    .select("area_id");
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  const deletedCount = data?.length ?? 0;
+  return {
+    ok: true,
+    deletedCount,
+    message:
+      deletedCount > 0
+        ? `Đã xóa ${deletedCount} khóa chỉnh sơ đồ hết hạn.`
+        : "Không có khóa chỉnh sơ đồ hết hạn.",
+  };
+}
+
+/** Delete per-day floor layouts tied to merge groups that are no longer valid. */
+export async function cleanupOrphanMergeManagedFloorLayoutsInSupabase(): Promise<Result & {
+  deletedCount?: number;
+}> {
+  const client = ensureClient();
+  const { data: rows, error } = await client
+    .from("area_floor_layout_by_date")
+    .select("id, layout_date, merge_group_id")
+    .not("merge_group_id", "is", null);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+  if (!rows?.length) {
+    return { ok: true, message: "Không có sơ đồ ngày gộp bàn cần dọn.", deletedCount: 0 };
+  }
+
+  const orphanIds: string[] = [];
+  for (const row of rows as Array<{ id: string; layout_date: string; merge_group_id: string }>) {
+    const stillValid = await isMergeManagedDayLayoutStillValid(
+      client,
+      row.layout_date,
+      row.merge_group_id
+    );
+    if (!stillValid) {
+      orphanIds.push(row.id);
+    }
+  }
+
+  if (orphanIds.length === 0) {
+    return { ok: true, message: "Không có sơ đồ ngày gộp bàn cần dọn.", deletedCount: 0 };
+  }
+
+  const { error: deleteError } = await client
+    .from("area_floor_layout_by_date")
+    .delete()
+    .in("id", orphanIds);
+  if (deleteError) {
+    return { ok: false, message: deleteError.message };
+  }
 
   return {
     ok: true,
-    message: `Bảo trì xong: ${lateCount} trễ, ${noShowCount} không đến (cuối ngày), ${expiredOfferCount} offer hết hạn, ${promotedCount} lượt promotion, ${staleSeatedCompleted} bàn Đã ngồi tự hoàn thành.`,
+    deletedCount: orphanIds.length,
+    message: `Đã xóa ${orphanIds.length} sơ đồ ngày gộp bàn không còn hiệu lực.`,
   };
 }
 
