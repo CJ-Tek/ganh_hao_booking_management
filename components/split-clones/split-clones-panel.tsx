@@ -103,7 +103,7 @@ export function SplitClonesPanel({
     for (const booking of bookings) {
       if (
         booking.tableId &&
-        !["completed", "cancelled", "no_show", "late"].includes(booking.status)
+        !["completed", "cancelled", "no_show"].includes(booking.status)
       ) {
         map.set(booking.tableId, (map.get(booking.tableId) ?? 0) + 1);
       }

@@ -481,12 +481,11 @@ function slotStartMs(booking: Pick<Booking, "startTime" | "bookingAt">): number 
   return Number.isFinite(t) ? t : 0;
 }
 
-/** Terminal or queue statuses that do not occupy a table on the floor map. */
+/** Terminal statuses that do not occupy a table on the floor map. */
 export const INACTIVE_FLOOR_MAP_BOOKING_STATUSES: readonly BookingStatus[] = [
   "completed",
   "cancelled",
   "no_show",
-  "late",
 ];
 
 export function isInactiveFloorMapBookingStatus(status: BookingStatus): boolean {
@@ -495,6 +494,38 @@ export function isInactiveFloorMapBookingStatus(status: BookingStatus): boolean 
 
 function isActiveFloorBooking(booking: Booking): boolean {
   return !isInactiveFloorMapBookingStatus(booking.status);
+}
+
+/** Bookings that reserve a table slot on the floor map and in assign/conflict checks. */
+export const TABLE_RESERVATION_BOOKING_STATUSES: readonly BookingStatus[] = [
+  "pending",
+  "confirmed",
+  "late",
+  "seated",
+  "checked_in",
+];
+
+/** Derive live / day-preview table color from active bookings on one table. */
+export function resolveTableStatusFromBookings(
+  bookings: readonly Pick<Booking, "status">[]
+): Exclude<TableStatus, "locked"> {
+  if (bookings.length === 0) {
+    return "available";
+  }
+  if (
+    bookings.some((booking) => booking.status === "seated" || booking.status === "checked_in")
+  ) {
+    return "occupied";
+  }
+  if (bookings.some((booking) => booking.status === "late")) {
+    return "late";
+  }
+  return "hold";
+}
+
+/** Table is reserved (not walk-in available) on the floor map. */
+export function isTableReservedForFloorOps(status: TableStatus): boolean {
+  return status === "hold" || status === "late" || status === "occupied";
 }
 
 export function canAssignBookingFromQueue(booking: Pick<Booking, "status">): boolean {
@@ -514,6 +545,114 @@ export function canQueueBooking(
     booking.status === "seated" ||
     booking.status === "checked_in"
   );
+}
+
+/** Bookings that still hold a table slot. */
+const TABLE_OCCUPYING_BOOKING_STATUSES: readonly BookingStatus[] = [
+  ...TABLE_RESERVATION_BOOKING_STATUSES,
+];
+
+function resolveAssignedTableIdsForCheckIn(
+  booking: Pick<Booking, "tableId" | "mergeGroupId">,
+  mergeGroups?: readonly Pick<TableMergeGroup, "id" | "tableIds">[]
+): string[] {
+  if (booking.mergeGroupId && mergeGroups) {
+    const group = mergeGroups.find((item) => item.id === booking.mergeGroupId);
+    if (group) {
+      return group.tableIds;
+    }
+  }
+  return booking.tableId ? [booking.tableId] : [];
+}
+
+/** True when another guest is already seated at the late booking's assigned table(s). */
+export function hasOtherSeatedBookingAtAssignedTable(
+  booking: Pick<Booking, "id" | "tableId" | "mergeGroupId" | "areaId">,
+  allBookings: readonly Booking[],
+  options?: {
+    mergeGroups?: readonly Pick<TableMergeGroup, "id" | "tableIds">[];
+  }
+): boolean {
+  const tableIds = resolveAssignedTableIdsForCheckIn(booking, options?.mergeGroups);
+  if (tableIds.length === 0) {
+    return false;
+  }
+  const tableIdSet = new Set(tableIds);
+
+  return allBookings.some((other) => {
+    if (other.id === booking.id || !other.tableId || !tableIdSet.has(other.tableId)) {
+      return false;
+    }
+    return other.status === "seated" || other.status === "checked_in";
+  });
+}
+
+/** @deprecated Use {@link hasOtherSeatedBookingAtAssignedTable} for late check-in guards. */
+export function hasOtherBookingAtAssignedTable(
+  booking: Pick<Booking, "id" | "tableId" | "mergeGroupId" | "areaId">,
+  allBookings: readonly Booking[],
+  options?: {
+    mergeGroups?: readonly Pick<TableMergeGroup, "id" | "tableIds">[];
+  }
+): boolean {
+  const tableIds = resolveAssignedTableIdsForCheckIn(booking, options?.mergeGroups);
+  if (tableIds.length === 0) {
+    return false;
+  }
+  const tableIdSet = new Set(tableIds);
+
+  return allBookings.some((other) => {
+    if (other.id === booking.id || !other.tableId || !tableIdSet.has(other.tableId)) {
+      return false;
+    }
+    if (booking.mergeGroupId && other.mergeGroupId === booking.mergeGroupId) {
+      return false;
+    }
+    return (TABLE_OCCUPYING_BOOKING_STATUSES as readonly string[]).includes(other.status);
+  });
+}
+
+/** Confirmed bookings always qualify; late guests check in when their reserved table is still theirs. */
+export function canCheckInBooking(
+  booking: Pick<Booking, "id" | "status" | "tableId" | "mergeGroupId" | "areaId">,
+  allBookings: readonly Booking[],
+  options?: {
+    mergeGroups?: readonly Pick<TableMergeGroup, "id" | "tableIds">[];
+  }
+): boolean {
+  if (booking.status === "confirmed") {
+    return true;
+  }
+  if (booking.status !== "late") {
+    return false;
+  }
+  if (!isBookingTableAssigned(booking)) {
+    return false;
+  }
+  return !hasOtherSeatedBookingAtAssignedTable(booking, allBookings, options);
+}
+
+export function checkInBookingDisabledReason(
+  booking: Pick<Booking, "id" | "status" | "tableId" | "mergeGroupId" | "areaId">,
+  allBookings: readonly Booking[],
+  options?: {
+    mergeGroups?: readonly Pick<TableMergeGroup, "id" | "tableIds">[];
+  }
+): string | null {
+  if (canCheckInBooking(booking, allBookings, options)) {
+    return null;
+  }
+  if (
+    booking.status === "late" &&
+    isBookingTableAssigned(booking) &&
+    hasOtherSeatedBookingAtAssignedTable(booking, allBookings, options)
+  ) {
+    return "Bàn đã có khách khác đang ngồi. Vui lòng xử lý trước khi check-in.";
+  }
+  if (booking.status === "late") {
+    return "Booking trễ cần được gán bàn trước khi check-in.";
+  }
+  return "Chỉ check-in khi booking đã xác nhận.";
 }
 
 export function minutesLateForBooking(
@@ -544,7 +683,25 @@ export function tableHasActiveBookingOnFloorDay(
   });
 }
 
-/** Prefer in-table seated guest, else soonest confirmed, else any active booking on the table. */
+function pickPrimaryFromTableBookings(onTable: readonly Booking[]): Booking | null {
+  if (onTable.length === 0) {
+    return null;
+  }
+  const checkedIn = onTable.filter(
+    (booking) => booking.status === "checked_in" || booking.status === "seated"
+  );
+  const late = onTable.filter((booking) => booking.status === "late");
+  const confirmed = onTable.filter((booking) => booking.status === "confirmed");
+  const pool =
+    checkedIn.length > 0 ? checkedIn : late.length > 0 ? late : confirmed.length > 0 ? confirmed : onTable;
+  const sorted = [...pool].sort((a, b) => slotStartMs(a) - slotStartMs(b));
+  if (checkedIn.length > 0) {
+    return sorted[sorted.length - 1] ?? null;
+  }
+  return sorted[0] ?? null;
+}
+
+/** Prefer in-table seated guest, else late hold, else soonest confirmed, else any active booking on the table. */
 export function pickPrimaryBookingOnTable(
   tableId: string,
   bookings: readonly Booking[]
@@ -554,26 +711,12 @@ export function pickPrimaryBookingOnTable(
       b.tableId === tableId &&
       b.status !== "cancelled" &&
       b.status !== "completed" &&
-      b.status !== "no_show" &&
-      b.status !== "late"
+      b.status !== "no_show"
   );
-  if (onTable.length === 0) {
-    return null;
-  }
-  const checkedIn = onTable.filter((b) => b.status === "checked_in" || b.status === "seated");
-  const pool =
-    checkedIn.length > 0
-      ? checkedIn
-      : onTable.filter((b) => b.status === "confirmed");
-  const finalPool = pool.length > 0 ? pool : onTable;
-  const sorted = [...finalPool].sort((a, b) => slotStartMs(a) - slotStartMs(b));
-  if (checkedIn.length > 0) {
-    return sorted[sorted.length - 1] ?? null;
-  }
-  return sorted[0] ?? null;
+  return pickPrimaryFromTableBookings(onTable);
 }
 
-/** Prefer seated/checked-in on the merge group, else soonest confirmed, else any active booking. */
+/** Prefer seated/checked-in on the merge group, else late hold, else soonest confirmed, else any active booking. */
 export function pickPrimaryBookingOnMergeGroup(
   mergeGroupId: string,
   bookings: readonly Booking[]
@@ -581,22 +724,7 @@ export function pickPrimaryBookingOnMergeGroup(
   const onGroup = bookings.filter(
     (booking) => booking.mergeGroupId === mergeGroupId && isActiveFloorBooking(booking)
   );
-  if (onGroup.length === 0) {
-    return null;
-  }
-  const checkedIn = onGroup.filter(
-    (booking) => booking.status === "checked_in" || booking.status === "seated"
-  );
-  const pool =
-    checkedIn.length > 0
-      ? checkedIn
-      : onGroup.filter((booking) => booking.status === "confirmed");
-  const finalPool = pool.length > 0 ? pool : onGroup;
-  const sorted = [...finalPool].sort((a, b) => slotStartMs(a) - slotStartMs(b));
-  if (checkedIn.length > 0) {
-    return sorted[sorted.length - 1] ?? null;
-  }
-  return sorted[0] ?? null;
+  return pickPrimaryFromTableBookings(onGroup);
 }
 
 /** True when the merge group has at least one active booking on the selected calendar day. */
@@ -658,8 +786,8 @@ export function deriveMergeMemberTableStatusFromDayBookings(
   }
 
   const groupStatus = deriveMergeGroupStatusFromDayBookings(mergeGroupId, dayBookings);
-  if (groupStatus === "occupied") {
-    return "occupied";
+  if (groupStatus === "occupied" || groupStatus === "late") {
+    return groupStatus;
   }
 
   const memberOwnStatus = deriveTableStatusFromDayBookings(
@@ -687,28 +815,12 @@ export function pickPrimaryBookingOnTableForFloorDisplay(
       booking.status !== "cancelled" &&
       booking.status !== "completed" &&
       booking.status !== "no_show" &&
-      booking.status !== "late" &&
       !(
         options?.excludeMergeGroupId &&
         isMergeGroupBookingOnMemberTable(booking, tableId, options.excludeMergeGroupId)
       )
   );
-  if (eligible.length === 0) {
-    return null;
-  }
-  const checkedIn = eligible.filter(
-    (booking) => booking.status === "checked_in" || booking.status === "seated"
-  );
-  const pool =
-    checkedIn.length > 0
-      ? checkedIn
-      : eligible.filter((booking) => booking.status === "confirmed");
-  const finalPool = pool.length > 0 ? pool : eligible;
-  const sorted = [...finalPool].sort((a, b) => slotStartMs(a) - slotStartMs(b));
-  if (checkedIn.length > 0) {
-    return sorted[sorted.length - 1] ?? null;
-  }
-  return sorted[0] ?? null;
+  return pickPrimaryFromTableBookings(eligible);
 }
 
 /**
@@ -737,13 +849,17 @@ export function pickPrimaryBookingForFloorTableBlock(
 
   if (
     memberOwn &&
-    (memberOwn.status === "checked_in" || memberOwn.status === "seated")
+    (memberOwn.status === "checked_in" ||
+      memberOwn.status === "seated" ||
+      memberOwn.status === "late")
   ) {
     return memberOwn;
   }
   if (
     mergeBooking &&
-    (mergeBooking.status === "checked_in" || mergeBooking.status === "seated")
+    (mergeBooking.status === "checked_in" ||
+      mergeBooking.status === "seated" ||
+      mergeBooking.status === "late")
   ) {
     return mergeBooking;
   }
@@ -801,13 +917,7 @@ export function deriveMergeGroupStatusFromDayBookings(
   const onGroup = dayBookings.filter(
     (booking) => booking.mergeGroupId === mergeGroupId && isActiveFloorBooking(booking)
   );
-  if (onGroup.length === 0) {
-    return "available";
-  }
-  const hasSeated = onGroup.some(
-    (booking) => booking.status === "seated" || booking.status === "checked_in"
-  );
-  return hasSeated ? "occupied" : "hold";
+  return resolveTableStatusFromBookings(onGroup);
 }
 
 /** Member tables with their own seated guests (excludes cluster booking rows on member table_id). */
@@ -905,17 +1015,12 @@ export function deriveTableStatusFromDayBookings(
       booking.tableId === table.id &&
       booking.status !== "cancelled" &&
       booking.status !== "completed" &&
-      booking.status !== "no_show" &&
-      booking.status !== "late"
+      booking.status !== "no_show"
   );
   if (onTable.length === 0) {
-    // Do not use global `tables.status` (hold/occupied) — it reflects live ops, not the selected day.
     return "available";
   }
-  const hasSeated = onTable.some(
-    (booking) => booking.status === "seated" || booking.status === "checked_in"
-  );
-  return hasSeated ? "occupied" : "hold";
+  return resolveTableStatusFromBookings(onTable);
 }
 
 /** Keep in sync with `DEFAULT_BOOKING_RUNTIME_SETTINGS.standardTurnaroundMinutes` in `supabase-store`. */
@@ -926,12 +1031,7 @@ function reservationBlocksAssignableSlot(item: Booking): boolean {
   if (item.tableId == null) {
     return false;
   }
-  return (
-    item.status === "confirmed" ||
-    item.status === "seated" ||
-    item.status === "checked_in" ||
-    item.status === "pending"
-  );
+  return (TABLE_RESERVATION_BOOKING_STATUSES as readonly string[]).includes(item.status);
 }
 
 function normalizeBookingSlotMs(booking: Pick<Booking, "startTime" | "endTime" | "bookingAt">): {

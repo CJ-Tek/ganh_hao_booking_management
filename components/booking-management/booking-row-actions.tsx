@@ -3,7 +3,13 @@
 import { Button, Group } from "@mantine/core";
 import { BookingCheckInButton } from "@/components/booking-management/booking-check-in-button";
 import { canChangeBookingTable, canEditBookingOrder } from "@/components/booking-management/shared";
-import { canAssignBookingFromQueue, canQueueBooking } from "@/lib/booking-meta";
+import { useAppContext } from "@/contexts/app-context";
+import {
+  canAssignBookingFromQueue,
+  canCheckInBooking,
+  canQueueBooking,
+  checkInBookingDisabledReason,
+} from "@/lib/booking-meta";
 import { type Booking } from "@/lib/types";
 
 export function BookingRowActions(props: {
@@ -39,6 +45,15 @@ export function BookingRowActions(props: {
     onCancel,
     onQueue,
   } = props;
+
+  const { state } = useAppContext();
+  const checkInAllowed = canCheckInBooking(booking, state.bookings, {
+    mergeGroups: state.mergeGroups,
+  });
+  const checkInDisabledReason =
+    checkInBookingDisabledReason(booking, state.bookings, {
+      mergeGroups: state.mergeGroups,
+    }) ?? undefined;
 
   if (
     booking.status === "cancelled" ||
@@ -117,7 +132,8 @@ export function BookingRowActions(props: {
   const checkInAction = (
     <BookingCheckInButton
       size={size}
-      disabled={booking.status !== "confirmed"}
+      disabled={!checkInAllowed}
+      disabledReason={checkInDisabledReason}
       loading={busy}
       onCheckIn={() => onCheckIn(booking.id)}
       fullWidth={layout === "drawer" && !showCancel && !queueAction}

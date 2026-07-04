@@ -15,6 +15,7 @@ import classes from "@/app/(portal)/floor-map/page.module.css";
 const TABLE_STATUS_SURFACE_CLASS: Record<TableStatus, string> = {
   available: classes.statusSurface_available,
   hold: classes.statusSurface_hold,
+  late: classes.statusSurface_late,
   occupied: classes.statusSurface_occupied,
   locked: classes.statusSurface_locked,
 };
@@ -107,7 +108,8 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
 
   const guestBadgeBooking = bookingGuestBadge ?? displayBooking;
   const isAvailableEmpty = table.status === "available";
-  const useStackedFooter = table.status === "hold" || table.status === "occupied";
+  const useStackedFooter =
+    table.status === "hold" || table.status === "late" || table.status === "occupied";
   const hideMergeMemberAvailableExtras = isMergeMember && isAvailableEmpty;
 
   const statusFooter = (
@@ -154,6 +156,7 @@ function FloorTableBlockViewInner(props: FloorTableBlockViewProps) {
   const showBookingPeek =
     !hideBookingPeek &&
     table.status !== "hold" &&
+    table.status !== "late" &&
     table.status !== "occupied" &&
     Boolean(displayBooking);
 

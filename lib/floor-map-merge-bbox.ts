@@ -3,6 +3,7 @@ import {
   FLOOR_TABLE_BLOCK_WIDTH_PX,
 } from "@/lib/floor-map-layout";
 import { gridCellCenterPx, type FloorMapRglGridConfig } from "@/lib/floor-map-rgl";
+import type { TableStatus } from "@/lib/types";
 
 export const MERGE_GROUP_HEADER_BASE_HEIGHT_PX = 28;
 export const MERGE_GROUP_HEADER_BOOKED_HEIGHT_PX = 54;
@@ -118,12 +119,10 @@ export function mergeMemberBorderStyleFromMask(
   };
 }
 
-const MERGE_MEMBER_BORDER_BY_STATUS: Record<
-  "available" | "hold" | "occupied" | "locked",
-  string
-> = {
+const MERGE_MEMBER_BORDER_BY_STATUS: Record<TableStatus, string> = {
   available: "rgba(32, 201, 151, 0.55)",
   hold: "rgba(250, 197, 21, 0.65)",
+  late: "rgba(240, 101, 149, 0.65)",
   occupied: "rgba(151, 112, 215, 0.55)",
   locked: "rgba(100, 116, 139, 0.55)",
 };

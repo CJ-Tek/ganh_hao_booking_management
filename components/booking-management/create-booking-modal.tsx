@@ -133,7 +133,7 @@ export function CreateBookingModal({
     }
     return state.bookings
       .filter((booking) => booking.branchId === createBranchId)
-      .filter((booking) => !["cancelled", "completed", "no_show", "late"].includes(booking.status))
+      .filter((booking) => !["cancelled", "completed", "no_show"].includes(booking.status))
       .map((booking) => {
         const customer = state.customers.find((item) => item.id === booking.customerId);
         if (!customer?.phone) {

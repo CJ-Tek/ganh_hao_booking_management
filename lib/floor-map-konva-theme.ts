@@ -15,6 +15,11 @@ export const tableStatusKonvaStyle: Record<
     stroke: "rgba(250, 197, 21, 0.9)",
     label: "#7a5c00",
   },
+  late: {
+    fill: "rgba(255, 240, 246, 0.96)",
+    stroke: "rgba(240, 101, 149, 0.9)",
+    label: "#a61e4d",
+  },
   occupied: {
     fill: "rgba(245, 240, 252, 0.96)",
     stroke: "rgba(151, 112, 215, 0.85)",

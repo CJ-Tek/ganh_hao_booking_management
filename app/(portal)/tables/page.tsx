@@ -520,7 +520,7 @@ function TablesPageContent() {
     return state.bookings.filter(
       (booking) =>
         booking.tableId === splitCloneDeleteTarget &&
-        !["completed", "cancelled", "no_show", "late"].includes(booking.status)
+        !["completed", "cancelled", "no_show"].includes(booking.status)
     ).length;
   }, [splitCloneDeleteTarget, state.bookings]);
 
@@ -643,7 +643,7 @@ function TablesPageContent() {
             }}
             data={[
               { value: "all", label: "Tất cả" },
-              ...(["available", "hold", "occupied", "locked"] as TableStatus[]).map((status) => ({
+              ...(["available", "hold", "late", "occupied", "locked"] as TableStatus[]).map((status) => ({
                 value: status,
                 label: tableStatusLabel[status],
               })),

@@ -143,6 +143,11 @@
   border-color: rgba(250, 197, 21, 0.65);
 }
 
+.statusSurface_late {
+  background-color: rgba(255, 240, 246, 0.96);
+  border-color: rgba(240, 101, 149, 0.65);
+}
+
 .statusSurface_occupied {
   background-color: rgba(245, 240, 252, 0.96);
   border-color: rgba(151, 112, 215, 0.55);
@@ -232,6 +237,7 @@
 }
 
 .statusSurface_hold .tableBlockCustomerName,
+.statusSurface_late .tableBlockCustomerName,
 .statusSurface_occupied .tableBlockCustomerName {
   font-size: 21px;
   line-height: 1.15;
@@ -245,6 +251,7 @@
 }
 
 .statusSurface_hold .tableBlockTableName,
+.statusSurface_late .tableBlockTableName,
 .statusSurface_occupied .tableBlockTableName {
   font-size: 17px;
   line-height: 1.2;
@@ -819,6 +826,11 @@
   border-color: rgba(250, 197, 21, 0.65);
 }
 
+.mergeGroupContainer.statusSurface_late {
+  background-color: rgba(255, 240, 246, 0.78);
+  border-color: rgba(240, 101, 149, 0.65);
+}
+
 .mergeGroupContainer.statusSurface_occupied {
   background-color: rgba(245, 240, 252, 0.78);
   border-color: rgba(151, 112, 215, 0.55);
@@ -865,6 +877,12 @@
   border-bottom-color: rgba(250, 197, 21, 0.35);
 }
 
+.mergeGroupHeaderLayer.statusSurface_late .mergeGroupContainerHeader,
+.mergeGroupHeaderLayer.statusSurface_late .mergeGroupContainerHeaderClickable {
+  background: rgba(255, 240, 246, 0.98);
+  border-bottom-color: rgba(240, 101, 149, 0.35);
+}
+
 .mergeGroupHeaderLayer.statusSurface_occupied .mergeGroupContainerHeader,
 .mergeGroupHeaderLayer.statusSurface_occupied .mergeGroupContainerHeaderClickable {
   background: rgba(245, 240, 252, 0.98);
@@ -889,6 +907,12 @@
   border-bottom-color: rgba(250, 197, 21, 0.35);
 }
 
+.mergeGroupContainer.statusSurface_late .mergeGroupContainerHeader,
+.mergeGroupContainer.statusSurface_late .mergeGroupContainerHeaderClickable {
+  background: rgba(255, 240, 246, 0.98);
+  border-bottom-color: rgba(240, 101, 149, 0.35);
+}
+
 .mergeGroupContainer.statusSurface_occupied .mergeGroupContainerHeader,
 .mergeGroupContainer.statusSurface_occupied .mergeGroupContainerHeaderClickable {
   background: rgba(245, 240, 252, 0.98);
@@ -909,6 +933,11 @@
 :global([data-mantine-color-scheme="dark"]) .mergeGroupContainer.statusSurface_hold {
   background-color: rgba(58, 48, 20, 0.88);
   border-color: rgba(250, 197, 21, 0.45);
+}
+
+:global([data-mantine-color-scheme="dark"]) .mergeGroupContainer.statusSurface_late {
+  background-color: rgba(58, 24, 40, 0.88);
+  border-color: rgba(240, 101, 149, 0.45);
 }
 
 :global([data-mantine-color-scheme="dark"]) .mergeGroupContainer.statusSurface_occupied {
@@ -939,6 +968,16 @@
   .mergeGroupContainerHeaderClickable {
   background: rgba(58, 48, 20, 0.96);
   border-bottom-color: rgba(250, 197, 21, 0.3);
+}
+
+:global([data-mantine-color-scheme="dark"])
+  .mergeGroupHeaderLayer.statusSurface_late
+  .mergeGroupContainerHeader,
+:global([data-mantine-color-scheme="dark"])
+  .mergeGroupHeaderLayer.statusSurface_late
+  .mergeGroupContainerHeaderClickable {
+  background: rgba(58, 24, 40, 0.96);
+  border-bottom-color: rgba(240, 101, 149, 0.3);
 }
 
 :global([data-mantine-color-scheme="dark"])
@@ -979,6 +1018,16 @@
   .mergeGroupContainerHeaderClickable {
   background: rgba(58, 48, 20, 0.96);
   border-bottom-color: rgba(250, 197, 21, 0.3);
+}
+
+:global([data-mantine-color-scheme="dark"])
+  .mergeGroupContainer.statusSurface_late
+  .mergeGroupContainerHeader,
+:global([data-mantine-color-scheme="dark"])
+  .mergeGroupContainer.statusSurface_late
+  .mergeGroupContainerHeaderClickable {
+  background: rgba(58, 24, 40, 0.96);
+  border-bottom-color: rgba(240, 101, 149, 0.3);
 }
 
 :global([data-mantine-color-scheme="dark"])
@@ -1300,6 +1349,7 @@ button.mergeGroupContainerHeaderClickable:hover .mergeGroupContainerTitle {
 
 .tableBlockMergeMemberSurface .tableBlockCustomerName,
 .tableBlockMergeMemberSurface.statusSurface_hold .tableBlockCustomerName,
+.tableBlockMergeMemberSurface.statusSurface_late .tableBlockCustomerName,
 .tableBlockMergeMemberSurface.statusSurface_occupied .tableBlockCustomerName {
   font-size: 21px;
   line-height: 1.2;
@@ -1307,6 +1357,7 @@ button.mergeGroupContainerHeaderClickable:hover .mergeGroupContainerTitle {
 
 .tableBlockMergeMemberSurface .tableBlockTableName,
 .tableBlockMergeMemberSurface.statusSurface_hold .tableBlockTableName,
+.tableBlockMergeMemberSurface.statusSurface_late .tableBlockTableName,
 .tableBlockMergeMemberSurface.statusSurface_occupied .tableBlockTableName {
   font-size: 12px;
   line-height: 1.2;

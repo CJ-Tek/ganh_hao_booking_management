@@ -1,6 +1,8 @@
 import dayjs from "dayjs";
 import {
+  resolveTableStatusFromBookings,
   shouldAutoSeatOnCreate,
+  TABLE_RESERVATION_BOOKING_STATUSES,
   type BookingArrivalIntent,
 } from "@/lib/booking-meta";
 import type {
@@ -11,14 +13,6 @@ import type {
   Customer,
   TableStatus,
 } from "@/lib/types";
-
-/** Bookings that tie a table (hold or occupied). Mirrors server `TABLE_RESERVATION_BOOKING_STATUSES`. */
-const TABLE_RESERVATION_BOOKING_STATUSES: BookingStatus[] = [
-  "pending",
-  "confirmed",
-  "seated",
-  "checked_in",
-];
 
 /** Same rule as `refreshTableAvailabilityForBooking` / floor-map derivation. */
 export function computeTableStatusFromBookings(
@@ -31,15 +25,10 @@ export function computeTableStatusFromBookings(
   }
   const onTable = bookings.filter(
     (booking) =>
-      booking.tableId === tableId && TABLE_RESERVATION_BOOKING_STATUSES.includes(booking.status)
+      booking.tableId === tableId &&
+      (TABLE_RESERVATION_BOOKING_STATUSES as readonly string[]).includes(booking.status)
   );
-  if (onTable.length === 0) {
-    return "available";
-  }
-  const hasSeated = onTable.some(
-    (booking) => booking.status === "seated" || booking.status === "checked_in"
-  );
-  return hasSeated ? "occupied" : "hold";
+  return resolveTableStatusFromBookings(onTable);
 }
 
 function sortBookings(bookings: Booking[]): Booking[] {

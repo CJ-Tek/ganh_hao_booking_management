@@ -168,10 +168,11 @@ async function maybeRunBookingMaintenance(force = false): Promise<void> {
 /** Bookings eligible for table assignment from queue (pending / Trễ). */
 const ASSIGN_QUEUE_BOOKING_STATUSES: BookingStatus[] = ["pending", "late"];
 
-/** Bookings that tie a table (show as hold or occupied, not trống). */
+/** Bookings that tie a table (show as hold, trễ, or occupied, not trống). */
 const TABLE_RESERVATION_BOOKING_STATUSES: BookingStatus[] = [
   "pending",
   "confirmed",
+  "late",
   "seated",
   "checked_in",
 ];
@@ -770,7 +771,8 @@ async function refreshTableAvailabilityForBooking(
   const hasSeated = rows.some(
     (r: { status: string }) => r.status === "seated" || r.status === "checked_in"
   );
-  const nextStatus: TableStatus = hasSeated ? "occupied" : "hold";
+  const hasLate = rows.some((r: { status: string }) => r.status === "late");
+  const nextStatus: TableStatus = hasSeated ? "occupied" : hasLate ? "late" : "hold";
   await client.from("tables").update({ status: nextStatus }).eq("id", tableId);
 }
 
@@ -884,7 +886,7 @@ async function refreshTablesTouchedByRecentNoShows(
   await Promise.all(ids.map((id) => refreshTableAvailabilityForBooking(client, id)));
 }
 
-/** Auto-late keeps table_id as a reminder; refresh so the physical table is freed on the floor map. */
+/** Auto-late keeps table_id; refresh so member tables show Trễ on the floor map. */
 async function refreshTablesTouchedByRecentLateMarks(
   client: ReturnType<typeof ensureClient>,
   sinceIso: string
@@ -4325,7 +4327,7 @@ export async function reconcileOrphanTableStatusesInSupabase(): Promise<Result &
       if (status === "locked") {
         return false;
       }
-      if (status !== "hold" && status !== "occupied") {
+      if (status !== "hold" && status !== "late" && status !== "occupied") {
         return false;
       }
       return pickPrimaryBookingOnTable(item.id, bookingsForPicker) === null;

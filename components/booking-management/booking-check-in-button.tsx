@@ -6,12 +6,21 @@ import type { CSSProperties } from "react";
 export function BookingCheckInButton(props: {
   size: "compact-xs" | "sm";
   disabled: boolean;
+  disabledReason?: string;
   loading?: boolean;
   onCheckIn: () => void;
   style?: CSSProperties;
   fullWidth?: boolean;
 }) {
-  const { size, disabled, loading = false, onCheckIn, style, fullWidth = false } = props;
+  const {
+    size,
+    disabled,
+    disabledReason = "Chỉ check-in khi booking đã xác nhận.",
+    loading = false,
+    onCheckIn,
+    style,
+    fullWidth = false,
+  } = props;
   const btn = (
     <Button
       size={size}
@@ -30,7 +39,7 @@ export function BookingCheckInButton(props: {
     return btn;
   }
   return (
-    <Tooltip label="Chỉ check-in khi booking đã xác nhận." withArrow>
+    <Tooltip label={disabledReason} withArrow>
       <span style={{ display: "inline-flex", minWidth: 0, ...style }}>{btn}</span>
     </Tooltip>
   );

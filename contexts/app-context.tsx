@@ -670,7 +670,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       };
     };
 
-    const tableStatuses: TableStatus[] = ["available", "hold", "occupied", "locked"];
+    const tableStatuses: TableStatus[] = ["available", "hold", "late", "occupied", "locked"];
 
     const mapRealtimeTable = (row: RealtimeRow): DiningTable | null => {
       const id = row.id;

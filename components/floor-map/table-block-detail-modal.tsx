@@ -17,6 +17,7 @@ import { canChangeBookingTable } from "@/components/booking-management/shared";
 import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import { useAppContext } from "@/contexts/app-context";
 import {
+  canCheckInBooking,
   canQueueBooking,
   getReceptionBookingStatus,
   inferGuestTypeLabel,
@@ -111,6 +112,9 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
   const isOccupied = displayStatus === "occupied";
   const mergeMemberOccupiedBlocksCheckIn =
     isMerge && mergeMemberOccupiedTableNames.length > 0;
+  const checkInAllowed =
+    activeBooking != null &&
+    canCheckInBooking(activeBooking, state.bookings, { mergeGroups: state.mergeGroups });
 
   useEffect(() => {
     if (!opened) {
@@ -324,10 +328,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                               size="sm"
                               variant="filled"
                               color="green"
-                              disabled={
-                                activeBooking.status !== "confirmed" ||
-                                mergeMemberOccupiedBlocksCheckIn
-                              }
+                              disabled={!checkInAllowed || mergeMemberOccupiedBlocksCheckIn}
                               loading={bookingActionLoading}
                               onClick={onCheckIn}
                             >
