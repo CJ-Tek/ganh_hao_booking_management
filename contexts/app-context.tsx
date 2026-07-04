@@ -211,6 +211,7 @@ interface AppContextValue {
     bookingId: string;
     bookingAt: string;
     guestCount?: number;
+    customerName?: string;
     customerPhone?: string;
     areaId: string | null;
     tableId: string | null;
@@ -1524,6 +1525,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     bookingId: string;
     bookingAt: string;
     guestCount?: number;
+    customerName?: string;
     customerPhone?: string;
     areaId: string | null;
     tableId: string | null;
@@ -1550,6 +1552,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!canOperateBookingInBranch(currentUser, booking.branchId, state.activeBranchId)) {
       return { ok: false, message: "Bạn không có quyền chỉnh booking của chi nhánh này." };
     }
+    const existingCustomer = state.customers.find((item) => item.id === booking.customerId);
+    const previousCustomerName = existingCustomer?.fullName;
     const revertPatch: Partial<Booking> = {
       bookingAt: booking.bookingAt,
       startTime: booking.startTime,
@@ -1573,7 +1577,19 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
 
     setState((prev) => {
       const next = applyBookingPatchToSnapshot(prev, input.bookingId, optimisticPatch);
-      return next ?? prev;
+      if (!next) {
+        return prev;
+      }
+      const trimmedName = input.customerName?.trim();
+      if (!trimmedName || !booking.customerId || trimmedName === previousCustomerName) {
+        return next;
+      }
+      return {
+        ...next,
+        customers: next.customers.map((customer) =>
+          customer.id === booking.customerId ? { ...customer, fullName: trimmedName } : customer
+        ),
+      };
     });
 
     const result = await updateBookingOrderInSupabase({
@@ -1583,7 +1599,20 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     if (!result.ok) {
       setState((prev) => {
         const next = applyBookingPatchToSnapshot(prev, input.bookingId, revertPatch);
-        return next ?? prev;
+        if (!next) {
+          return prev;
+        }
+        if (previousCustomerName === undefined || !booking.customerId) {
+          return next;
+        }
+        return {
+          ...next,
+          customers: next.customers.map((customer) =>
+            customer.id === booking.customerId
+              ? { ...customer, fullName: previousCustomerName }
+              : customer
+          ),
+        };
       });
     }
     return result;

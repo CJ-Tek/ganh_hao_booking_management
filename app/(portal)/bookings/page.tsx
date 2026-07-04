@@ -9,7 +9,6 @@ import {
   Divider,
   Drawer,
   Group,
-  Modal,
   Stack,
   Tabs,
   Text,
@@ -99,6 +98,7 @@ import { validateMergeGroupDateRange } from "@/lib/merge-group-utils";
 import { bookingCardBusyProps, bookingListRowStyle } from "@/lib/busy-row-style";
 import { useBusyId } from "@/lib/use-busy-id";
 import { usePortalCompact } from "@/lib/use-portal-compact";
+import { finalizeCustomerName } from "@/lib/voice-booking/format";
 import { type Booking, type BookingStatus } from "@/lib/types";
 
 function branchScopeKey(branchIds: string[]) {
@@ -181,6 +181,7 @@ function BookingsPageContent() {
   const [editBooking, setEditBooking] = useState<Booking | null>(null);
   const [editBookingAt, setEditBookingAt] = useState<string | null>(null);
   const [editGuestCount, setEditGuestCount] = useState<number | undefined>(undefined);
+  const [editCustomerName, setEditCustomerName] = useState("");
   const [editCustomerPhone, setEditCustomerPhone] = useState("");
   const [editAreaId, setEditAreaId] = useState<string | null>(null);
   const [editTableId, setEditTableId] = useState<string | null>(null);
@@ -739,6 +740,7 @@ function BookingsPageContent() {
         bookingId: booking.id,
         bookingAt: dayjs(editBookingAt).toISOString(),
         guestCount: guestApplied,
+        customerName: finalizeCustomerName(editCustomerName),
         customerPhone: editCustomerPhone,
         areaId: target.areaId,
         tableId: null,
@@ -808,6 +810,7 @@ function BookingsPageContent() {
     setEditGuestCount(
       isGuestCountSpecified(booking) ? Math.max(1, booking.guestCount) : undefined
     );
+    setEditCustomerName(customer?.fullName ?? "");
     setEditCustomerPhone(phone);
     setEditAreaId(booking.areaId);
     setEditTableId(booking.tableId);
@@ -844,6 +847,7 @@ function BookingsPageContent() {
     setEditBooking(null);
     setEditBookingAt(null);
     setEditGuestCount(undefined);
+    setEditCustomerName("");
     setEditCustomerPhone("");
     setEditAreaId(null);
     setEditTableId(null);
@@ -853,6 +857,11 @@ function BookingsPageContent() {
   const submitEditBooking = async (options?: { allowDuplicate?: boolean }) => {
     if (!editBooking || !editBookingAt) {
       notifications.show({ color: "red", message: "Vui lòng chọn thời gian đến." });
+      return;
+    }
+    const finalizedCustomerName = finalizeCustomerName(editCustomerName);
+    if (!finalizedCustomerName) {
+      notifications.show({ color: "red", message: "Vui lòng nhập tên khách." });
       return;
     }
     const normalizedEditPhone = normalizeVietnamPhone(editCustomerPhone.trim());
@@ -896,6 +905,7 @@ function BookingsPageContent() {
           typeof editGuestCount === "number" && Number.isFinite(editGuestCount)
             ? Math.max(1, editGuestCount)
             : undefined,
+        customerName: finalizedCustomerName,
         customerPhone: editCustomerPhone,
         areaId: editAreaId,
         tableId: editMergeGroupId ? null : editTableId,
@@ -1804,6 +1814,7 @@ function BookingsPageContent() {
         bookingAreaTableLookup={bookingAreaTableLookup}
         receptionThresholds={receptionThresholds}
         getGuestTypeLabel={getGuestTypeLabel}
+        lastEditorName={bookingLastEditorName(booking, state.users)}
         onClick={() => openMobileBookingDetail(booking, "today")}
       />
     );
@@ -2185,31 +2196,55 @@ function BookingsPageContent() {
         onCancel={openCancelBookingConfirm}
         onQueue={openQueueBookingConfirm}
       />
-      <Modal
+      <PortalStandardModal
         opened={editBooking != null}
         onClose={closeEditBookingModal}
+        closeOnClickOutside={!isEditSaving}
+        closeOnEscape={!isEditSaving}
         title={
           editBooking ? (
-            <EditBookingModalTitle
-              customerName={
-                state.customers.find((item) => item.id === editBooking.customerId)?.fullName ?? "—"
-              }
-            />
+            <EditBookingModalTitle customerName={editCustomerName.trim() || "—"} />
           ) : (
             "Chỉnh booking"
           )
         }
         size="xl"
-        centered
         zIndex={MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
+        footer={
+          editBooking ? (
+            <Group justify="flex-end" gap="sm">
+              <Button variant="default" onClick={closeEditBookingModal} disabled={isEditSaving}>
+                Hủy
+              </Button>
+              <Button
+                loading={isEditSaving}
+                disabled={editTableSlotConflicts.length > 0 || editMergeGroupSlotBlocked}
+                onClick={() => void submitEditBooking()}
+              >
+                Lưu
+              </Button>
+            </Group>
+          ) : undefined
+        }
       >
         {editBooking ? (
           <Stack gap="sm">
+            <TextInputWithVoice
+              label="Tên khách"
+              placeholder="Nhập tên khách"
+              value={editCustomerName}
+              onChange={(event) => setEditCustomerName(event.currentTarget.value)}
+              onBlur={() => setEditCustomerName((value) => finalizeCustomerName(value))}
+              disabled={isEditSaving}
+              size={isCompact ? "md" : "sm"}
+            />
             <BookingDateTimeFields
               value={editBookingAt}
               onChange={setEditBookingAt}
               labelDate="Ngày đến"
               labelTime="Giờ đến"
+              disabled={isEditSaving}
             />
             {editTableConflictMessage ? (
               <Alert color="red" variant="light" title="Trùng khung giờ trên bàn">
@@ -2227,6 +2262,7 @@ function BookingsPageContent() {
               inputMode="tel"
               value={editCustomerPhone}
               onChange={(event) => setEditCustomerPhone(event.currentTarget.value)}
+              disabled={isEditSaving}
               size={isCompact ? "md" : "sm"}
             />
             <GuestCountNumberInput
@@ -2235,6 +2271,7 @@ function BookingsPageContent() {
               value={editGuestCount}
               onChange={setEditGuestCount}
               placeholder="Chưa rõ"
+              disabled={isEditSaving}
               size={isCompact ? "md" : "sm"}
             />
             <BookingTablePicker
@@ -2250,6 +2287,7 @@ function BookingsPageContent() {
               areaId={editAreaId}
               tableId={editTableId}
               mergeGroupId={editMergeGroupId}
+              disabled={isEditSaving}
               onChange={(patch) => {
                 if (patch.areaId !== undefined) {
                   setEditAreaId(patch.areaId);
@@ -2262,21 +2300,9 @@ function BookingsPageContent() {
                 }
               }}
             />
-            <Group justify="flex-end" gap="sm">
-              <Button variant="default" onClick={closeEditBookingModal}>
-                Hủy
-              </Button>
-              <Button
-                loading={isEditSaving}
-                disabled={editTableSlotConflicts.length > 0 || editMergeGroupSlotBlocked}
-                onClick={() => void submitEditBooking()}
-              >
-                Lưu
-              </Button>
-            </Group>
           </Stack>
         ) : null}
-      </Modal>
+      </PortalStandardModal>
       <ChangeBookingTableModal
         opened={changeTableBooking != null}
         onClose={() => {
