@@ -79,7 +79,7 @@ export function getBookingCompactCardProps(props: {
   }
 
   const updatedLabel =
-    variant === "list" && booking.lastEditedAt && lastEditorName
+    booking.lastEditedAt && lastEditorName
       ? {
           name: lastEditorName,
           time: dayjs(booking.lastEditedAt).format("HH:mm DD/MM"),

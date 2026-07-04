@@ -5,7 +5,6 @@ import {
   Alert,
   Button,
   Group,
-  Modal,
   Select,
   Stack,
   Text,
@@ -52,6 +51,7 @@ import { bookingRowBusyStyle } from "@/lib/busy-row-style";
 import { useBusyId } from "@/lib/use-busy-id";
 import { BOOKING_PENDING_TABLE_LABEL } from "@/lib/display";
 import { usePortalCompact } from "@/lib/use-portal-compact";
+import { finalizeCustomerName } from "@/lib/voice-booking/format";
 import { type Booking } from "@/lib/types";
 
 export function useBookingManagement() {
@@ -78,6 +78,7 @@ export function useBookingManagement() {
   const [editBooking, setEditBooking] = useState<Booking | null>(null);
   const [editBookingAt, setEditBookingAt] = useState<string | null>(null);
   const [editGuestCount, setEditGuestCount] = useState<number | undefined>(undefined);
+  const [editCustomerName, setEditCustomerName] = useState("");
   const [editCustomerPhone, setEditCustomerPhone] = useState("");
   const [editAreaId, setEditAreaId] = useState<string | null>(null);
   const [editTableId, setEditTableId] = useState<string | null>(null);
@@ -307,6 +308,7 @@ export function useBookingManagement() {
       setEditGuestCount(
         isGuestCountSpecified(booking) ? Math.max(1, booking.guestCount) : undefined
       );
+      setEditCustomerName(customer?.fullName ?? "");
       setEditCustomerPhone(phone);
       setEditAreaId(booking.areaId);
       setEditTableId(booking.tableId);
@@ -319,6 +321,7 @@ export function useBookingManagement() {
     setEditBooking(null);
     setEditBookingAt(null);
     setEditGuestCount(undefined);
+    setEditCustomerName("");
     setEditCustomerPhone("");
     setEditAreaId(null);
     setEditTableId(null);
@@ -455,6 +458,11 @@ export function useBookingManagement() {
         notifications.show({ color: "red", message: "Vui lòng chọn thời gian đến." });
         return;
       }
+      const finalizedCustomerName = finalizeCustomerName(editCustomerName);
+      if (!finalizedCustomerName) {
+        notifications.show({ color: "red", message: "Vui lòng nhập tên khách." });
+        return;
+      }
       const normalizedEditPhone = normalizeVietnamPhone(editCustomerPhone.trim());
       if (normalizedEditPhone && !isPlausibleVietnamPhone(normalizedEditPhone)) {
         notifications.show({
@@ -496,6 +504,7 @@ export function useBookingManagement() {
             typeof editGuestCount === "number" && Number.isFinite(editGuestCount)
               ? Math.max(1, editGuestCount)
               : undefined,
+          customerName: finalizedCustomerName,
           customerPhone: editCustomerPhone,
           areaId: editAreaId,
           tableId: editMergeGroupId ? null : editTableId,
@@ -529,6 +538,7 @@ export function useBookingManagement() {
       editAreaId,
       editBooking,
       editBookingAt,
+      editCustomerName,
       editCustomerPhone,
       editGuestCount,
       editMergeGroupId,
@@ -683,26 +693,49 @@ export function useBookingManagement() {
 
   const bookingManagementModals = (
     <>
-      <Modal
+      <PortalStandardModal
         opened={editBooking != null}
         onClose={closeEditBookingModal}
+        closeOnClickOutside={!isEditSaving}
+        closeOnEscape={!isEditSaving}
         title={
           editBooking ? (
-            <EditBookingModalTitle
-              customerName={
-                state.customers.find((item) => item.id === editBooking.customerId)?.fullName ?? "—"
-              }
-            />
+            <EditBookingModalTitle customerName={editCustomerName.trim() || "—"} />
           ) : (
             "Chỉnh booking"
           )
         }
         size="xl"
-        centered
         zIndex={MANUAL_ASSIGN_PAGE_MODAL_Z_INDEX}
+        overlayProps={{ backgroundOpacity: 0.55, blur: 4 }}
+        footer={
+          editBooking ? (
+            <Group justify="flex-end" gap="sm">
+              <Button variant="default" onClick={closeEditBookingModal} disabled={isEditSaving}>
+                Hủy
+              </Button>
+              <Button
+                loading={isEditSaving}
+                disabled={editTableSlotConflicts.length > 0 || editMergeGroupSlotBlocked}
+                onClick={() => void submitEditBooking()}
+              >
+                Lưu
+              </Button>
+            </Group>
+          ) : undefined
+        }
       >
         {editBooking ? (
           <Stack gap="sm">
+            <TextInput
+              label="Tên khách"
+              placeholder="Nhập tên khách"
+              value={editCustomerName}
+              onChange={(event) => setEditCustomerName(event.currentTarget.value)}
+              onBlur={() => setEditCustomerName((value) => finalizeCustomerName(value))}
+              disabled={isEditSaving}
+              size={isCompact ? "md" : "sm"}
+            />
             <BookingDateTimeFields
               value={editBookingAt}
               onChange={setEditBookingAt}
@@ -724,6 +757,7 @@ export function useBookingManagement() {
               inputMode="tel"
               value={editCustomerPhone}
               onChange={(event) => setEditCustomerPhone(event.currentTarget.value)}
+              disabled={isEditSaving}
               size={isCompact ? "md" : "sm"}
             />
             <GuestCountNumberInput
@@ -732,6 +766,7 @@ export function useBookingManagement() {
               value={editGuestCount}
               onChange={setEditGuestCount}
               placeholder="Chưa rõ"
+              disabled={isEditSaving}
               size={isCompact ? "md" : "sm"}
             />
             <BookingTablePicker
@@ -760,21 +795,9 @@ export function useBookingManagement() {
                 }
               }}
             />
-            <Group justify="flex-end" gap="sm">
-              <Button variant="default" onClick={closeEditBookingModal}>
-                Hủy
-              </Button>
-              <Button
-                loading={isEditSaving}
-                disabled={editTableSlotConflicts.length > 0 || editMergeGroupSlotBlocked}
-                onClick={() => void submitEditBooking()}
-              >
-                Lưu
-              </Button>
-            </Group>
           </Stack>
         ) : null}
-      </Modal>
+      </PortalStandardModal>
       <ChangeBookingTableModal
         opened={changeTableBooking != null}
         onClose={() => {

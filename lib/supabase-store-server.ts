@@ -1808,6 +1808,7 @@ export async function updateBookingOrderInSupabase(input: {
   bookingId: string;
   bookingAt: string;
   guestCount?: number;
+  customerName?: string;
   customerPhone?: string;
   areaId: string | null;
   tableId: string | null;
@@ -1844,7 +1845,7 @@ export async function updateBookingOrderInSupabase(input: {
     return {
       ok: false,
       message:
-        "Chỉ chỉnh giờ, số khách, SĐT và khu/bàn khi booking chờ xếp bàn hoặc đã xác nhận.",
+        "Chỉ chỉnh giờ, tên khách, số khách, SĐT và khu/bàn khi booking chờ xếp bàn hoặc đã xác nhận.",
     };
   }
 
@@ -1867,13 +1868,31 @@ export async function updateBookingOrderInSupabase(input: {
 
   const { data: customerRow, error: customerLoadErr } = await client
     .from("customers")
-    .select("phone")
+    .select("phone, full_name")
     .eq("id", booking.customer_id)
     .maybeSingle();
   if (customerLoadErr || !customerRow) {
     return { ok: false, message: customerLoadErr?.message ?? "Không tìm thấy khách hàng." };
   }
   const existingPhone = customerRow.phone as string | null;
+  let customerNameForDuplicate = (customerRow.full_name as string) ?? "";
+
+  if (input.customerName !== undefined) {
+    const trimmedName = input.customerName.trim();
+    if (!trimmedName) {
+      return { ok: false, message: "Tên khách không được để trống." };
+    }
+    if (trimmedName !== customerNameForDuplicate) {
+      const { error: nameUpdateErr } = await client
+        .from("customers")
+        .update({ full_name: trimmedName })
+        .eq("id", booking.customer_id);
+      if (nameUpdateErr) {
+        return { ok: false, message: nameUpdateErr.message };
+      }
+      customerNameForDuplicate = trimmedName;
+    }
+  }
 
   if (input.customerPhone !== undefined) {
     const trimmed = input.customerPhone.trim();
@@ -1937,18 +1956,13 @@ export async function updateBookingOrderInSupabase(input: {
   const phoneForDuplicate = customerAfterPhone?.phone as string | null | undefined;
 
   if (!input.allowDuplicate) {
-    const { data: customerNameRow } = await client
-      .from("customers")
-      .select("full_name")
-      .eq("id", booking.customer_id)
-      .maybeSingle();
     const duplicates = await findBookingDuplicatesByPhoneSlotInSupabase(client, {
       branchId: booking.branch_id,
       customerPhone:
         phoneForDuplicate && !isSyntheticPhoneValue(phoneForDuplicate)
           ? phoneForDuplicate
           : undefined,
-      customerName: customerNameRow?.full_name ?? "",
+      customerName: customerNameForDuplicate,
       bookingAt: normalizedAt,
       tableId: input.tableId,
       excludeBookingId: input.bookingId,
