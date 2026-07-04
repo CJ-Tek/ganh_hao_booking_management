@@ -3,6 +3,7 @@ import { BookingStatus, TableStatus } from "./types";
 export const tableStatusLabel: Record<TableStatus, string> = {
   available: "Trống",
   hold: "Giữ chỗ",
+  late: "Trễ",
   occupied: "Đã ngồi",
   locked: "Khóa",
 };
@@ -10,6 +11,7 @@ export const tableStatusLabel: Record<TableStatus, string> = {
 export const tableStatusColor: Record<TableStatus, string> = {
   available: "teal",
   hold: "yellow",
+  late: "pink",
   occupied: "grape",
   locked: "gray",
 };
@@ -83,7 +85,7 @@ export function normalizeBookingStatusFilters(
 export const bookingSearchStatusFilters: BookingStatus[] = [...defaultBookingStatusFilters];
 
 /** Confirmed schedule table on floor map (subset of pipeline). */
-export const bookingScheduleStatusFilterStatuses = ["confirmed", "seated"] as const satisfies readonly BookingStatus[];
+export const bookingScheduleStatusFilterStatuses = ["confirmed", "seated", "late"] as const satisfies readonly BookingStatus[];
 
 export const defaultScheduleStatusFilters: BookingStatus[] = [
   ...bookingScheduleStatusFilterStatuses,

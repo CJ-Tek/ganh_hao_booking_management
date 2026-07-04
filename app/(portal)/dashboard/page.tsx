@@ -79,6 +79,7 @@ export default function DashboardPage() {
       ).length;
       const statusCounts = {
         hold: tables.filter((table) => table.status === "hold").length,
+        late: tables.filter((table) => table.status === "late").length,
         occupied: tables.filter((table) => table.status === "occupied").length,
         available: tables.filter((table) => table.status === "available").length,
         locked: tables.filter((table) => table.status === "locked").length,
@@ -163,13 +164,14 @@ export default function DashboardPage() {
 
   type TableStatusCounts = {
     hold: number;
+    late: number;
     occupied: number;
     available: number;
     locked: number;
   };
 
   const buildTableStatusDonutData = (counts: TableStatusCounts) =>
-    (["hold", "occupied", "available", "locked"] as const).map((status) => ({
+    (["hold", "late", "occupied", "available", "locked"] as const).map((status) => ({
       name: tableStatusLabel[status],
       value: counts[status],
       color: `${tableStatusColor[status]}.6`,

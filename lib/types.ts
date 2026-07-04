@@ -1,6 +1,6 @@
 export type Role = "admin" | "general_manager" | "manager" | "employee";
 
-export type TableStatus = "available" | "hold" | "occupied" | "locked";
+export type TableStatus = "available" | "hold" | "late" | "occupied" | "locked";
 export type BookingStatus =
   | "pending"
   | "confirmed"

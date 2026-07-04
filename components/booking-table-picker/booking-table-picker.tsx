@@ -332,7 +332,7 @@ export function BookingTablePicker(props: BookingTablePickerProps) {
               <>
                 <Group gap="xs" wrap="wrap" justify={readOnly ? "flex-start" : "space-between"} align="center">
                   <Group gap="xs" wrap="wrap">
-                    {(["available", "hold", "occupied", "locked"] as const).map((status) => (
+                    {(["available", "hold", "late", "occupied", "locked"] as const).map((status) => (
                       <Badge
                         key={status}
                         variant="light"

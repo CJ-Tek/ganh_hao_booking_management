@@ -179,6 +179,7 @@ import {
 } from "@/lib/display";
 import {
   BOOKING_GUEST_TYPE_OPTIONS,
+  canCheckInBooking,
   displayCustomerPhone,
   findAssignableSlotConflictsAtTable,
   formatTableSlotConflictMessage,
@@ -187,6 +188,7 @@ import {
   pickNonOverlappingBookingsForTable,
   deriveMergeGroupStatusFromDayBookings,
   deriveMergeMemberTableStatusFromDayBookings,
+  isTableReservedForFloorOps,
   listOccupiedMergeMemberTableNames,
   MERGE_GROUP_CHECK_IN_BLOCKED_BY_MEMBER_OCCUPIED,
   pickPrimaryBookingForFloorTableBlock,
@@ -235,6 +237,7 @@ const MERGE_GROUP_HEADER_TABLE_GAP_PX = 6;
 const MERGE_GROUP_STATUS_SURFACE_CLASS: Record<TableStatus, string> = {
   available: classes.statusSurface_available,
   hold: classes.statusSurface_hold,
+  late: classes.statusSurface_late,
   occupied: classes.statusSurface_occupied,
   locked: classes.statusSurface_locked,
 };
@@ -315,6 +318,7 @@ function TableBlockBookingPeek(props: {
 const TABLE_STATUS_SURFACE_CLASS: Record<TableStatus, string> = {
   available: classes.statusSurface_available,
   hold: classes.statusSurface_hold,
+  late: classes.statusSurface_late,
   occupied: classes.statusSurface_occupied,
   locked: classes.statusSurface_locked,
 };
@@ -1656,7 +1660,7 @@ export default function FloorMapPage() {
     if (!booking) {
       return;
     }
-    if (booking.status !== "confirmed") {
+    if (!canCheckInBooking(booking, state.bookings, { mergeGroups: state.mergeGroups })) {
       return;
     }
     if (
@@ -2949,7 +2953,7 @@ export default function FloorMapPage() {
 
     const status = mergeGroupStatusById.get(group.id) ?? "available";
     const preferHold =
-      options?.preferHoldAfterOccupied && (status === "occupied" || status === "hold");
+      options?.preferHoldAfterOccupied && isTableReservedForFloorOps(status);
     if (preferHold) {
       const primaryBooking = pickPrimaryBookingOnMergeGroup(group.id, state.bookings);
       const afterEnd = primaryBooking?.endTime
@@ -2987,7 +2991,7 @@ export default function FloorMapPage() {
     });
 
     const preferHold =
-      options?.preferHoldAfterOccupied && (table.status === "occupied" || table.status === "hold");
+      options?.preferHoldAfterOccupied && isTableReservedForFloorOps(table.status);
     if (preferHold) {
       const primaryBooking = pickPrimaryBookingOnTable(table.id, state.bookings);
       const afterEnd = primaryBooking?.endTime
@@ -3081,7 +3085,7 @@ export default function FloorMapPage() {
       openDetailForTable(table);
       return;
     }
-    if (table.status === "occupied" || table.status === "hold") {
+    if (isTableReservedForFloorOps(table.status)) {
       if (detailTable?.id === table.id) {
         closeDetailModal();
         return;
@@ -3118,7 +3122,7 @@ export default function FloorMapPage() {
       openDetailForMergeGroup(group);
       return;
     }
-    if (status === "occupied" || status === "hold") {
+    if (isTableReservedForFloorOps(status)) {
       if (detailMergeGroup?.id === group.id) {
         closeDetailModal();
         return;
@@ -3563,7 +3567,7 @@ export default function FloorMapPage() {
     return floorMapDayBookings.filter(
       (booking) =>
         booking.tableId === splitCloneDeleteTarget &&
-        !["completed", "cancelled", "no_show", "late"].includes(booking.status)
+        !["completed", "cancelled", "no_show"].includes(booking.status)
     ).length;
   }, [floorMapDayBookings, splitCloneDeleteTarget]);
 
@@ -4987,7 +4991,7 @@ export default function FloorMapPage() {
                               >
                                 Tất cả
                               </Button>
-                              {(["available", "hold", "occupied", "locked"] as TableStatus[]).map(
+                              {(["available", "hold", "late", "occupied", "locked"] as TableStatus[]).map(
                                 (status) => {
                                   const selected = statusFilter === status;
                                   const color = tableStatusColor[status];
@@ -5463,8 +5467,9 @@ export default function FloorMapPage() {
                 </Button>
               ) : null}
               {registerMergeGroup ? (
-                (mergeGroupStatusById.get(registerMergeGroup.id) === "occupied" ||
-                  mergeGroupStatusById.get(registerMergeGroup.id) === "hold") ? (
+                isTableReservedForFloorOps(
+                  mergeGroupStatusById.get(registerMergeGroup.id) ?? "available"
+                ) ? (
                   <Button
                     variant="subtle"
                     size="compact-xs"
@@ -5473,7 +5478,7 @@ export default function FloorMapPage() {
                     Lịch sử booking
                   </Button>
                 ) : null
-              ) : registerTable!.status === "occupied" || registerTable!.status === "hold" ? (
+              ) : isTableReservedForFloorOps(registerTable!.status) ? (
                 <Button
                   variant="subtle"
                   size="compact-xs"
@@ -6193,7 +6198,7 @@ function MergeGroupDetailModal({
       .filter(
         (booking) =>
           booking.mergeGroupId === group.id &&
-          !["completed", "cancelled", "no_show", "late"].includes(booking.status)
+          !["completed", "cancelled", "no_show"].includes(booking.status)
       )
       .sort((a, b) => dayjs(a.bookingAt).valueOf() - dayjs(b.bookingAt).valueOf());
   }, [bookings, group]);
