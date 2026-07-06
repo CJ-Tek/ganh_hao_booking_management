@@ -828,6 +828,7 @@ export default function FloorMapPage() {
   const prevAreaIdForLayoutRef = useRef<string | null>(null);
   const prevModeForLayoutRef = useRef<CanvasMode>("view");
   const dayFetchGenerationRef = useRef(0);
+  const dayLayoutFetchGenerationRef = useRef(0);
 
   /** Stable order so the default/fallback area does not jump when snapshot polling refreshes. */
   const availableAreas = useMemo(
@@ -874,9 +875,13 @@ export default function FloorMapPage() {
     if (!areaId || !hasSupabase || !dayLayoutCacheKey) {
       return null;
     }
-    setCurrentDayLayoutCache(undefined);
+    const generation = ++dayLayoutFetchGenerationRef.current;
+    const cacheKey = dayLayoutCacheKey;
     const row = await fetchAreaFloorLayoutForDate(areaId, selectedLayoutDate);
-    setCurrentDayLayoutCache(row);
+    if (generation !== dayLayoutFetchGenerationRef.current) {
+      return row;
+    }
+    setDayLayoutByKey((prev) => ({ ...prev, [cacheKey]: row }));
     return row;
   }, [
     areaId,
@@ -884,7 +889,6 @@ export default function FloorMapPage() {
     fetchAreaFloorLayoutForDate,
     hasSupabase,
     selectedLayoutDate,
-    setCurrentDayLayoutCache,
   ]);
 
   const syncEditLayoutFromDayOverride = useCallback(
@@ -924,9 +928,15 @@ export default function FloorMapPage() {
       return;
     }
     let cancelled = false;
-    setDayLayoutByKey((prev) => ({ ...prev, [dayLayoutCacheKey]: undefined }));
+    const generation = ++dayLayoutFetchGenerationRef.current;
+    setDayLayoutByKey((prev) => {
+      if (Object.prototype.hasOwnProperty.call(prev, dayLayoutCacheKey)) {
+        return prev;
+      }
+      return { ...prev, [dayLayoutCacheKey]: undefined };
+    });
     void fetchAreaFloorLayoutForDate(areaId, selectedLayoutDate).then((row) => {
-      if (!cancelled) {
+      if (!cancelled && generation === dayLayoutFetchGenerationRef.current) {
         setDayLayoutByKey((prev) => ({ ...prev, [dayLayoutCacheKey]: row }));
       }
     });
@@ -2164,11 +2174,10 @@ export default function FloorMapPage() {
         (table) =>
           table.status !== "locked" &&
           !isSplitCloneTable(table) &&
-          !seatedTableIdsOnFloorDay.has(table.id) &&
-          !allActiveMergedTableIds.has(table.id)
+          !seatedTableIdsOnFloorDay.has(table.id)
       )
       .sort((a, b) => a.name.localeCompare(b.name, "vi"));
-  }, [allActiveMergedTableIds, areaId, floorMapDisplayTables, seatedTableIdsOnFloorDay]);
+  }, [areaId, floorMapDisplayTables, seatedTableIdsOnFloorDay]);
 
   const mergeCandidateTableIds = useMemo(
     () => new Set(mergeCandidateTables.map((table) => table.id)),
@@ -4305,13 +4314,10 @@ export default function FloorMapPage() {
       });
       return;
     }
-    if (allActiveMergedTableIds.has(table.id)) {
+    if (action === "merge" && allActiveMergedTableIds.has(table.id)) {
       notifications.show({
         color: "yellow",
-        message:
-          action === "split"
-            ? "Không thể tách bàn đang thuộc cụm gộp."
-            : `${table.name} đã thuộc một cụm gộp khác.`,
+        message: `${table.name} đã thuộc một cụm gộp khác.`,
       });
       return;
     }
@@ -4623,20 +4629,18 @@ export default function FloorMapPage() {
                     const isMergeGridSelect = gridTableActionMode === "merge";
                     const isSplitGridSelect = gridTableActionMode === "split";
                     const isGridSelecting = isMergeGridSelect || isSplitGridSelect;
-                    const isGridSelectionCandidate =
-                      !isMergeMember &&
-                      (isMergeGridSelect
-                        ? mergeCandidateTableIds.has(table.id)
-                        : isSplitGridSelect
-                          ? splitCandidateTableIds.has(table.id)
-                          : false);
+                    const isGridSelectionCandidate = isMergeGridSelect
+                      ? !isMergeMember && mergeCandidateTableIds.has(table.id)
+                      : isSplitGridSelect
+                        ? splitCandidateTableIds.has(table.id)
+                        : false;
                     const isGridSelected = isMergeGridSelect
                       ? mergeSelectedTableIds.includes(table.id)
                       : isSplitGridSelect
                         ? splitSelectedTableId === table.id
                         : false;
                     const onGridSelect =
-                      isGridSelecting && !isMergeMember
+                      isGridSelecting && (isMergeGridSelect ? !isMergeMember : true)
                         ? () => {
                             if (isMergeGridSelect) {
                               if (!mergeCandidateTableIds.has(table.id)) {

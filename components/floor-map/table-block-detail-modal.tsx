@@ -21,6 +21,7 @@ import {
   canQueueBooking,
   getReceptionBookingStatus,
   inferGuestTypeLabel,
+  queueBookingActionLabel,
   stripUnknownGuestTag,
 } from "@/lib/booking-meta";
 import {
@@ -320,7 +321,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                               loading={bookingActionLoading}
                               onClick={onQueueBooking}
                             >
-                              Chờ
+                              {queueBookingActionLabel(activeBooking)}
                             </Button>
                           ) : null}
                           {!isOccupied ? (

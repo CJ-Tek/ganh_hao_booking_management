@@ -542,9 +542,15 @@ export function canQueueBooking(
   }
   return (
     booking.status === "confirmed" ||
+    booking.status === "late" ||
     booking.status === "seated" ||
     booking.status === "checked_in"
   );
+}
+
+/** Action label for releasing a table back to the assignment queue. */
+export function queueBookingActionLabel(booking: Pick<Booking, "status">): string {
+  return booking.status === "late" ? "Chờ xếp bàn" : "Chờ";
 }
 
 /** Bookings that still hold a table slot. */
