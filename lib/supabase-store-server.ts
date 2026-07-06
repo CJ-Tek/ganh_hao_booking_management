@@ -2553,12 +2553,15 @@ export async function queueBookingInSupabase(bookingId: string): Promise<Result>
   const hasTable = Boolean(booking.table_id || booking.merge_group_id);
   if (
     !hasTable ||
-    (status !== "confirmed" && status !== "seated" && status !== "checked_in")
+    (status !== "confirmed" &&
+      status !== "late" &&
+      status !== "seated" &&
+      status !== "checked_in")
   ) {
     return {
       ok: false,
       message:
-        "Chỉ chuyển về chờ xếp bàn khi booking đã có bàn và đang xác nhận hoặc đã vào bàn.",
+        "Chỉ chuyển về chờ xếp bàn khi booking đã có bàn và đang xác nhận, trễ hoặc đã vào bàn.",
     };
   }
 

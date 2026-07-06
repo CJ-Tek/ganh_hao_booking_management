@@ -9,6 +9,7 @@ import {
   canCheckInBooking,
   canQueueBooking,
   checkInBookingDisabledReason,
+  queueBookingActionLabel,
 } from "@/lib/booking-meta";
 import { type Booking } from "@/lib/types";
 
@@ -125,7 +126,7 @@ export function BookingRowActions(props: {
         disabled={busy}
         onClick={() => onQueue(booking)}
       >
-        Chờ
+        {queueBookingActionLabel(booking)}
       </Button>
     ) : null;
 
