@@ -3435,7 +3435,7 @@ export async function createTableMergeGroupInSupabase(
 
   const { data: tables, error: loadErr } = await client
     .from("tables")
-    .select("id, name, status, branch_id, area_id")
+    .select("id, name, status, branch_id, area_id, split_source_table_id")
     .in("id", tableIds);
   if (loadErr) {
     return { ok: false, message: loadErr.message };
@@ -3445,6 +3445,9 @@ export async function createTableMergeGroupInSupabase(
   }
   if (tables.some((table) => table.branch_id !== input.branchId || table.area_id !== input.areaId)) {
     return { ok: false, message: "Các bàn phải cùng chi nhánh và cùng khu vực." };
+  }
+  if (tables.some((table) => table.split_source_table_id)) {
+    return { ok: false, message: "Không gộp được bàn tách — chỉ gộp bàn gốc." };
   }
   if (tables.some((table) => (table.status as TableStatus) === "locked")) {
     return { ok: false, message: "Không gộp được bàn đang khóa." };
@@ -3581,18 +3584,6 @@ export async function createTableSplitCloneInSupabase(input: {
   });
   if (!dateCheck.ok) {
     return { ok: false, message: dateCheck.message };
-  }
-
-  const mergeCheck = await ensureTablesAreFreeToMerge(client, [input.sourceTableId], {
-    startDate: input.startDate,
-    endDate: input.endDate,
-  });
-  if (!mergeCheck.ok) {
-    return {
-      ok: false,
-      message:
-        "Bàn đang thuộc cụm gộp trong khoảng ngày đã chọn. Chỉ tách được bàn lẻ.",
-    };
   }
 
   const { data: existingClones, error: clonesErr } = await client
@@ -3746,7 +3737,7 @@ export async function addTableToMergeGroupInSupabase(input: {
 
   const { data: table, error: tableErr } = await client
     .from("tables")
-    .select("id, name, status, branch_id, area_id")
+    .select("id, name, status, branch_id, area_id, split_source_table_id")
     .eq("id", input.tableId)
     .maybeSingle();
   if (tableErr || !table) {
@@ -3754,6 +3745,9 @@ export async function addTableToMergeGroupInSupabase(input: {
   }
   if (table.branch_id !== group.branch_id || table.area_id !== group.area_id) {
     return { ok: false, message: "Bàn không cùng chi nhánh hoặc khu vực với cụm bàn gộp." };
+  }
+  if (table.split_source_table_id) {
+    return { ok: false, message: "Không gộp được bàn tách — chỉ gộp bàn gốc." };
   }
   if ((table.status as TableStatus) === "locked") {
     return { ok: false, message: "Không gộp được bàn đang khóa." };
