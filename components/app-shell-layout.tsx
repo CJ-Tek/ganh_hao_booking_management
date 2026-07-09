@@ -19,7 +19,6 @@ import {
   Select,
   Stack,
   Text,
-  Title,
   UnstyledButton,
 } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
@@ -230,10 +229,13 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   const leftManagerDockItems = managerDockItems.slice(0, dockLeftCount);
   const rightManagerDockItems = managerDockItems.slice(dockLeftCount);
 
-  const openCreateBookingFromDock = () => {
+  const openCreateBookingModal = () => {
     closeManagerMore();
     setCreateBookingModalOpened(true);
   };
+
+  const showShellCreateBooking =
+    usesMobileDock && canEditActiveBranch;
 
   const focusExistingBookingFromDock = (booking: Booking) => {
     const params = new URLSearchParams({
@@ -297,12 +299,6 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
 
   // Avoid overlap: when mobile drawer is open, hide fixed bottom dock.
   const showManagerDock = usesMobileDock && isCompact && !opened;
-  const portalLabel =
-    currentUser?.role === "manager"
-      ? "Cổng quản lý chi nhánh"
-      : currentUser?.role === "employee"
-        ? "Cổng nhân viên"
-        : "Cổng quản lý tổng";
 
   return (
     <>
@@ -345,16 +341,20 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 aria-label="Ẩn hoặc hiện thanh điều hướng"
               />
               <Image src="/logo/horizontal.png" alt="Logo Gành Hào" h={34} w="auto" />
-              <Stack gap={0} className={classes.brandCopy}>
-                <Group gap={6} wrap="nowrap">
-                  <Title order={4} c="white">
-                    Hệ thống quản lý đặt bàn
-                  </Title>
-                </Group>
-                <Text size="xs" c="rgba(255,255,255,0.85)">
-                  {portalLabel}
-                </Text>
-              </Stack>
+              {showShellCreateBooking ? (
+                <Button
+                  type="button"
+                  variant="white"
+                  color="brand"
+                  size="sm"
+                  leftSection={<Plus size={18} strokeWidth={2.5} aria-hidden />}
+                  className={classes.headerCreateButton}
+                  visibleFrom="md"
+                  onClick={openCreateBookingModal}
+                >
+                  Tạo booking
+                </Button>
+              ) : null}
             </Group>
 
             <Group gap="xs" wrap="nowrap">
@@ -772,8 +772,8 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               aria-label="Tạo booking"
               title="Tạo booking"
               className={classes.managerDockCreateButton}
-              onClick={openCreateBookingFromDock}
-              style={canEditActiveBranch ? undefined : { display: "none" }}
+              onClick={openCreateBookingModal}
+              style={showShellCreateBooking ? undefined : { display: "none" }}
             >
               <Plus size={28} strokeWidth={2.5} aria-hidden />
             </UnstyledButton>
@@ -814,13 +814,6 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             </Group>
           </Paper>
 
-          <CreateBookingModal
-            opened={createBookingModalOpened}
-            onClose={() => setCreateBookingModalOpened(false)}
-            onFocusExistingBooking={focusExistingBookingFromDock}
-            onViewCreatedBookingInFloorMap={viewCreatedBookingInFloorMapFromDock}
-          />
-
           <Drawer
             opened={managerMoreOpen}
             onClose={closeManagerMore}
@@ -853,6 +846,15 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             </Stack>
           </Drawer>
         </>
+      ) : null}
+
+      {showShellCreateBooking ? (
+        <CreateBookingModal
+          opened={createBookingModalOpened}
+          onClose={() => setCreateBookingModalOpened(false)}
+          onFocusExistingBooking={focusExistingBookingFromDock}
+          onViewCreatedBookingInFloorMap={viewCreatedBookingInFloorMapFromDock}
+        />
       ) : null}
     </AppShell>
     </>

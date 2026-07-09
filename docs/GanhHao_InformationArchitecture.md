@@ -113,7 +113,7 @@ For the point 3, this one should have 2 features:
 |-------|-----------|
 | Frontend | React.js, Mantine UI, Lucide |
 | Backend | Next.js, REST API |
-| Database | Supabase |
+| Database | Supabase — see [database-schema.md](./database-schema.md) for tables, columns, FKs, and data flows |
 | Deploy | Vercel |
 | Table engine | mantine-datable |
 | Git | https://github.com/LeeJarvis98/ganh_hao_booking_management |
