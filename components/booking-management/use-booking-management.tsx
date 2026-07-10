@@ -67,7 +67,9 @@ export function useBookingManagement() {
     queueBooking,
     hasSupabase,
     canEditActiveBranch,
+    currentUser,
   } = useAppContext();
+  const isEmployee = currentUser?.role === "employee";
   const isCompact = usePortalCompact();
   const {
     busyId: busyBookingId,
@@ -578,13 +580,15 @@ export function useBookingManagement() {
 
   const renderBookingActions = useCallback(
     (booking: Booking) => {
-      if (!canEditActiveBranch) {
+      if (!canEditActiveBranch && !isEmployee) {
         return null;
       }
       return (
       <BookingRowActions
         booking={booking}
         busy={isBookingRowBusy(booking.id)}
+        showEdit={!isEmployee}
+        employeeMode={isEmployee}
         onEdit={openEditBookingModal}
         onChangeTable={setChangeTableBooking}
         onAssign={openManualAssignModal}
@@ -597,6 +601,7 @@ export function useBookingManagement() {
     },
     [
       canEditActiveBranch,
+      isEmployee,
       isBookingRowBusy,
       openManualAssignModal,
       openCancelBookingConfirm,

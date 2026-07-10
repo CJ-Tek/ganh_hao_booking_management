@@ -14,7 +14,6 @@ import {
   Title,
 } from "@mantine/core";
 import { useMemo, useState, useEffect, useCallback, type Dispatch, type SetStateAction } from "react";
-import { useRouter } from "next/navigation";
 import { BookingTablePicker } from "@/components/booking-table-picker/booking-table-picker";
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
@@ -29,14 +28,7 @@ import { type BookingStatus } from "@/lib/types";
 
 export default function DashboardPage() {
   const { state, currentUser } = useAppContext();
-  const router = useRouter();
   const isCompact = usePortalCompact();
-  const isEmployee = currentUser?.role === "employee";
-  useEffect(() => {
-    if (isEmployee) {
-      router.replace("/bookings");
-    }
-  }, [isEmployee, router]);
 
   const isManager = currentUser?.role === "manager";
   const accessibleBranchIds = useMemo(() => currentUser?.branchIds ?? [], [currentUser?.branchIds]);

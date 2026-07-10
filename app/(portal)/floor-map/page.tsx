@@ -1157,11 +1157,8 @@ export default function FloorMapPage() {
   const bookingsForFloorTableDisplay = floorMapDayBookings;
 
   const advanceSearchSections = useMemo((): PortalAdvanceSearchSection[] => {
-    if (isEmployee) {
-      return ["floor-map"];
-    }
     return ["floor-map", "bookings", "customers", "tables"];
-  }, [isEmployee]);
+  }, []);
 
   const advanceSearchResults = useMemo(
     () =>
@@ -3086,14 +3083,6 @@ export default function FloorMapPage() {
       handleViewOrRegisterForMergeGroup(memberMergeGroup);
       return;
     }
-    if (isEmployee) {
-      if (detailTable?.id === table.id) {
-        closeDetailModal();
-        return;
-      }
-      openDetailForTable(table);
-      return;
-    }
     if (isTableReservedForFloorOps(table.status)) {
       if (detailTable?.id === table.id) {
         closeDetailModal();
@@ -3116,14 +3105,6 @@ export default function FloorMapPage() {
   const handleViewOrRegisterForMergeGroup = (group: TableMergeGroup) => {
     const status = mergeGroupStatusById.get(group.id) ?? "available";
     if (!canEditActiveBranch) {
-      if (detailMergeGroup?.id === group.id) {
-        closeDetailModal();
-        return;
-      }
-      openDetailForMergeGroup(group);
-      return;
-    }
-    if (isEmployee) {
       if (detailMergeGroup?.id === group.id) {
         closeDetailModal();
         return;
@@ -4468,46 +4449,32 @@ export default function FloorMapPage() {
           </Group>
         </Group>
 
-        {!isEmployee ? (
-          <Stack gap="xs">
-            <FloorMapBookingToolbar
-              isCompact={isCompact}
-              isEditMode={isEditMode}
-              activeAreaBranchId={activeAreaBranchId}
-              canCreateBooking={canEditActiveBranch}
-              onCreateBooking={() => setCreateBookingModalOpened(true)}
-              onOpenDayList={() => dayListModalRef.current?.openDayListModal()}
-              onOpenLateList={() => setLateListModalOpen(true)}
-              onOpenMergeGroups={() => setMergeGroupsListModalOpen(true)}
-              onOpenSplitClones={() => setSplitClonesListModalOpen(true)}
-            />
-            {!isEditMode ? (
-              <Button
-                variant="light"
-                color="brand"
-                fullWidth
-                size={isCompact ? "sm" : "md"}
-                leftSection={<ScanSearch size={18} />}
-                className={classes.advanceSearchBtn}
-                onClick={() => setAdvanceSearchOpen(true)}
-              >
-                Tìm kiếm nâng cao
-              </Button>
-            ) : null}
-          </Stack>
-        ) : !isEditMode ? (
-          <Button
-            variant="light"
-            color="brand"
-            fullWidth
-            size={isCompact ? "sm" : "md"}
-            leftSection={<ScanSearch size={18} />}
-            className={classes.advanceSearchBtn}
-            onClick={() => setAdvanceSearchOpen(true)}
-          >
-            Tìm kiếm nâng cao
-          </Button>
-        ) : null}
+        <Stack gap="xs">
+          <FloorMapBookingToolbar
+            isCompact={isCompact}
+            isEditMode={isEditMode}
+            activeAreaBranchId={activeAreaBranchId}
+            canCreateBooking={canEditActiveBranch}
+            onCreateBooking={() => setCreateBookingModalOpened(true)}
+            onOpenDayList={() => dayListModalRef.current?.openDayListModal()}
+            onOpenLateList={() => setLateListModalOpen(true)}
+            onOpenMergeGroups={() => setMergeGroupsListModalOpen(true)}
+            onOpenSplitClones={() => setSplitClonesListModalOpen(true)}
+          />
+          {!isEditMode ? (
+            <Button
+              variant="light"
+              color="brand"
+              fullWidth
+              size={isCompact ? "sm" : "md"}
+              leftSection={<ScanSearch size={18} />}
+              className={classes.advanceSearchBtn}
+              onClick={() => setAdvanceSearchOpen(true)}
+            >
+              Tìm kiếm nâng cao
+            </Button>
+          ) : null}
+        </Stack>
       </Stack>
 
       {layoutLockHolderName ? (
@@ -4912,7 +4879,7 @@ export default function FloorMapPage() {
             <div className={classes.canvasTopLeftDocks}>
               {!isEditMode ? (
                 <>
-                  {isDatePickerDockOpen && !isEmployee ? (
+                  {isDatePickerDockOpen ? (
                     <div className={classes.canvasDateDock}>
                       <Group justify="space-between" align="center" wrap="nowrap" mb={4} gap={4}>
                         <Text size="sm" fw={600} className={classes.canvasDateDockTitle}>
@@ -4942,7 +4909,7 @@ export default function FloorMapPage() {
                       />
                     </div>
                   ) : null}
-                  {!isEmployee && !isDatePickerDockOpen ? (
+                  {!isDatePickerDockOpen ? (
                     <ActionIcon
                       variant="filled"
                       size="lg"
@@ -5222,7 +5189,7 @@ export default function FloorMapPage() {
               </div>
             ) : null}
 
-            {!isEmployee && !isEditMode && canEditActiveBranch ? (
+            {!isEditMode && canEditActiveBranch ? (
               <div className={classes.canvasTopRightDocks}>
                 <div className={classes.canvasTableActionDock}>
                   <Group
@@ -5460,7 +5427,7 @@ export default function FloorMapPage() {
         {registerTable || registerMergeGroup ? (
           <Stack gap="sm">
             <Group justify="flex-end" align="flex-start" wrap="wrap" gap="xs">
-              {registerMergeGroup && !isEmployee ? (
+              {registerMergeGroup && canEditActiveBranch ? (
                 <Button
                   variant="light"
                   color="blue"
@@ -5589,9 +5556,9 @@ export default function FloorMapPage() {
         scheduleBookings={detailScheduleBookings}
         activeBooking={activeBookingForDetail}
         activeBookingCustomerName={activeBookingCustomerName}
-        isEmployee={isEmployee}
         bookingActionLoading={detailBookingActionLoading}
         readOnly={!canEditActiveBranch}
+        allowEmployeeComplete={isEmployee}
         onNewBooking={() => {
           if (detailMergeGroup) {
             openNewBookingForMergeGroup(detailMergeGroup);
@@ -5974,7 +5941,6 @@ export default function FloorMapPage() {
         pendingBookings={pendingBookings}
         currentUserId={currentUser?.id}
         isEditMode={isEditMode}
-        isEmployee={isEmployee}
         readOnly={!canEditActiveBranch}
         onClose={() => setOpenedMergeGroupId(null)}
         onRequestRelease={(groupId) => setReleaseMergeGroupId(groupId)}
@@ -6099,15 +6065,13 @@ export default function FloorMapPage() {
         </Stack>
       </PortalMinimalModal>
 
-      {!isEmployee ? (
-        <BookingDayListModal
-          ref={dayListModalRef}
-          selectedDate={floorMapSelectedDate}
-          onSelectedDateChange={setFloorMapSelectedDate}
-          onDayBookingRowClick={(booking) => setDayListDetailBooking(booking)}
-          onNavigateToFloorMap={setFloorMapSelectedDate}
-        />
-      ) : null}
+      <BookingDayListModal
+        ref={dayListModalRef}
+        selectedDate={floorMapSelectedDate}
+        onSelectedDateChange={setFloorMapSelectedDate}
+        onDayBookingRowClick={(booking) => setDayListDetailBooking(booking)}
+        onNavigateToFloorMap={setFloorMapSelectedDate}
+      />
 
       <BookingOrderDetailModal
         booking={dayListDetailBooking}
@@ -6156,7 +6120,6 @@ interface MergeGroupDetailModalProps {
   pendingBookings: Booking[];
   currentUserId?: string | null;
   isEditMode: boolean;
-  isEmployee: boolean;
   readOnly?: boolean;
   onClose: () => void;
   onRequestRelease: (groupId: string) => void;
@@ -6174,7 +6137,6 @@ function MergeGroupDetailModal({
   pendingBookings,
   currentUserId: _currentUserId,
   isEditMode,
-  isEmployee,
   readOnly = false,
   onClose,
   onRequestRelease,
@@ -6230,7 +6192,7 @@ function MergeGroupDetailModal({
     return null;
   }
 
-  const canMutateGroup = !readOnly && !isEmployee;
+  const canMutateGroup = !readOnly;
   const effectiveEditMode = isEditMode && canMutateGroup;
 
   const datesDirty =
@@ -6346,7 +6308,7 @@ function MergeGroupDetailModal({
                   {table.name}
                 </Text>
               </Stack>
-              {!isEmployee && canMutateGroup ? (
+              {canMutateGroup ? (
                 <Tooltip
                   label={
                     hasSeatedBookingInGroup

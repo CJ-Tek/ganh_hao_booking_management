@@ -1716,7 +1716,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       throw new Error("Bạn không có quyền chỉnh booking của chi nhánh này.");
     }
     if (isEmployeeUser(currentUser)) {
-      assertEmployeeMaySetBookingStatus(state, bookingId, status);
+      assertEmployeeMaySetBookingStatus(state, bookingId, status, currentUser);
     }
 
     const clearsCheckedInAt =

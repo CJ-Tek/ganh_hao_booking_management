@@ -12,28 +12,28 @@ function bookingsContent(role: Role): GuideModuleContent {
   if (role === "employee") {
     return {
       intro:
-        "Nhân viên sử dụng màn Đặt bàn để theo dõi suất trong ngày và đánh dấu hoàn thành khi khách đã ngồi xong.",
+        "Nhân viên xem màn Đặt bàn giống quản lý chi nhánh. Ngoài xem, bạn được đánh dấu Hoàn thành khi khách đã vào bàn trên chi nhánh được gán.",
       steps: [
         {
           title: "Mở màn Đặt bàn",
-          body: "Sau đăng nhập, bạn vào thẳng màn Đặt bàn. Đây là màn hình chính của bạn.",
+          body: "Chọn Đặt bàn trên menu trái hoặc thanh dưới (trên điện thoại).",
         },
         {
-          title: "Xem booking hôm nay",
-          body: "Tab Booking hôm nay liệt kê các suất trong ngày. Dùng bộ lọc trạng thái để tìm khách sắp đến hoặc đang ngồi.",
+          title: "Tab Booking hôm nay",
+          body: "Xem suất trong ngày. Lọc theo trạng thái và tìm theo tên hoặc SĐT để hỗ trợ khách tại quầy.",
         },
         {
           title: "Đánh dấu Hoàn thành",
-          body: "Khi khách đã vào bàn và bàn đang ở trạng thái Đã ngồi, bạn có thể nhấn Hoàn thành để kết thúc phục vụ và giải phóng bàn.",
+          body: "Khi booking đã check-in/Đã vào bàn và bàn đang Đã ngồi, mở chi tiết và nhấn Hoàn thành để giải phóng bàn.",
         },
         {
           title: "Những việc bạn không làm được",
-          body: "Tài khoản nhân viên không tạo booking mới, không sửa thông tin booking và không chỉnh sơ đồ. Nếu cần hỗ trợ, liên hệ quản lý ca.",
+          body: "Không tạo/sửa booking, không check-in/hủy. Các thao tác khác nhờ quản lý chi nhánh.",
         },
       ],
       tips: [
-        "Luôn kiểm tra trạng thái bàn trước khi nhấn Hoàn thành.",
-        "Nếu không thấy nút Hoàn thành, booking có thể chưa check-in hoặc bàn chưa ở trạng thái Đã ngồi.",
+        "Khi khách đã ngồi xong, mở chi tiết booking (hoặc bàn trên Sơ đồ) và nhấn Hoàn thành.",
+        "Dùng tìm kiếm để nhanh chóng trả lời khách về giờ đến và bàn đã đặt.",
       ],
     };
   }
@@ -74,40 +74,32 @@ function bookingFlowContent(role: Role): GuideModuleContent {
   if (role === "employee") {
     return {
       intro:
-        "Nhân viên dùng màn Đặt bàn để theo dõi suất trong ngày và hỗ trợ kết thúc phục vụ khi khách đã ngồi. Tạo hoặc sửa booking do quản lý ca thực hiện.",
+        "Nhân viên theo dõi quy trình đặt bàn và được Hoàn thành khi khách đã ngồi. Tạo/sửa/check-in do quản lý chi nhánh thực hiện.",
       steps: [
         {
-          title: "Mở màn Đặt bàn",
-          body: "Sau đăng nhập, bạn vào thẳng Đặt bàn. Đây là màn hình chính của tài khoản nhân viên.",
-        },
-        {
-          title: "Tab Booking hôm nay",
-          body: "Xem danh sách suất trong ngày. Dùng bộ lọc trạng thái để tìm khách sắp đến (Chờ đến), đã xác nhận, hoặc đang ngồi.",
+          title: "Xem suất trong ngày",
+          body: "Mở Đặt bàn → tab Booking hôm nay. Lọc theo trạng thái để tìm khách sắp đến hoặc đang ngồi.",
         },
         {
           title: "Mở chi tiết một booking",
           body: "Nhấn vào dòng booking để xem giờ đến, số khách, bàn, ghi chú và trạng thái hiện tại.",
         },
         {
-          title: "Khi khách đến",
-          body: "Nếu khách hỏi về bàn đã đặt, tìm booking theo tên hoặc SĐT. Báo quản lý ca để check-in hoặc xếp bàn nếu cần — nhân viên không tự tạo/sửa booking.",
+          title: "Khi khách hỏi về bàn đã đặt",
+          body: "Tìm theo tên hoặc SĐT trên Đặt bàn, Sơ đồ hoặc Lịch. Báo đúng thông tin; nhờ quản lý ca nếu cần check-in hoặc xếp bàn.",
         },
         {
           title: "Đánh dấu Hoàn thành",
-          body: "Khi khách đã vào bàn và bàn ở trạng thái Đã ngồi, nhấn Hoàn thành để kết thúc phục vụ và giải phóng bàn.",
-        },
-        {
-          title: "Khi không thấy nút Hoàn thành",
-          body: "Booking có thể chưa check-in hoặc bàn chưa chuyển Đã ngồi. Nhờ quản lý ca xử lý trước khi bạn nhấn Hoàn thành.",
+          body: "Khi booking đã vào bàn và bàn Đã ngồi, nhấn Hoàn thành trên chi tiết booking hoặc trên Sơ đồ.",
         },
         {
           title: "Khách muốn đặt bàn mới",
-          body: "Chuyển cho quản lý chi nhánh hoặc nhân sự có quyền tạo booking. Bạn có thể ghi chú nhanh: tên, SĐT, số khách, giờ đến để họ nhập vào hệ thống.",
+          body: "Chuyển cho quản lý chi nhánh. Bạn có thể ghi chú nhanh: tên, SĐT, số khách, giờ đến để họ nhập vào hệ thống.",
         },
       ],
       tips: [
         "Luôn đọc Ghi chú trên booking — có thể có yêu cầu đặc biệt (sinh nhật, đoàn, đặt món trước…).",
-        "Kiểm tra đúng booking trước khi nhấn Hoàn thành, tránh nhầm khách.",
+        "Chỉ Hoàn thành trên chi nhánh bạn được gán.",
       ],
     };
   }
@@ -195,7 +187,7 @@ function yourRoleContent(role: Role): GuideModuleContent {
     manager:
       "Bạn vận hành chi nhánh được gán: đặt bàn, sơ đồ, lịch, khách hàng. Có thể xem chi nhánh khác ở chế độ chỉ đọc.",
     employee:
-      "Bạn hỗ trợ tại quầy: theo dõi booking hôm nay và đánh dấu hoàn thành khi khách đã ngồi xong.",
+      "Bạn xem cùng các màn với quản lý chi nhánh và được đánh dấu Hoàn thành khi khách đã vào bàn trên chi nhánh được gán — không tạo hoặc chỉnh sửa khác.",
   };
 
   const menus: Record<Role, string> = {
@@ -204,7 +196,7 @@ function yourRoleContent(role: Role): GuideModuleContent {
     general_manager:
       "Tổng quan, Sơ đồ, Đặt bàn, Lịch, Quản lý bàn, Khách hàng, Khu vực, Cấu hình, Chi nhánh, Người dùng, Hướng dẫn.",
     manager: "Tổng quan, Sơ đồ, Đặt bàn, Lịch, Khách hàng, Hướng dẫn.",
-    employee: "Đặt bàn, Hướng dẫn, Tài khoản của tôi.",
+    employee: "Tổng quan, Sơ đồ, Đặt bàn, Lịch, Khách hàng, Hướng dẫn (chỉ xem).",
   };
 
   return {
@@ -223,7 +215,9 @@ function yourRoleContent(role: Role): GuideModuleContent {
         body:
           role === "admin" || role === "general_manager"
             ? "Sau đăng nhập, chọn chi nhánh trên màn Chọn chi nhánh hoặc đổi nhanh trên thanh công cụ."
-            : "Dữ liệu hiển thị theo chi nhánh bạn được gán. Nếu được gán nhiều chi nhánh, dùng mục Chọn chi nhánh.",
+            : role === "employee"
+              ? "Dữ liệu hiển thị theo chi nhánh bạn được gán. Nếu được gán nhiều chi nhánh, đổi nhanh trên thanh công cụ."
+              : "Dữ liệu hiển thị theo chi nhánh bạn được gán. Nếu được gán nhiều chi nhánh, dùng mục Chọn chi nhánh.",
       },
     ],
     tips: [
@@ -239,18 +233,18 @@ function workflowsContent(role: Role): GuideModuleContent {
       steps: [
         {
           title: "Khách đang ngồi, chuẩn bị rời bàn",
-          body: "Mở Đặt bàn → tìm booking → nhấn Hoàn thành khi bàn đang ở trạng thái Đã ngồi.",
+          body: "Mở Đặt bàn hoặc Sơ đồ → tìm booking/bàn → nhấn Hoàn thành khi bàn đang Đã ngồi.",
         },
         {
-          title: "Không thấy nút Hoàn thành",
-          body: "Booking có thể chưa check-in hoặc bàn chưa chuyển Đã ngồi. Nhờ quản lý ca hỗ trợ.",
+          title: "Cần check-in hoặc xếp bàn",
+          body: "Chuyển cho quản lý chi nhánh — nhân viên chỉ được Hoàn thành.",
         },
         {
           title: "Cần tạo hoặc sửa booking",
-          body: "Chuyển cho quản lý chi nhánh hoặc nhân viên có quyền đặt bàn.",
+          body: "Ghi lại thông tin khách (tên, SĐT, số khách, giờ) và nhờ quản lý chi nhánh nhập vào hệ thống.",
         },
       ],
-      tips: ["Luôn xác nhận đúng booking trước khi nhấn Hoàn thành."],
+      tips: ["Chỉ Hoàn thành trên chi nhánh được gán; các nút tạo/sửa khác vẫn ẩn."],
     };
   }
 
@@ -311,8 +305,8 @@ function tipsContent(role: Role): GuideModuleContent {
       "Dùng giọng nói khi bận nghe điện thoại — vẫn đọc lại form trước khi lưu.",
     ],
     employee: [
-      "Tập trung tab Booking hôm nay — đây là nơi bạn làm việc chính.",
-      "Nếu cần tạo booking, nhờ quản lý ca thay bạn.",
+      "Bạn xem cùng menu với quản lý chi nhánh nhưng không tạo hay chỉnh sửa dữ liệu.",
+      "Dùng Đặt bàn, Sơ đồ và Lịch để tra cứu nhanh khi khách hỏi.",
       "Vào Hướng dẫn bất cứ lúc nào khi quên thao tác.",
     ],
   };

@@ -6,7 +6,18 @@ import { useEffect } from "react";
 import { useAppContext } from "@/contexts/app-context";
 import { EMPLOYEE_PORTAL_HOME, isEmployeeUser } from "@/lib/employee-access";
 
-const EMPLOYEE_ALLOWED_PREFIXES = [EMPLOYEE_PORTAL_HOME, "/settings/account", "/guide"] as const;
+/** Same portal surfaces as branch managers; admin settings stay blocked. */
+const EMPLOYEE_ALLOWED_PREFIXES = [
+  "/dashboard",
+  "/calendar",
+  "/floor-map",
+  "/bookings",
+  "/customers",
+  "/guide",
+  "/settings/account",
+  "/notifications",
+  "/select-branch",
+] as const;
 
 function isEmployeeAllowedPath(pathname: string): boolean {
   return EMPLOYEE_ALLOWED_PREFIXES.some(
@@ -14,7 +25,7 @@ function isEmployeeAllowedPath(pathname: string): boolean {
   );
 }
 
-/** Keeps employee accounts on allowed portal routes (Đặt bàn, Hướng dẫn, account settings). */
+/** Keeps employee accounts on manager-like portal routes (read-only). */
 export function EmployeePortalRedirect({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();

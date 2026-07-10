@@ -32,7 +32,6 @@ import {
   LayoutDashboard,
   LogOut,
   Map,
-  MapPin,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -184,10 +183,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
   );
   const shownNavItems = useMemo(() => {
     const guideItem = navItems.find((item) => item.href === "/guide");
-    if (currentUser?.role === "employee") {
-      return navItems.filter((item) => item.href === "/bookings" || item.href === "/guide");
-    }
-    if (currentUser?.role === "manager") {
+    if (currentUser?.role === "employee" || currentUser?.role === "manager") {
       const managerItems = MANAGER_SECTION_HREFS.map((href) =>
         navItems.find((item) => item.href === href)
       ).filter((item): item is NavItem => Boolean(item));
@@ -200,9 +196,9 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
     return base;
   }, [currentUser]);
 
-  /** Bottom quick nav on narrow viewports (sync with `usePortalCompact` / navbar `breakpoint: "md"`).
-   *  Enabled for branch managers, general_manager, and admin — not employees (single Đặt bàn page). */
+  /** Bottom quick nav on narrow viewports (sync with `usePortalCompact` / navbar `breakpoint: "md"`). */
   const usesMobileDock =
+    currentUser?.role === "employee" ||
     currentUser?.role === "manager" ||
     currentUser?.role === "general_manager" ||
     currentUser?.role === "admin";
@@ -358,7 +354,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
             </Group>
 
             <Group gap="xs" wrap="nowrap">
-              {currentUser?.role !== "employee" && branchSwitcherOptions.length > 1 ? (
+              {branchSwitcherOptions.length > 1 ? (
                 <Select
                   size="xs"
                   className={classes.branchSelect}
@@ -384,8 +380,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               >
                 <RefreshCw size={20} strokeWidth={1.75} />
               </ActionIcon>
-              {currentUser?.role !== "employee" ? (
-              isCompact ? (
+              {isCompact ? (
                 <Box className={classes.notificationBellWrap}>
                   <ActionIcon
                     variant="transparent"
@@ -559,8 +554,7 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 ) : null}
                 </Popover.Dropdown>
               </Popover>
-              )
-              ) : null}
+              )}
 
               <Group gap="xs" wrap="nowrap" visibleFrom="md">
                 <UnstyledButton
@@ -661,24 +655,6 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
                 fontWeight: 700,
               }}
             />
-            {currentUser?.role === "employee" && currentUser.branchIds.length > 1 ? (
-              <NavLink
-                component={Link}
-                href="/select-branch"
-                className={classes.blueNavLink}
-                label="Chọn chi nhánh"
-                leftSection={<MapPin size={20} />}
-                active={pathname.startsWith("/select-branch")}
-                onClick={close}
-                style={{
-                  borderRadius: 12,
-                  minHeight: 62,
-                  paddingInline: 12,
-                  fontSize: "1rem",
-                  fontWeight: 700,
-                }}
-              />
-            ) : null}
           </Stack>
 
           <Stack
@@ -767,19 +743,22 @@ export function AppShellLayout({ children }: { children: React.ReactNode }) {
               borderTopColor: "rgba(255,255,255,0.25)",
             }}
           >
-            <UnstyledButton
-              type="button"
-              aria-label="Tạo booking"
-              title="Tạo booking"
-              className={classes.managerDockCreateButton}
-              onClick={openCreateBookingModal}
-              style={showShellCreateBooking ? undefined : { display: "none" }}
-            >
-              <Plus size={28} strokeWidth={2.5} aria-hidden />
-            </UnstyledButton>
+            {showShellCreateBooking ? (
+              <UnstyledButton
+                type="button"
+                aria-label="Tạo booking"
+                title="Tạo booking"
+                className={classes.managerDockCreateButton}
+                onClick={openCreateBookingModal}
+              >
+                <Plus size={28} strokeWidth={2.5} aria-hidden />
+              </UnstyledButton>
+            ) : null}
             <Group justify="space-between" gap={4} wrap="nowrap" grow>
               {leftManagerDockItems.map(renderManagerDockLink)}
-              <Box className={classes.managerDockCenterSpacer} aria-hidden />
+              {showShellCreateBooking ? (
+                <Box className={classes.managerDockCenterSpacer} aria-hidden />
+              ) : null}
               {rightManagerDockItems.map(renderManagerDockLink)}
               {managerMoreNavItems.length > 0 ? (
                 <UnstyledButton

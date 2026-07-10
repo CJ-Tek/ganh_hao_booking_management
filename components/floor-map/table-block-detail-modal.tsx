@@ -56,7 +56,6 @@ export type TableBlockDetailModalProps = {
   scheduleBookings?: Booking[] | null;
   activeBooking: Booking | null;
   activeBookingCustomerName: string;
-  isEmployee: boolean;
   bookingActionLoading: boolean;
   onNewBooking: () => void;
   onAssignPending: () => void;
@@ -69,6 +68,8 @@ export type TableBlockDetailModalProps = {
   onOpenMergeGroupManage?: () => void;
   /** View-only branch — hide booking and table management actions. */
   readOnly?: boolean;
+  /** When read-only, still allow Hoàn thành for seated/checked-in (employee). */
+  allowEmployeeComplete?: boolean;
 };
 
 export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
@@ -84,7 +85,6 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     scheduleBookings = null,
     activeBooking,
     activeBookingCustomerName,
-    isEmployee,
     bookingActionLoading,
     onNewBooking,
     onAssignPending,
@@ -95,6 +95,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     onQueueBooking,
     onOpenMergeGroupManage,
     readOnly = false,
+    allowEmployeeComplete = false,
   } = props;
 
   const { state } = useAppContext();
@@ -174,7 +175,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
     >
       {targetReady ? (
         <Stack gap="md">
-          {!isEmployee && !readOnly ? (
+          {!readOnly ? (
             <Group justify="space-between" align="center" wrap="wrap" gap="xs" w="100%">
               <Group gap="xs" wrap="wrap">
                 {displayStatus === "occupied" || displayStatus === "hold" ? (
@@ -297,7 +298,7 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                       </Text>
                     </Text>
 
-                    {!isEmployee && !readOnly ? (
+                    {!readOnly ? (
                       <>
                         <Divider />
 
@@ -370,6 +371,23 @@ export function TableBlockDetailModal(props: TableBlockDetailModalProps) {
                             activeBooking.status === "seated"
                               ? "Hoàn thành"
                               : "Hủy bàn"}
+                          </Button>
+                        </Group>
+                      </>
+                    ) : allowEmployeeComplete &&
+                      (activeBooking.status === "checked_in" ||
+                        activeBooking.status === "seated") ? (
+                      <>
+                        <Divider />
+                        <Group justify="flex-end" gap="xs">
+                          <Button
+                            size="sm"
+                            variant="filled"
+                            color="green"
+                            loading={bookingActionLoading}
+                            onClick={onComplete}
+                          >
+                            Hoàn thành
                           </Button>
                         </Group>
                       </>
