@@ -347,6 +347,81 @@ export function getReceptionBookingStatus(
   };
 }
 
+/**
+ * Status bucket for dashboard summaries.
+ * Matches reception display: checked_in≡seated (“Đã vào bàn”), confirmed past late grace → late.
+ */
+export function resolveBookingStatusForDashboardChart(
+  booking: Booking,
+  thresholdsInput?: Partial<ReceptionThresholdSettings>
+): BookingStatus {
+  if (booking.status === "seated" || booking.status === "checked_in") {
+    return "seated";
+  }
+  if (booking.status === "late") {
+    return "late";
+  }
+  if (
+    booking.status === "confirmed" &&
+    isPastLateGrace(booking, resolveReceptionThresholds(thresholdsInput).lateGraceMinutes)
+  ) {
+    return "late";
+  }
+  return booking.status;
+}
+
+/** Remap booking statuses for dashboard table/booking charts (does not mutate originals). */
+export function withDashboardEffectiveBookingStatuses(
+  bookings: readonly Booking[],
+  thresholdsInput?: Partial<ReceptionThresholdSettings>
+): Booking[] {
+  return bookings.map((booking) => {
+    const status = resolveBookingStatusForDashboardChart(booking, thresholdsInput);
+    return status === booking.status ? booking : { ...booking, status };
+  });
+}
+
+export type DashboardTableStatusCounts = {
+  hold: number;
+  late: number;
+  occupied: number;
+  available: number;
+  locked: number;
+};
+
+/**
+ * Derive live table status counts for a day (same rules as floor map / table picker).
+ * Pass day-filtered tables, merge groups effective on that day, and ideally
+ * {@link withDashboardEffectiveBookingStatuses} so Trễ matches reception display.
+ */
+export function countDerivedTableStatusesForDay(
+  tables: readonly DiningTable[],
+  mergeGroups: readonly TableMergeGroup[],
+  dayBookings: readonly Booking[]
+): DashboardTableStatusCounts {
+  const counts: DashboardTableStatusCounts = {
+    hold: 0,
+    late: 0,
+    occupied: 0,
+    available: 0,
+    locked: 0,
+  };
+  const mergeGroupIdByTableId = new Map<string, string>();
+  for (const group of mergeGroups) {
+    for (const tableId of group.tableIds) {
+      mergeGroupIdByTableId.set(tableId, group.id);
+    }
+  }
+  for (const table of tables) {
+    const mergeGroupId = mergeGroupIdByTableId.get(table.id);
+    const status = mergeGroupId
+      ? deriveMergeMemberTableStatusFromDayBookings(table, mergeGroupId, dayBookings)
+      : deriveTableStatusFromDayBookings(table, dayBookings);
+    counts[status] += 1;
+  }
+  return counts;
+}
+
 export type BookingAreaTableLookup = {
   areas: readonly { id: string; name: string }[];
   tables: readonly { id: string; name: string; areaId?: string }[];
