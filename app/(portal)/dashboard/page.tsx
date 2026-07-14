@@ -18,13 +18,20 @@ import { BookingTablePicker } from "@/components/booking-table-picker/booking-ta
 import { PortalPageTitle, PortalSectionCard } from "@/components/portal-page";
 import { useAppContext } from "@/contexts/app-context";
 import {
+  countDerivedTableStatusesForDay,
+  withDashboardEffectiveBookingStatuses,
+} from "@/lib/booking-meta";
+import {
+  bookingListStatusFilterStatuses,
   bookingStatusColor,
   bookingStatusLabel,
   tableStatusColor,
   tableStatusLabel,
 } from "@/lib/display";
+import { filterBookingsForFloorLayoutDate } from "@/lib/floor-map-day-bookings";
+import { isMergeGroupEffectiveOnDate } from "@/lib/merge-group-utils";
+import { filterTablesForFloorMapDay } from "@/lib/table-split-clone-utils";
 import { usePortalCompact } from "@/lib/use-portal-compact";
-import { type BookingStatus } from "@/lib/types";
 
 export default function DashboardPage() {
   const { state, currentUser } = useAppContext();
@@ -58,35 +65,46 @@ export default function DashboardPage() {
     });
   }, [activeBranchId, otherBranches]);
 
+  const layoutDate = dayjs().format("YYYY-MM-DD");
+  const layoutDay = dayjs(layoutDate);
+  const receptionThresholds = state.bookingRuntimeSettings;
+
   const branchDashboard = useMemo(() => {
     const build = (branchId: string | null) => {
       if (!branchId) {
         return null;
       }
 
-      const bookings = state.bookings.filter((item) => item.branchId === branchId);
-      const tables = state.tables.filter((item) => item.branchId === branchId);
-      const checkedInCount = bookings.filter(
+      const todayBookings = filterBookingsForFloorLayoutDate(
+        state.bookings,
+        layoutDate,
+        [branchId]
+      );
+      const effectiveTodayBookings = withDashboardEffectiveBookingStatuses(
+        todayBookings,
+        receptionThresholds
+      );
+      const tables = filterTablesForFloorMapDay(
+        state.tables.filter((item) => item.branchId === branchId),
+        layoutDay
+      );
+      const mergeGroups = state.mergeGroups.filter(
+        (group) => group.branchId === branchId && isMergeGroupEffectiveOnDate(group, layoutDay)
+      );
+      const checkedInCount = todayBookings.filter(
         (item) => item.status === "checked_in" || item.status === "seated"
       ).length;
-      const statusCounts = {
-        hold: tables.filter((table) => table.status === "hold").length,
-        late: tables.filter((table) => table.status === "late").length,
-        occupied: tables.filter((table) => table.status === "occupied").length,
-        available: tables.filter((table) => table.status === "available").length,
-        locked: tables.filter((table) => table.status === "locked").length,
-      };
-      const hiddenStatuses = new Set<BookingStatus>(["checked_in"]);
-      const bookingStatusChart = (Object.keys(bookingStatusLabel) as BookingStatus[])
-        .filter((status) => !hiddenStatuses.has(status))
-        .map((status) => ({
-          status,
-          label: bookingStatusLabel[status],
-          color: `${bookingStatusColor[status]}.6`,
-          count: state.bookings.filter(
-            (booking) => booking.branchId === branchId && booking.status === status
-          ).length,
-        }));
+      const statusCounts = countDerivedTableStatusesForDay(
+        tables,
+        mergeGroups,
+        effectiveTodayBookings
+      );
+      const bookingStatusChart = bookingListStatusFilterStatuses.map((status) => ({
+        status,
+        label: bookingStatusLabel[status],
+        color: `${bookingStatusColor[status]}.6`,
+        count: effectiveTodayBookings.filter((booking) => booking.status === status).length,
+      }));
       const bookingStatusBarChart = {
         data: bookingStatusChart.map((entry) => ({
           status: entry.label,
@@ -97,12 +115,12 @@ export default function DashboardPage() {
       };
 
       return {
-        bookings,
+        bookings: todayBookings,
         tables,
         checkedInCount,
         statusCounts,
         bookingStatusBarChart,
-        mergeGroups: state.mergeGroups.filter((group) => group.branchId === branchId),
+        mergeGroups,
       };
     };
 
@@ -110,7 +128,16 @@ export default function DashboardPage() {
       active: build(activeBranchId ?? null),
       other: build(otherBranchId),
     };
-  }, [activeBranchId, otherBranchId, state.bookings, state.mergeGroups, state.tables]);
+  }, [
+    activeBranchId,
+    layoutDate,
+    layoutDay,
+    otherBranchId,
+    receptionThresholds,
+    state.bookings,
+    state.mergeGroups,
+    state.tables,
+  ]);
 
   const syncPickerAreaId = useCallback(
     (branchId: string | null, setAreaId: Dispatch<SetStateAction<string | null>>) => {
@@ -214,13 +241,13 @@ export default function DashboardPage() {
     <SimpleGrid cols={{ base: 2, sm: 2, lg: 4 }} spacing={isCompact ? "sm" : "md"}>
       <PortalSectionCard padding={isCompact ? "sm" : "md"}>
         <Text size="xs" c="dimmed" fw={600}>
-          Tổng booking
+          Booking hôm nay
         </Text>
         <Title order={2}>{dashboard.bookings.length}</Title>
       </PortalSectionCard>
       <PortalSectionCard padding={isCompact ? "sm" : "md"}>
         <Text size="xs" c="dimmed" fw={600}>
-          Đã check-in
+          Đã vào bàn
         </Text>
         <Title order={2}>{dashboard.checkedInCount}</Title>
       </PortalSectionCard>
@@ -296,7 +323,7 @@ export default function DashboardPage() {
         tables={state.tables}
         mergeGroups={dashboard.mergeGroups}
         bookings={state.bookings}
-        layoutDate={dayjs().format("YYYY-MM-DD")}
+        layoutDate={layoutDate}
         areaId={areaId}
         tableId={null}
         mergeGroupId={null}
