@@ -1,8 +1,9 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Button, Drawer, Group, Stack, Text } from "@mantine/core";
+import { Button, Drawer, Group, Modal, Select, Stack, Text } from "@mantine/core";
 import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
+import { BookingListDateRangeFilter } from "@/components/booking-management/booking-list-date-range-filter";
 import { type DataTableSortStatus } from "mantine-datatable";
 import { Phone } from "lucide-react";
 import { useSearchParams } from "next/navigation";
@@ -32,6 +33,49 @@ import { openPortalAlertModal, openPortalConfirmModal } from "@/lib/portal-confi
 
 const DRAWER_BOOKING_PAGE_SIZE = 8;
 const MOBILE_CUSTOMER_PAGE_SIZE_OPTIONS = [6, 8, 10, 12, 20] as const;
+const DEFAULT_CUSTOMER_SORT: DataTableSortStatus<CustomerListRow> = {
+  columnAccessor: "latestBooking",
+  direction: "desc",
+};
+const CUSTOMER_SORT_OPTIONS = [
+  { value: "latestBooking:desc", label: "Booking gần nhất" },
+  { value: "latestBooking:asc", label: "Booking xa nhất" },
+  { value: "createdAt:desc", label: "Mới tạo → Cũ" },
+  { value: "createdAt:asc", label: "Cũ → Mới tạo" },
+  { value: "fullName:asc", label: "Tên A → Z" },
+  { value: "fullName:desc", label: "Tên Z → A" },
+  { value: "bookingCount:desc", label: "Nhiều booking nhất" },
+  { value: "bookingCount:asc", label: "Ít booking nhất" },
+  { value: "phone:asc", label: "SĐT A → Z" },
+  { value: "phone:desc", label: "SĐT Z → A" },
+] as const;
+
+function customerSortValue(sortStatus: DataTableSortStatus<CustomerListRow>): string {
+  return `${String(sortStatus.columnAccessor)}:${sortStatus.direction}`;
+}
+
+function parseCustomerSortValue(
+  value: string | null
+): DataTableSortStatus<CustomerListRow> | null {
+  if (!value) {
+    return null;
+  }
+  const [columnAccessor, direction] = value.split(":");
+  if (
+    (columnAccessor !== "latestBooking" &&
+      columnAccessor !== "createdAt" &&
+      columnAccessor !== "fullName" &&
+      columnAccessor !== "bookingCount" &&
+      columnAccessor !== "phone") ||
+    (direction !== "asc" && direction !== "desc")
+  ) {
+    return null;
+  }
+  return {
+    columnAccessor: columnAccessor as DataTableSortStatus<CustomerListRow>["columnAccessor"],
+    direction,
+  };
+}
 
 function applyCustomerBookingFilter(rows: CustomerListRow[], filter: CustomerBookingFilter) {
   if (filter === "has_booking") {
@@ -44,7 +88,15 @@ function applyCustomerBookingFilter(rows: CustomerListRow[], filter: CustomerBoo
 }
 
 export default function CustomersPage() {
-  const { state, filteredBranchIds, deleteCustomers, canEditActiveBranch } = useAppContext();
+  const {
+    state,
+    filteredBranchIds,
+    currentUser,
+    deleteCustomers,
+    purgeCustomersWithRelatedData,
+    purgeDataInDateRange,
+    canEditActiveBranch,
+  } = useAppContext();
   const isCompact = usePortalCompact();
   const searchParams = useSearchParams();
   const consumedSearchFromUrlRef = useRef<string | null>(null);
@@ -52,10 +104,21 @@ export default function CustomersPage() {
   const [filter, setFilter] = useState<CustomerBookingFilter>("all");
   const [listPage, setListPage] = useState(1);
   const [mobileListPageSize, setMobileListPageSize] = useState(10);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sortStatus, setSortStatus] =
+    useState<DataTableSortStatus<CustomerListRow>>(DEFAULT_CUSTOMER_SORT);
   const [drawerBookingPage, setDrawerBookingPage] = useState(1);
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerListRow | null>(null);
   const [selectedCustomers, setSelectedCustomers] = useState<CustomerListRow[]>([]);
+  const [dateRangeModalOpen, setDateRangeModalOpen] = useState(false);
+  const [purgeRangeStart, setPurgeRangeStart] = useState(() =>
+    dayjs().subtract(30, "day").format("YYYY-MM-DD")
+  );
+  const [purgeRangeEnd, setPurgeRangeEnd] = useState(() => dayjs().format("YYYY-MM-DD"));
+  const [isPurging, setIsPurging] = useState(false);
+
+  const canPurgeCustomerData =
+    currentUser?.role === "general_manager" || currentUser?.role === "admin";
+  const canSelectCustomers = canEditActiveBranch || canPurgeCustomerData;
 
   useEffect(() => {
     const queryFromUrl = searchParams.get(PORTAL_SEARCH_QUERY_PARAM);
@@ -80,6 +143,7 @@ export default function CustomersPage() {
           ...customer,
           bookingCount: bookings.length,
           latestBooking: bookings[0]?.bookingAt,
+          createdAt: customer.createdAt,
         };
       }),
     [filteredBranchIds, state.bookings, state.customers]
@@ -109,9 +173,9 @@ export default function CustomersPage() {
   );
 
   const sortCustomerRows = useCallback(
-    (records: CustomerListRow[], sortStatus: DataTableSortStatus<CustomerListRow>) => {
-      const dir = sortStatus.direction === "asc" ? 1 : -1;
-      const accessor = sortStatus.columnAccessor;
+    (records: CustomerListRow[], nextSort: DataTableSortStatus<CustomerListRow>) => {
+      const dir = nextSort.direction === "asc" ? 1 : -1;
+      const accessor = nextSort.columnAccessor;
       return [...records].sort((a, b) => {
         if (accessor === "fullName") {
           return dir * a.fullName.localeCompare(b.fullName, "vi");
@@ -125,6 +189,11 @@ export default function CustomersPage() {
         if (accessor === "bookingCount") {
           return dir * (a.bookingCount - b.bookingCount);
         }
+        if (accessor === "createdAt") {
+          const av = a.createdAt ? dayjs(a.createdAt).valueOf() : 0;
+          const bv = b.createdAt ? dayjs(b.createdAt).valueOf() : 0;
+          return dir * (av - bv);
+        }
         if (accessor === "latestBooking") {
           const av = a.latestBooking ? dayjs(a.latestBooking).valueOf() : 0;
           const bv = b.latestBooking ? dayjs(b.latestBooking).valueOf() : 0;
@@ -136,15 +205,20 @@ export default function CustomersPage() {
     []
   );
 
-  const listTotalPages = Math.max(1, Math.ceil(searchFilteredRows.length / mobileListPageSize));
+  const sortedFilteredRows = useMemo(
+    () => sortCustomerRows(searchFilteredRows, sortStatus),
+    [searchFilteredRows, sortCustomerRows, sortStatus]
+  );
+
+  const listTotalPages = Math.max(1, Math.ceil(sortedFilteredRows.length / mobileListPageSize));
   const listPageSafe = Math.min(listPage, listTotalPages);
   const pagedCustomerRows = useMemo(
     () =>
-      searchFilteredRows.slice(
+      sortedFilteredRows.slice(
         (listPageSafe - 1) * mobileListPageSize,
         listPageSafe * mobileListPageSize
       ),
-    [listPageSafe, mobileListPageSize, searchFilteredRows]
+    [listPageSafe, mobileListPageSize, sortedFilteredRows]
   );
 
   const mobilePageSizeSelectData = useMemo(
@@ -155,6 +229,34 @@ export default function CustomersPage() {
       })),
     []
   );
+
+  const rangePreview = useMemo(() => {
+    const from = dayjs(purgeRangeStart).startOf("day");
+    const to = dayjs(purgeRangeEnd).endOf("day");
+    const inRange = state.bookings.filter((booking) => {
+      const at = dayjs(booking.bookingAt);
+      return !at.isBefore(from) && !at.isAfter(to);
+    });
+    const bookingIds = new Set(inRange.map((booking) => booking.id));
+    const touchedCustomerIds = [...new Set(inRange.map((booking) => booking.customerId))];
+    const remainingByCustomer = new Map<string, number>();
+    for (const booking of state.bookings) {
+      if (bookingIds.has(booking.id)) {
+        continue;
+      }
+      remainingByCustomer.set(
+        booking.customerId,
+        (remainingByCustomer.get(booking.customerId) ?? 0) + 1
+      );
+    }
+    const orphanCustomers = touchedCustomerIds.filter(
+      (customerId) => !remainingByCustomer.has(customerId)
+    );
+    return {
+      bookingCount: inRange.length,
+      orphanCustomerCount: orphanCustomers.length,
+    };
+  }, [purgeRangeEnd, purgeRangeStart, state.bookings]);
 
   const customerPaginationBar = (
     <BookingListPaginationBar
@@ -167,7 +269,7 @@ export default function CustomersPage() {
       page={listPageSafe}
       totalPages={listTotalPages}
       onPageChange={setListPage}
-      totalBookings={searchFilteredRows.length}
+      totalBookings={sortedFilteredRows.length}
     />
   );
 
@@ -176,10 +278,49 @@ export default function CustomersPage() {
     setSelectedCustomer(row);
   }, []);
 
+  const runPurgeCustomers = async (ids: string[], bookingCount: number) => {
+    const ok = await openPortalConfirmModal({
+      title: "Xóa toàn bộ dữ liệu khách",
+      message: `Xóa ${ids.length} khách hàng và ${bookingCount} booking liên quan? Hành động không thể hoàn tác.`,
+      confirmLabel: "Xóa toàn bộ",
+      confirmColor: "red",
+    });
+    if (!ok) {
+      return;
+    }
+    setIsPurging(true);
+    try {
+      const result = await purgeCustomersWithRelatedData(ids);
+      if (!result.ok) {
+        openPortalAlertModal({
+          title: "Không thể xóa",
+          message: result.message,
+        });
+        return;
+      }
+      openPortalAlertModal({
+        title: "Đã xóa",
+        message: result.message,
+      });
+      setSelectedCustomers([]);
+      setSelectedCustomer((prev) => (prev && ids.includes(prev.id) ? null : prev));
+    } finally {
+      setIsPurging(false);
+    }
+  };
+
   const handleDeleteSelected = async () => {
     const ids = selectedCustomers.map((customer) => customer.id);
-    const hasBooking = state.bookings.some((booking) => ids.includes(booking.customerId));
-    if (hasBooking) {
+    const relatedBookingCount = state.bookings.filter((booking) =>
+      ids.includes(booking.customerId)
+    ).length;
+
+    if (canPurgeCustomerData) {
+      await runPurgeCustomers(ids, relatedBookingCount);
+      return;
+    }
+
+    if (relatedBookingCount > 0) {
       openPortalAlertModal({
         title: "Không thể xóa",
         message: "Không thể xóa: có khách hàng đã có booking.",
@@ -206,6 +347,131 @@ export default function CustomersPage() {
     setSelectedCustomers([]);
   };
 
+  const handlePurgeSelectedCustomer = async () => {
+    if (!selectedCustomer || !canPurgeCustomerData) {
+      return;
+    }
+    const bookingCount = state.bookings.filter(
+      (booking) => booking.customerId === selectedCustomer.id
+    ).length;
+    await runPurgeCustomers([selectedCustomer.id], bookingCount);
+  };
+
+  const handlePurgeDateRange = async () => {
+    if (!canPurgeCustomerData) {
+      return;
+    }
+    if (!purgeRangeStart || !purgeRangeEnd) {
+      openPortalAlertModal({
+        title: "Khoảng thời gian không hợp lệ",
+        message: "Vui lòng chọn đầy đủ từ ngày và đến ngày.",
+      });
+      return;
+    }
+    if (dayjs(purgeRangeStart).isAfter(dayjs(purgeRangeEnd), "day")) {
+      openPortalAlertModal({
+        title: "Khoảng thời gian không hợp lệ",
+        message: "Ngày bắt đầu phải trước hoặc bằng ngày kết thúc.",
+      });
+      return;
+    }
+
+    const fromIso = dayjs(purgeRangeStart).startOf("day").toISOString();
+    const toIso = dayjs(purgeRangeEnd).endOf("day").toISOString();
+    const ok = await openPortalConfirmModal({
+      title: "Xóa dữ liệu theo khoảng thời gian",
+      message: `Xóa khoảng ${rangePreview.bookingCount} booking từ ${dayjs(purgeRangeStart).format("DD/MM/YYYY")} đến ${dayjs(purgeRangeEnd).format("DD/MM/YYYY")}? Khoảng ${rangePreview.orphanCustomerCount} khách không còn booking sẽ bị xóa. Không thể hoàn tác.`,
+      confirmLabel: "Xóa theo khoảng",
+      confirmColor: "red",
+    });
+    if (!ok) {
+      return;
+    }
+
+    setIsPurging(true);
+    try {
+      const result = await purgeDataInDateRange({ fromIso, toIso });
+      if (!result.ok) {
+        openPortalAlertModal({
+          title: "Không thể xóa",
+          message: result.message,
+        });
+        return;
+      }
+      openPortalAlertModal({
+        title: "Đã xóa",
+        message: result.message,
+      });
+      setDateRangeModalOpen(false);
+      setSelectedCustomers([]);
+      setSelectedCustomer(null);
+    } finally {
+      setIsPurging(false);
+    }
+  };
+
+  const setCustomerSelected = useCallback((row: CustomerListRow, selected: boolean) => {
+    setSelectedCustomers((prev) => {
+      if (selected) {
+        if (prev.some((item) => item.id === row.id)) {
+          return prev;
+        }
+        return [...prev, row];
+      }
+      return prev.filter((item) => item.id !== row.id);
+    });
+  }, []);
+
+  const selectCurrentPageCustomers = useCallback(() => {
+    setSelectedCustomers((prev) => {
+      const byId = new Map(prev.map((item) => [item.id, item]));
+      for (const row of pagedCustomerRows) {
+        byId.set(row.id, row);
+      }
+      return [...byId.values()];
+    });
+  }, [pagedCustomerRows]);
+
+  const equalWidthButtonStyle = isCompact
+    ? { flex: "1 1 0", minWidth: 0, width: 0 }
+    : undefined;
+
+  const customerActionButtons = (
+    <Group
+      gap="xs"
+      wrap={isCompact ? "nowrap" : "wrap"}
+      w={isCompact ? "100%" : undefined}
+      style={isCompact ? undefined : { flexShrink: 0 }}
+    >
+      {canPurgeCustomerData ? (
+        <Button
+          color="red"
+          variant="outline"
+          size={isCompact ? "md" : "sm"}
+          onClick={() => setDateRangeModalOpen(true)}
+          disabled={isPurging}
+          style={equalWidthButtonStyle}
+        >
+          Xóa theo thời gian
+        </Button>
+      ) : null}
+      {canSelectCustomers ? (
+        <Button
+          color="red"
+          variant="light"
+          size={isCompact ? "md" : "sm"}
+          disabled={selectedCustomers.length === 0 || isPurging}
+          onClick={() => void handleDeleteSelected()}
+          style={equalWidthButtonStyle}
+        >
+          {canPurgeCustomerData
+            ? `Xóa dữ liệu (${selectedCustomers.length})`
+            : `Xóa (${selectedCustomers.length})`}
+        </Button>
+      ) : null}
+    </Group>
+  );
+
   const headerFilters = (
     <Group justify="space-between" align="flex-start" wrap="wrap" gap="sm" w="100%">
       <CustomerBookingFilterChips
@@ -217,19 +483,24 @@ export default function CustomersPage() {
         }}
         size={isCompact ? "xs" : undefined}
       />
-      {!isCompact && canEditActiveBranch ? (
-        <Button
-          color="red"
-          variant="light"
-          size="sm"
-          disabled={selectedCustomers.length === 0}
-          onClick={() => void handleDeleteSelected()}
-          style={{ flexShrink: 0 }}
-        >
-          Xóa ({selectedCustomers.length})
-        </Button>
-      ) : null}
+      {!isCompact ? customerActionButtons : null}
     </Group>
+  );
+
+  const customerSortSelect = (
+    <Select
+      label="Sắp xếp"
+      data={[...CUSTOMER_SORT_OPTIONS]}
+      value={customerSortValue(sortStatus)}
+      onChange={(value) => {
+        const next = parseCustomerSortValue(value) ?? DEFAULT_CUSTOMER_SORT;
+        setSortStatus(next);
+        setListPage(1);
+      }}
+      size={isCompact ? "md" : "sm"}
+      w="100%"
+      allowDeselect={false}
+    />
   );
 
   const filtersToolbar = (
@@ -240,12 +511,33 @@ export default function CustomersPage() {
         setListPage(1);
       }}
       searchPlaceholder="Tìm tên hoặc SĐT"
-      filtersOpen={filtersOpen}
-      onFiltersOpenChange={setFiltersOpen}
-      collapseFilters={
-        <Text size="sm" c="dimmed">
-          Không có bộ lọc thêm.
-        </Text>
+      inlineFilters={
+        <Stack gap="sm" w="100%">
+          {customerSortSelect}
+          {customerActionButtons}
+          {canSelectCustomers ? (
+            <Group gap="xs" wrap="nowrap" w="100%">
+              <Button
+                variant="default"
+                size={isCompact ? "md" : "sm"}
+                onClick={selectCurrentPageCustomers}
+                disabled={pagedCustomerRows.length === 0 || isPurging}
+                style={equalWidthButtonStyle}
+              >
+                Chọn trang ({pagedCustomerRows.length})
+              </Button>
+              <Button
+                variant="default"
+                size={isCompact ? "md" : "sm"}
+                onClick={() => setSelectedCustomers([])}
+                disabled={selectedCustomers.length === 0 || isPurging}
+                style={equalWidthButtonStyle}
+              >
+                Bỏ chọn
+              </Button>
+            </Group>
+          ) : null}
+        </Stack>
       }
     />
   );
@@ -260,15 +552,31 @@ export default function CustomersPage() {
       }}
       getRecordSearchValue={getCustomerSearchValue}
       sortRecords={sortCustomerRows}
-      defaultSort={{ columnAccessor: "latestBooking", direction: "desc" }}
+      defaultSort={DEFAULT_CUSTOMER_SORT}
+      sortStatus={sortStatus}
+      onSortStatusChange={(next) => {
+        setSortStatus(next);
+        setListPage(1);
+      }}
       idAccessor="id"
       searchPlaceholder="Tìm tên hoặc SĐT"
       noRecordsText="Không tìm thấy khách hàng phù hợp."
       onRowClick={({ record }) => openCustomerDetail(record)}
-      selectedRecords={canEditActiveBranch ? selectedCustomers : []}
-      onSelectedRecordsChange={canEditActiveBranch ? setSelectedCustomers : undefined}
+      selectedRecords={canSelectCustomers ? selectedCustomers : []}
+      onSelectedRecordsChange={canSelectCustomers ? setSelectedCustomers : undefined}
       mobileCardRender={(row) => (
-        <CustomerCompactCard key={row.id} row={row} onClick={() => openCustomerDetail(row)} />
+        <CustomerCompactCard
+          key={row.id}
+          row={row}
+          selected={selectedCustomers.some((item) => item.id === row.id)}
+          onSelectedChange={
+            canSelectCustomers
+              ? (selected) => setCustomerSelected(row, selected)
+              : undefined
+          }
+          selectionDisabled={isPurging}
+          onClick={() => openCustomerDetail(row)}
+        />
       )}
       columns={[
         { accessor: "fullName", title: "Khách hàng", sortable: true },
@@ -279,6 +587,13 @@ export default function CustomersPage() {
           render: (row) => displayCustomerPhone(row.phone),
         },
         { accessor: "bookingCount", title: "Số booking", sortable: true },
+        {
+          accessor: "createdAt",
+          title: "Ngày tạo",
+          sortable: true,
+          render: (row) =>
+            row.createdAt ? dayjs(row.createdAt).format("DD/MM/YYYY HH:mm") : "—",
+        },
         {
           accessor: "latestBooking",
           title: "Booking gần nhất",
@@ -337,6 +652,13 @@ export default function CustomersPage() {
               <CustomerCompactCard
                 key={row.id}
                 row={row}
+                selected={selectedCustomers.some((item) => item.id === row.id)}
+                onSelectedChange={
+                  canSelectCustomers
+                    ? (selected) => setCustomerSelected(row, selected)
+                    : undefined
+                }
+                selectionDisabled={isPurging}
                 onClick={() => openCustomerDetail(row)}
               />
             ))
@@ -373,8 +695,24 @@ export default function CustomersPage() {
             <Text fw={600}>{displayCustomerPhone(selectedCustomer?.phone)}</Text>
           </Group>
           <Text size="sm" c="dimmed">
+            Ngày tạo:{" "}
+            {selectedCustomer?.createdAt
+              ? dayjs(selectedCustomer.createdAt).format("DD/MM/YYYY HH:mm")
+              : "—"}
+          </Text>
+          <Text size="sm" c="dimmed">
             Ghi chú: {selectedCustomer?.note || "Không có"}
           </Text>
+          {canPurgeCustomerData ? (
+            <Button
+              color="red"
+              variant="light"
+              loading={isPurging}
+              onClick={() => void handlePurgeSelectedCustomer()}
+            >
+              Xóa toàn bộ dữ liệu khách này
+            </Button>
+          ) : null}
           <Text fw={700} size="sm">
             Lịch sử booking ({customerBookings.length})
           </Text>
@@ -443,6 +781,59 @@ export default function CustomersPage() {
           </Stack>
         </Stack>
       </Drawer>
+
+      <Modal
+        opened={dateRangeModalOpen}
+        onClose={() => {
+          if (!isPurging) {
+            setDateRangeModalOpen(false);
+          }
+        }}
+        title="Xóa dữ liệu theo khoảng thời gian"
+        centered
+      >
+        <Stack gap="md">
+          <Text size="sm" c="dimmed">
+            Xóa mọi booking có giờ đặt trong khoảng đã chọn. Khách hàng không còn booking nào sẽ bị
+            xóa luôn.
+          </Text>
+          <BookingListDateRangeFilter
+            startDate={purgeRangeStart}
+            endDate={purgeRangeEnd}
+            onStartDateChange={setPurgeRangeStart}
+            onEndDateChange={setPurgeRangeEnd}
+            disabled={isPurging}
+          />
+          <Text size="sm">
+            Dự kiến:{" "}
+            <Text span fw={600}>
+              {rangePreview.bookingCount}
+            </Text>{" "}
+            booking,{" "}
+            <Text span fw={600}>
+              {rangePreview.orphanCustomerCount}
+            </Text>{" "}
+            khách hàng sẽ bị xóa hết.
+          </Text>
+          <Group justify="flex-end" gap="sm">
+            <Button
+              variant="default"
+              disabled={isPurging}
+              onClick={() => setDateRangeModalOpen(false)}
+            >
+              Hủy
+            </Button>
+            <Button
+              color="red"
+              loading={isPurging}
+              disabled={rangePreview.bookingCount === 0}
+              onClick={() => void handlePurgeDateRange()}
+            >
+              Xóa theo khoảng
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
     </Stack>
   );
 }

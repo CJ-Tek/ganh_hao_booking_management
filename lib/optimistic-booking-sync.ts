@@ -136,6 +136,7 @@ export function resolveOptimisticCustomerForCreate(
     fullName: input.customerName.trim(),
     phone,
     note: undefined,
+    createdAt: new Date().toISOString(),
   };
   return {
     customers: [customer, ...prev.customers.filter((item) => item.id !== optimisticId)],

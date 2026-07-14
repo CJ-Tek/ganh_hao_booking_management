@@ -1122,6 +1122,7 @@ export async function fetchSnapshot(options?: {
         fullName: item.full_name,
         phone: item.phone,
         note: item.note ?? undefined,
+        createdAt: item.created_at ?? undefined,
       })) ?? [],
     bookings,
     mergeGroups,
@@ -1315,6 +1316,7 @@ export async function fetchFloorMapDayBookingsInSupabase(
         fullName: item.full_name,
         phone: item.phone,
         note: item.note ?? undefined,
+        createdAt: item.created_at ?? undefined,
       })) ?? [];
   }
 
@@ -2662,6 +2664,202 @@ export async function deleteCustomersInSupabase(customerIds: string[]): Promise<
     return { ok: false, message: error.message };
   }
   return { ok: true, message: "Đã xóa khách hàng." };
+}
+
+export type PurgeDataResult = Result & {
+  deletedCustomerCount?: number;
+  deletedBookingCount?: number;
+  deletedBookingIds?: string[];
+  deletedCustomerIds?: string[];
+};
+
+const PURGE_ID_CHUNK_SIZE = 200;
+
+type BookingPurgeRow = {
+  id: string;
+  customer_id: string;
+  table_id: string | null;
+  merge_group_id: string | null;
+};
+
+async function collectTableIdsTouchedByBookings(
+  client: ReturnType<typeof ensureClient>,
+  bookings: BookingPurgeRow[]
+): Promise<string[]> {
+  const tableIds = new Set<string>();
+  const mergeGroupIds = new Set<string>();
+  for (const booking of bookings) {
+    if (booking.table_id) {
+      tableIds.add(booking.table_id);
+    }
+    if (booking.merge_group_id) {
+      mergeGroupIds.add(booking.merge_group_id);
+    }
+  }
+  for (const mergeGroupId of mergeGroupIds) {
+    for (const memberTableId of await listMergeGroupMemberTableIds(client, mergeGroupId)) {
+      tableIds.add(memberTableId);
+    }
+  }
+  return [...tableIds];
+}
+
+async function deleteRowsByIdInChunks(
+  client: ReturnType<typeof ensureClient>,
+  table: "bookings" | "customers",
+  ids: string[]
+): Promise<Result> {
+  for (let offset = 0; offset < ids.length; offset += PURGE_ID_CHUNK_SIZE) {
+    const chunk = ids.slice(offset, offset + PURGE_ID_CHUNK_SIZE);
+    const { error } = await client.from(table).delete().in("id", chunk);
+    if (error) {
+      return { ok: false, message: error.message };
+    }
+  }
+  return { ok: true, message: "OK" };
+}
+
+async function refreshTablesAfterPurge(
+  client: ReturnType<typeof ensureClient>,
+  tableIds: string[]
+): Promise<void> {
+  if (tableIds.length === 0) {
+    return;
+  }
+  await Promise.all(tableIds.map((tableId) => refreshTableAvailabilityForBooking(client, tableId)));
+}
+
+/** Hard-delete customers and cascaded bookings (GM/admin data purge). */
+export async function purgeCustomersWithRelatedDataInSupabase(
+  customerIds: string[]
+): Promise<PurgeDataResult> {
+  const client = ensureClient();
+  const ids = [...new Set(customerIds.map((id) => id.trim()).filter((id) => id.length > 0))];
+  if (ids.length === 0) {
+    return { ok: true, message: "Không có khách hàng để xóa.", deletedCustomerCount: 0, deletedBookingCount: 0 };
+  }
+
+  const bookings: BookingPurgeRow[] = [];
+  for (let offset = 0; offset < ids.length; offset += PURGE_ID_CHUNK_SIZE) {
+    const chunk = ids.slice(offset, offset + PURGE_ID_CHUNK_SIZE);
+    const { data, error } = await client
+      .from("bookings")
+      .select("id, customer_id, table_id, merge_group_id")
+      .in("customer_id", chunk);
+    if (error) {
+      return { ok: false, message: error.message };
+    }
+    bookings.push(...((data ?? []) as BookingPurgeRow[]));
+  }
+
+  const tableIds = await collectTableIdsTouchedByBookings(client, bookings);
+  const deleteResult = await deleteRowsByIdInChunks(client, "customers", ids);
+  if (!deleteResult.ok) {
+    return deleteResult;
+  }
+
+  await refreshTablesAfterPurge(client, tableIds);
+
+  const deletedBookingIds = bookings.map((row) => row.id);
+  return {
+    ok: true,
+    message: `Đã xóa ${ids.length} khách hàng và ${deletedBookingIds.length} booking liên quan.`,
+    deletedCustomerCount: ids.length,
+    deletedBookingCount: deletedBookingIds.length,
+    deletedCustomerIds: ids,
+    deletedBookingIds,
+  };
+}
+
+/**
+ * Delete bookings whose booking_at falls in [fromIso, toIso] (inclusive),
+ * then remove customers left with no remaining bookings.
+ */
+export async function purgeDataInDateRangeInSupabase(input: {
+  fromIso: string;
+  toIso: string;
+}): Promise<PurgeDataResult> {
+  const client = ensureClient();
+  const fromIso = input.fromIso.trim();
+  const toIso = input.toIso.trim();
+  if (!fromIso || !toIso) {
+    return { ok: false, message: "Khoảng thời gian không hợp lệ." };
+  }
+  if (dayjs(fromIso).isAfter(dayjs(toIso))) {
+    return { ok: false, message: "Ngày bắt đầu phải trước hoặc bằng ngày kết thúc." };
+  }
+
+  const { data, error } = await client
+    .from("bookings")
+    .select("id, customer_id, table_id, merge_group_id")
+    .gte("booking_at", fromIso)
+    .lte("booking_at", toIso);
+  if (error) {
+    return { ok: false, message: error.message };
+  }
+
+  const bookings = (data ?? []) as BookingPurgeRow[];
+  if (bookings.length === 0) {
+    return {
+      ok: true,
+      message: "Không có booking nào trong khoảng thời gian đã chọn.",
+      deletedCustomerCount: 0,
+      deletedBookingCount: 0,
+      deletedBookingIds: [],
+      deletedCustomerIds: [],
+    };
+  }
+
+  const bookingIds = bookings.map((row) => row.id);
+  const customerIdsTouched = [...new Set(bookings.map((row) => row.customer_id))];
+  const tableIds = await collectTableIdsTouchedByBookings(client, bookings);
+
+  const deleteBookingsResult = await deleteRowsByIdInChunks(client, "bookings", bookingIds);
+  if (!deleteBookingsResult.ok) {
+    return deleteBookingsResult;
+  }
+
+  const orphanCustomerIds: string[] = [];
+  for (let offset = 0; offset < customerIdsTouched.length; offset += PURGE_ID_CHUNK_SIZE) {
+    const chunk = customerIdsTouched.slice(offset, offset + PURGE_ID_CHUNK_SIZE);
+    const { data: remaining, error: remainingError } = await client
+      .from("bookings")
+      .select("customer_id")
+      .in("customer_id", chunk);
+    if (remainingError) {
+      return { ok: false, message: remainingError.message };
+    }
+    const stillReferenced = new Set(
+      ((remaining ?? []) as Array<{ customer_id: string }>).map((row) => row.customer_id)
+    );
+    for (const customerId of chunk) {
+      if (!stillReferenced.has(customerId)) {
+        orphanCustomerIds.push(customerId);
+      }
+    }
+  }
+
+  if (orphanCustomerIds.length > 0) {
+    const deleteCustomersResult = await deleteRowsByIdInChunks(
+      client,
+      "customers",
+      orphanCustomerIds
+    );
+    if (!deleteCustomersResult.ok) {
+      return deleteCustomersResult;
+    }
+  }
+
+  await refreshTablesAfterPurge(client, tableIds);
+
+  return {
+    ok: true,
+    message: `Đã xóa ${bookingIds.length} booking và ${orphanCustomerIds.length} khách hàng không còn dữ liệu.`,
+    deletedBookingCount: bookingIds.length,
+    deletedCustomerCount: orphanCustomerIds.length,
+    deletedBookingIds: bookingIds,
+    deletedCustomerIds: orphanCustomerIds,
+  };
 }
 
 export async function checkInBookingInSupabase(bookingId: string): Promise<void> {

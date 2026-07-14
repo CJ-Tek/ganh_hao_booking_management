@@ -80,6 +80,8 @@ import {
   deleteTableInSupabase,
   deleteTablesInSupabase,
   deleteCustomersInSupabase,
+  purgeCustomersWithRelatedDataInSupabase,
+  purgeDataInDateRangeInSupabase,
   releaseTableMergeGroupInSupabase,
   updateTableMergeGroupDatesInSupabase,
   removeTableFromMergeGroupInSupabase,
@@ -265,6 +267,10 @@ interface AppContextValue {
   checkInBooking: (bookingId: string, seedBooking?: Booking) => Promise<void>;
   queueBooking: (bookingId: string, seedBooking?: Booking) => Promise<ActionResult>;
   deleteCustomers: (customerIds: string[]) => Promise<ActionResult>;
+  /** GM/admin: hard-delete customers and all related bookings. */
+  purgeCustomersWithRelatedData: (customerIds: string[]) => Promise<ActionResult>;
+  /** GM/admin: delete bookings in a booking_at range; orphans customers with no bookings left. */
+  purgeDataInDateRange: (input: { fromIso: string; toIso: string }) => Promise<ActionResult>;
   upsertTable: (table: Omit<DiningTable, "id"> & { id?: string }) => Promise<void>;
   upsertTablesBatch: (tables: Array<Omit<DiningTable, "id"> & { id?: string }>) => Promise<void>;
   deleteTable: (tableId: string) => Promise<void>;
@@ -667,6 +673,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         fullName,
         phone: phone ?? null,
         note: note ?? undefined,
+        createdAt: typeof row.created_at === "string" ? row.created_at : undefined,
       };
     };
 
@@ -1927,6 +1934,120 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     return result;
   };
 
+  const canPurgeCustomerData =
+    currentUser?.role === "general_manager" || currentUser?.role === "admin";
+
+  const applyPurgedCustomerDataToState = (
+    deletedCustomerIds: string[],
+    deletedBookingIds: string[]
+  ) => {
+    const customerIdSet = new Set(deletedCustomerIds);
+    const bookingIdSet = new Set(deletedBookingIds);
+    if (customerIdSet.size > 0) {
+      customerDeleteTombstonesRef.current.register([...customerIdSet]);
+    }
+    setState((prev) => ({
+      ...prev,
+      customers: prev.customers.filter((customer) => !customerIdSet.has(customer.id)),
+      bookings: prev.bookings.filter(
+        (booking) => !bookingIdSet.has(booking.id) && !customerIdSet.has(booking.customerId)
+      ),
+    }));
+  };
+
+  const purgeCustomersWithRelatedData = async (customerIds: string[]) => {
+    if (!canPurgeCustomerData) {
+      return {
+        ok: false,
+        message: "Chỉ quản lý tổng hoặc admin mới được xóa toàn bộ dữ liệu khách hàng.",
+      };
+    }
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    const ids = [...new Set(customerIds.map((id) => id.trim()).filter((id) => id.length > 0))];
+    if (ids.length === 0) {
+      return { ok: true, message: "Không có khách hàng để xóa." };
+    }
+
+    if (!hasSupabase) {
+      const relatedBookingIds = state.bookings
+        .filter((booking) => ids.includes(booking.customerId))
+        .map((booking) => booking.id);
+      applyPurgedCustomerDataToState(ids, relatedBookingIds);
+      return {
+        ok: true,
+        message: `Đã xóa ${ids.length} khách hàng và ${relatedBookingIds.length} booking liên quan.`,
+      };
+    }
+
+    const result = await purgeCustomersWithRelatedDataInSupabase(ids);
+    if (result.ok) {
+      applyPurgedCustomerDataToState(
+        result.deletedCustomerIds ?? ids,
+        result.deletedBookingIds ??
+          state.bookings
+            .filter((booking) => ids.includes(booking.customerId))
+            .map((booking) => booking.id)
+      );
+    }
+    return result;
+  };
+
+  const purgeDataInDateRange = async (input: { fromIso: string; toIso: string }) => {
+    if (!canPurgeCustomerData) {
+      return {
+        ok: false,
+        message: "Chỉ quản lý tổng hoặc admin mới được xóa dữ liệu theo khoảng thời gian.",
+      };
+    }
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    const fromIso = input.fromIso.trim();
+    const toIso = input.toIso.trim();
+    if (!fromIso || !toIso) {
+      return { ok: false, message: "Khoảng thời gian không hợp lệ." };
+    }
+
+    if (!hasSupabase) {
+      const inRange = state.bookings.filter((booking) => {
+        const at = dayjs(booking.bookingAt).valueOf();
+        return at >= dayjs(fromIso).valueOf() && at <= dayjs(toIso).valueOf();
+      });
+      const bookingIds = inRange.map((booking) => booking.id);
+      const bookingIdSet = new Set(bookingIds);
+      const touchedCustomerIds = [...new Set(inRange.map((booking) => booking.customerId))];
+      const remainingByCustomer = new Map<string, number>();
+      for (const booking of state.bookings) {
+        if (bookingIdSet.has(booking.id)) {
+          continue;
+        }
+        remainingByCustomer.set(
+          booking.customerId,
+          (remainingByCustomer.get(booking.customerId) ?? 0) + 1
+        );
+      }
+      const orphanCustomerIds = touchedCustomerIds.filter(
+        (customerId) => !remainingByCustomer.has(customerId)
+      );
+      applyPurgedCustomerDataToState(orphanCustomerIds, bookingIds);
+      return {
+        ok: true,
+        message: `Đã xóa ${bookingIds.length} booking và ${orphanCustomerIds.length} khách hàng không còn dữ liệu.`,
+      };
+    }
+
+    const result = await purgeDataInDateRangeInSupabase({ fromIso, toIso });
+    if (result.ok) {
+      applyPurgedCustomerDataToState(
+        result.deletedCustomerIds ?? [],
+        result.deletedBookingIds ?? []
+      );
+    }
+    return result;
+  };
+
   const applyTableToState = (table: DiningTable) => {
     setState((prev) => {
       const index = prev.tables.findIndex((item) => item.id === table.id);
@@ -2988,6 +3109,8 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     checkInBooking,
     queueBooking,
     deleteCustomers,
+    purgeCustomersWithRelatedData,
+    purgeDataInDateRange,
     upsertTable,
     upsertTablesBatch,
     deleteTable,

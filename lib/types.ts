@@ -66,6 +66,8 @@ export interface Customer {
   /** Real phone when known; null when the guest did not provide one (stored as NULL in Supabase). */
   phone: string | null;
   note?: string;
+  /** When the customer profile was first created. */
+  createdAt?: string;
 }
 
 export interface Booking {

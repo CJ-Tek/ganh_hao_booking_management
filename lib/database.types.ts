@@ -330,18 +330,21 @@ export type Database = {
       }
       customers: {
         Row: {
+          created_at: string
           full_name: string
           id: string
           note: string | null
           phone: string | null
         }
         Insert: {
+          created_at?: string
           full_name: string
           id?: string
           note?: string | null
           phone?: string | null
         }
         Update: {
+          created_at?: string
           full_name?: string
           id?: string
           note?: string | null

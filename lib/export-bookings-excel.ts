@@ -6,6 +6,7 @@ import {
   isBookingTableAssigned,
   resolveBookingArrivalTime,
   resolveBookingLeadingColumn,
+  stripUnknownGuestTag,
   type BookingAreaTableLookup,
 } from "@/lib/booking-meta";
 import { formatBookingListDateRangeLabel, isBookingInDateRange } from "@/lib/booking-list-date-range";
@@ -24,6 +25,7 @@ const EXPORT_HEADERS = [
   "Giờ đến",
   "Khách",
   "SĐT",
+  "Ghi chú",
 ] as const;
 
 const COLUMN_COUNT = EXPORT_HEADERS.length;
@@ -140,6 +142,7 @@ function bookingToExportRow(
     formatArrivalTime(resolveBookingArrivalTime(booking)),
     customer?.fullName ?? "—",
     displayCustomerPhone(customer?.phone),
+    stripUnknownGuestTag(booking.note) ?? "—",
   ];
 }
 
@@ -356,7 +359,7 @@ function populateBookingWorksheet(
       currentHourKey = hourKey;
       const arrival = resolveBookingArrivalTime(booking);
       const groupLabel = formatHourGroupLabel(arrival, isDateRange);
-      const hourRow = worksheet.addRow(["", "", groupLabel, "", ""]);
+      const hourRow = worksheet.addRow(["", "", groupLabel, "", "", ""]);
       hourRow.font = { bold: true, size: FONT_SIZE.body };
       hourRow.fill = GROUP_HEADER_FILL;
       hourRow.alignment = { vertical: "middle" };
