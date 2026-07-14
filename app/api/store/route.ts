@@ -66,6 +66,12 @@ const handlers: Record<string, StoreHandler> = {
   },
   deleteCustomers: (payload) =>
     store.deleteCustomersInSupabase(payload as string[]),
+  purgeCustomersWithRelatedData: (payload) =>
+    store.purgeCustomersWithRelatedDataInSupabase(payload as string[]),
+  purgeDataInDateRange: (payload) =>
+    store.purgeDataInDateRangeInSupabase(
+      payload as Parameters<typeof store.purgeDataInDateRangeInSupabase>[0]
+    ),
   checkInBooking: (payload) =>
     store.checkInBookingInSupabase(payload as string),
   queueBooking: (payload) => {

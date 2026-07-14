@@ -174,6 +174,19 @@ export async function deleteCustomersInSupabase(customerIds: string[]): Promise<
   return callStore("deleteCustomers", customerIds);
 }
 
+export async function purgeCustomersWithRelatedDataInSupabase(
+  customerIds: string[]
+): Promise<import("./supabase-store-server").PurgeDataResult> {
+  return callStore("purgeCustomersWithRelatedData", customerIds);
+}
+
+export async function purgeDataInDateRangeInSupabase(input: {
+  fromIso: string;
+  toIso: string;
+}): Promise<import("./supabase-store-server").PurgeDataResult> {
+  return callStore("purgeDataInDateRange", input);
+}
+
 export async function checkInBookingInSupabase(bookingId: string): Promise<void> {
   await callStore("checkInBooking", bookingId);
 }
