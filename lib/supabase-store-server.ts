@@ -191,6 +191,37 @@ function ensureClient(): StoreClient {
   return client;
 }
 
+/** PostgREST/Supabase default max rows returned per request. */
+const SUPABASE_PAGE_SIZE = 1000;
+
+type PagedQueryResult<T> = {
+  data: T[] | null;
+  error: { message: string } | null;
+};
+
+/**
+ * Fetch every matching row by paging with `.range()`, avoiding silent truncation
+ * once a table exceeds the default 1000-row response cap.
+ */
+async function fetchAllRows<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<PagedQueryResult<T>>
+): Promise<{ data: T[]; error: { message: string } | null }> {
+  const all: T[] = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await fetchPage(from, from + SUPABASE_PAGE_SIZE - 1);
+    if (error) {
+      return { data: all, error };
+    }
+    const rows = data ?? [];
+    all.push(...rows);
+    if (rows.length < SUPABASE_PAGE_SIZE) {
+      return { data: all, error: null };
+    }
+    from += SUPABASE_PAGE_SIZE;
+  }
+}
+
 function mapDiningTableFromRow(item: {
   id: string;
   branch_id: string;
@@ -964,24 +995,33 @@ export async function fetchSnapshot(options?: {
     bookingRuntimeSettings,
   ] = await Promise.all([
     usersPromise,
-    client.from("branches").select("*"),
-    client.from("areas").select("*"),
-    client.from("tables").select("*"),
-    client.from("customers").select("*"),
-    client.from("bookings").select("*"),
-    client
-      .from("internal_notifications")
-      .select("*")
-      .order("created_at", { ascending: false }),
-    client
-      .from("table_merge_groups")
-      .select("*")
-      .eq("status", "active")
-      .order("auto_number", { ascending: true }),
-    client
-      .from("table_merge_members")
-      .select("group_id, table_id, order_index")
-      .order("order_index", { ascending: true }),
+    fetchAllRows((from, to) => client.from("branches").select("*").range(from, to)),
+    fetchAllRows((from, to) => client.from("areas").select("*").range(from, to)),
+    fetchAllRows((from, to) => client.from("tables").select("*").range(from, to)),
+    fetchAllRows((from, to) => client.from("customers").select("*").range(from, to)),
+    fetchAllRows((from, to) => client.from("bookings").select("*").range(from, to)),
+    fetchAllRows((from, to) =>
+      client
+        .from("internal_notifications")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .range(from, to)
+    ),
+    fetchAllRows((from, to) =>
+      client
+        .from("table_merge_groups")
+        .select("*")
+        .eq("status", "active")
+        .order("auto_number", { ascending: true })
+        .range(from, to)
+    ),
+    fetchAllRows((from, to) =>
+      client
+        .from("table_merge_members")
+        .select("group_id, table_id, order_index")
+        .order("order_index", { ascending: true })
+        .range(from, to)
+    ),
     getBookingRuntimeSettings(client),
   ]);
 
