@@ -121,7 +121,7 @@ export default function BookingRulesSettingsPage() {
             />
             <EditableNumberInput
               label="Thời gian trễ tối đa (phút)"
-              description="Khách đã xác nhận quá N phút sau giờ đến mà chưa check-in → Trễ. Cuối ngày nếu vẫn Trễ → Không đến."
+              description="Khách đã xác nhận quá N phút sau giờ đến mà chưa check-in → Trễ. Cuối ngày nếu vẫn Trễ hoặc còn Chờ xếp bàn → Không đến."
               required
               disabled={saving}
               value={draft.lateGraceMinutes}

@@ -409,7 +409,7 @@ pending ──assign──► confirmed ──check-in / auto-seat──► seat
 Notes:
 
 - App maps UI `checked_in` → DB `seated` in `updateBookingStatusInSupabase`.
-- `run_booking_maintenance`: `confirmed` past late grace → `late`; `late` with local day **before today** → `no_show` and clears `table_id` / `merge_group_id` / `area_id`.
+- `run_booking_maintenance`: `confirmed` past late grace → `late`; `late` or `pending` (Chờ xếp bàn) with local day **before today** → `no_show` and clears `table_id` / `merge_group_id` / `area_id`.
 - Trigger `trg_on_booking_slot_released` fires when status becomes `cancelled` or `no_show` (and `old.table_id` was set) → stub waitlist promote.
 
 **How data arrives (main functions)**
@@ -716,7 +716,7 @@ Returns `(no_show_count, expired_offer_count, promoted_count, late_count)` — l
 
 1. Read `late_grace_minutes` from singleton settings.
 2. `confirmed` + no check-in + start ≤ now − grace → `late` (+ `late_marked_at`).
-3. `late` whose local day < today → `no_show`, clear assignment columns.
+3. `late` or `pending` whose local day < today → `no_show`, clear assignment columns.
 
 Called from `maybeRunBookingMaintenance` / `runBookingMaintenanceInSupabase` (throttled on snapshot).
 
@@ -904,6 +904,7 @@ Applied on the linked project (names only — SQL not in repo):
 | 20260517172950 | `bookings_last_edited_tracking` |
 | 20260523152945 | `enable_realtime_publication_for_booking_app` |
 | 20260523195044 | `run_booking_maintenance_include_pending_no_show` |
+| 20260714070127 | `run_booking_maintenance_pending_end_of_day_no_show` |
 | 20260524102626 | `merge_tables_overhaul` |
 | 20260524102710 | `merge_tables_rpc_merge_group_support` |
 | 20260525111232 | `table_merge_groups_validity_dates` |
