@@ -66,6 +66,10 @@ const handlers: Record<string, StoreHandler> = {
   },
   deleteCustomers: (payload) =>
     store.deleteCustomersInSupabase(payload as string[]),
+  mergeCustomers: (payload) =>
+    store.mergeCustomersInSupabase(
+      payload as Parameters<typeof store.mergeCustomersInSupabase>[0]
+    ),
   purgeCustomersWithRelatedData: (payload) =>
     store.purgeCustomersWithRelatedDataInSupabase(payload as string[]),
   purgeDataInDateRange: (payload) =>

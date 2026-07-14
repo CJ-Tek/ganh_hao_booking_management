@@ -330,11 +330,14 @@ Delete behavior (summary): cascading deletes from `branches` / `areas` / `tables
 | `full_name` | `text` | NO | — | Guest name |
 | `phone` | `text` | YES | — | Phone; NULL when unknown |
 | `note` | `text` | YES | — | Free-form note |
+| `created_at` | `timestamptz` | NO | `now()` | Profile created |
+| `updated_at` | `timestamptz` | NO | `now()` | Profile last updated (trigger on UPDATE) |
 
 **Constraints / indexes**
 
 - PK
 - **Partial unique** `customers_phone_unique_when_set` on `phone` WHERE `phone IS NOT NULL` — multiple NULL phones allowed; non-null phones unique
+- Trigger `customers_set_updated_at` keeps `updated_at` current on row updates
 
 **Relationships:** `bookings.customer_id` → CASCADE delete of bookings if customer deleted (app blocks delete when bookings exist).
 
@@ -343,10 +346,11 @@ Delete behavior (summary): cascading deletes from `branches` / `areas` / `tables
 - `upsertCustomerForBooking` during create / order edit: match by phone when present, else insert; may update `full_name`
 - Direct updates during booking order edit paths in `updateBookingOrderInSupabase`
 - `deleteCustomersInSupabase` — refuses if any booking references IDs
+- `merge_customers` RPC / `mergeCustomersInSupabase` — reassigns all loser bookings onto a survivor id, updates survivor profile (`full_name` / `phone` / `note`), then deletes loser customer rows (booking histories add on the survivor)
 
 **How data is read**
 
-- Snapshot full table; floor-map day bookings load customers by ID set.
+- Snapshot full table; floor-map day bookings load customers by ID set; customer management list shows `created_at` / `updated_at`
 
 **Phone normalization:** SQL `normalize_vietnam_phone` used by duplicate RPC; app also normalizes in TS for duplicate checks / storage consistency.
 
@@ -924,6 +928,10 @@ Applied on the linked project (names only — SQL not in repo):
 | 20260612110543 | `remove_on_hold_status` |
 | 20260616040645 | `app_users_audit_and_admin_fields` |
 | 20260630061721 | `late_booking_keep_table_reminder` |
+| 20260714060522 | `customers_add_created_at` |
+| 20260714070127 | `run_booking_maintenance_pending_end_of_day_no_show` |
+| 20260714101328 | `customers_add_updated_at` |
+| 20260714104640 | `merge_customers_rpc` |
 
 ---
 

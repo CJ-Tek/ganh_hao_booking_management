@@ -68,6 +68,8 @@ export interface Customer {
   note?: string;
   /** When the customer profile was first created. */
   createdAt?: string;
+  /** When the customer profile was last updated. */
+  updatedAt?: string;
 }
 
 export interface Booking {

@@ -30,6 +30,10 @@ export type BookingSummaryCompactCardProps = {
   /** Optional second line under assignee: [name] cập nhật lúc [time]. */
   updatedLabel?: { name: string; time: string } | null;
   metaSegments: BookingSummaryMetaSegment[];
+  /** Inline (default) joins segments with " · "; stack puts each segment on its own line. */
+  metaLayout?: "inline" | "stack";
+  /** Right-aligned stacked labels (e.g. customer created/updated dates). */
+  metaTrailingSegments?: BookingSummaryMetaSegment[];
   note?: string | null;
   onClick?: () => void;
   className?: string;
@@ -49,6 +53,8 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
     createdBy,
     updatedLabel,
     metaSegments,
+    metaLayout = "inline",
+    metaTrailingSegments,
     note,
     onClick,
     className,
@@ -58,9 +64,69 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
 
   const isCompact = usePortalCompact();
   const hasTitleSuffix = Boolean(titleSuffix?.bold || titleSuffix?.normal);
-  const hasMetaBlock = metaSegments.length > 0 || Boolean(createdBy) || Boolean(note);
+  const trailingSegments = metaTrailingSegments ?? [];
+  const hasMetaBlock =
+    metaSegments.length > 0 || trailingSegments.length > 0 || Boolean(createdBy) || Boolean(note);
   const creatorAlign = isCompact ? "flex-start" : "flex-end";
   const creatorTextAlign = isCompact ? "left" : "right";
+
+  const renderMetaSegmentText = (segment: BookingSummaryMetaSegment, index: number) => (
+    <Text
+      key={`${segment.text}-${index}`}
+      size="xs"
+      lh={1.45}
+      fw={segment.emphasize ? 700 : 500}
+      c={segment.emphasize ? undefined : "dimmed"}
+      style={{ minWidth: 0, wordBreak: "break-word" }}
+    >
+      {segment.text}
+    </Text>
+  );
+
+  const metaPrimary =
+    metaSegments.length > 0 ? (
+      metaLayout === "stack" ? (
+        <Stack gap={2}>{metaSegments.map(renderMetaSegmentText)}</Stack>
+      ) : (
+        <Text size="xs" lh={1.45} style={{ minWidth: 0, wordBreak: "break-word" }}>
+          {metaSegments.map((segment, index) => (
+            <Fragment key={`${segment.text}-${index}`}>
+              {index > 0 ? (
+                <Text component="span" c="dimmed" fw={400}>
+                  {" · "}
+                </Text>
+              ) : null}
+              <Text
+                component="span"
+                fw={segment.emphasize ? 700 : 500}
+                c={segment.emphasize ? undefined : "dimmed"}
+              >
+                {segment.text}
+              </Text>
+            </Fragment>
+          ))}
+        </Text>
+      )
+    ) : null;
+
+  const metaTrailing =
+    trailingSegments.length > 0 ? (
+      <Stack gap={2} align="flex-end" style={{ flexShrink: 0 }}>
+        {trailingSegments.map((segment, index) => (
+          <Text
+            key={`${segment.text}-${index}`}
+            size="xs"
+            lh={1.45}
+            fw={segment.emphasize ? 700 : 500}
+            c={segment.emphasize ? undefined : "dimmed"}
+            ta="right"
+            style={{ minWidth: 0, wordBreak: "break-word" }}
+          >
+            {segment.text}
+          </Text>
+        ))}
+      </Stack>
+    ) : null;
 
   const titleSuffixContent = hasTitleSuffix ? (
     <>
@@ -152,29 +218,21 @@ export function BookingSummaryCompactCard(props: BookingSummaryCompactCardProps)
           {hasMetaBlock ? (
             <Stack gap={4}>
               {highlightedNote}
-              {metaSegments.length > 0 ? (
-                <Text
-                  size="xs"
-                  lh={1.45}
-                  style={{ minWidth: 0, wordBreak: "break-word" }}
-                >
-                  {metaSegments.map((segment, index) => (
-                    <Fragment key={`${segment.text}-${index}`}>
-                      {index > 0 ? (
-                        <Text component="span" c="dimmed" fw={400}>
-                          {" · "}
-                        </Text>
-                      ) : null}
-                      <Text
-                        component="span"
-                        fw={segment.emphasize ? 700 : 500}
-                        c={segment.emphasize ? undefined : "dimmed"}
-                      >
-                        {segment.text}
-                      </Text>
-                    </Fragment>
-                  ))}
-                </Text>
+              {metaPrimary || metaTrailing ? (
+                metaTrailing ? (
+                  <Group
+                    justify="space-between"
+                    align="flex-start"
+                    wrap="nowrap"
+                    gap="sm"
+                    w="100%"
+                  >
+                    <Box style={{ flex: 1, minWidth: 0 }}>{metaPrimary}</Box>
+                    {metaTrailing}
+                  </Group>
+                ) : (
+                  metaPrimary
+                )
               ) : null}
               {createdBy ? (
                 <Stack

@@ -131,12 +131,14 @@ export function resolveOptimisticCustomerForCreate(
     }
   }
   const optimisticId = `optimistic-customer-${bookingId}`;
+  const nowIso = new Date().toISOString();
   const customer: Customer = {
     id: optimisticId,
     fullName: input.customerName.trim(),
     phone,
     note: undefined,
-    createdAt: new Date().toISOString(),
+    createdAt: nowIso,
+    updatedAt: nowIso,
   };
   return {
     customers: [customer, ...prev.customers.filter((item) => item.id !== optimisticId)],
