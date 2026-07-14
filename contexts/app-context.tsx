@@ -80,6 +80,7 @@ import {
   deleteTableInSupabase,
   deleteTablesInSupabase,
   deleteCustomersInSupabase,
+  mergeCustomersInSupabase,
   purgeCustomersWithRelatedDataInSupabase,
   purgeDataInDateRangeInSupabase,
   releaseTableMergeGroupInSupabase,
@@ -267,6 +268,14 @@ interface AppContextValue {
   checkInBooking: (bookingId: string, seedBooking?: Booking) => Promise<void>;
   queueBooking: (bookingId: string, seedBooking?: Booking) => Promise<ActionResult>;
   deleteCustomers: (customerIds: string[]) => Promise<ActionResult>;
+  /** Branch editors: merge 2+ customers onto one survivor; bookings reassign and add. */
+  mergeCustomers: (input: {
+    survivorId: string;
+    sourceIds: string[];
+    fullName: string;
+    phone: string | null;
+    note: string | null;
+  }) => Promise<ActionResult & { survivorId?: string; mergedBookingCount?: number }>;
   /** GM/admin: hard-delete customers and all related bookings. */
   purgeCustomersWithRelatedData: (customerIds: string[]) => Promise<ActionResult>;
   /** GM/admin: delete bookings in a booking_at range; orphans customers with no bookings left. */
@@ -674,6 +683,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         phone: phone ?? null,
         note: note ?? undefined,
         createdAt: typeof row.created_at === "string" ? row.created_at : undefined,
+        updatedAt: typeof row.updated_at === "string" ? row.updated_at : undefined,
       };
     };
 
@@ -1934,6 +1944,94 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     return result;
   };
 
+  const mergeCustomers = async (input: {
+    survivorId: string;
+    sourceIds: string[];
+    fullName: string;
+    phone: string | null;
+    note: string | null;
+  }) => {
+    if (isEmployeeUser(currentUser)) {
+      return { ok: false, message: EMPLOYEE_MUTATION_BLOCKED };
+    }
+    const viewOnlyBlock = managerViewOnlyResult(currentUser, state.activeBranchId);
+    if (viewOnlyBlock) {
+      return viewOnlyBlock;
+    }
+    if (!canEditActiveBranch) {
+      return { ok: false, message: "Không có quyền gộp khách hàng trên chi nhánh đang chọn." };
+    }
+
+    const sourceIds = [...new Set(input.sourceIds.map((id) => id.trim()).filter(Boolean))];
+    const survivorId = input.survivorId.trim();
+    const fullName = input.fullName.trim();
+    if (sourceIds.length < 2) {
+      return { ok: false, message: "Cần chọn ít nhất 2 khách hàng để gộp." };
+    }
+    if (!survivorId || !sourceIds.includes(survivorId)) {
+      return { ok: false, message: "Hồ sơ giữ lại phải nằm trong danh sách gộp." };
+    }
+    if (!fullName) {
+      return { ok: false, message: "Tên khách không được để trống." };
+    }
+
+    const loserIds = sourceIds.filter((id) => id !== survivorId);
+    const note =
+      input.note != null && input.note.trim().length > 0 ? input.note.trim() : null;
+    const nowIso = new Date().toISOString();
+
+    const applyMergeToState = () => {
+      const loserSet = new Set(loserIds);
+      customerDeleteTombstonesRef.current.register(loserIds);
+      setState((prev) => ({
+        ...prev,
+        customers: prev.customers
+          .filter((customer) => !loserSet.has(customer.id))
+          .map((customer) =>
+            customer.id === survivorId
+              ? {
+                  ...customer,
+                  fullName,
+                  phone: input.phone,
+                  note: note ?? undefined,
+                  updatedAt: nowIso,
+                }
+              : customer
+          ),
+        bookings: prev.bookings.map((booking) =>
+          loserSet.has(booking.customerId)
+            ? { ...booking, customerId: survivorId }
+            : booking
+        ),
+      }));
+    };
+
+    if (!hasSupabase) {
+      const mergedBookingCount = state.bookings.filter((booking) =>
+        sourceIds.includes(booking.customerId)
+      ).length;
+      applyMergeToState();
+      return {
+        ok: true,
+        message: `Đã gộp ${sourceIds.length} khách → 1 hồ sơ (${mergedBookingCount} booking).`,
+        survivorId,
+        mergedBookingCount,
+      };
+    }
+
+    const result = await mergeCustomersInSupabase({
+      survivorId,
+      sourceIds,
+      fullName,
+      phone: input.phone,
+      note,
+    });
+    if (result.ok) {
+      applyMergeToState();
+    }
+    return result;
+  };
+
   const canPurgeCustomerData =
     currentUser?.role === "general_manager" || currentUser?.role === "admin";
 
@@ -3109,6 +3207,7 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     checkInBooking,
     queueBooking,
     deleteCustomers,
+    mergeCustomers,
     purgeCustomersWithRelatedData,
     purgeDataInDateRange,
     upsertTable,

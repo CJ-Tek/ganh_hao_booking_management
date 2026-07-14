@@ -13,6 +13,7 @@ export type CustomerListRow = {
   bookingCount: number;
   latestBooking?: string;
   createdAt?: string;
+  updatedAt?: string;
 };
 
 export function CustomerCompactCard(props: {
@@ -27,30 +28,28 @@ export function CustomerCompactCard(props: {
   const createdLabel = row.createdAt
     ? `Tạo ${dayjs(row.createdAt).format("DD/MM/YYYY")}`
     : null;
+  const updatedLabel = row.updatedAt
+    ? `Cập nhật ${dayjs(row.updatedAt).format("DD/MM/YYYY")}`
+    : null;
+
+  const latestBookingLabel = row.latestBooking
+    ? `Booking gần nhất ${dayjs(row.latestBooking).format("HH:mm")} ${dayjs(row.latestBooking).format("DD/MM/YYYY")}`
+    : "Chưa có booking";
 
   return (
     <BookingSummaryCompactCard
       showTimeColumn={false}
       title={row.fullName}
+      titleSuffix={{ bold: phone, normal: "" }}
       badge={{
         label: `${row.bookingCount} booking`,
         color: row.bookingCount > 0 ? "green" : "gray",
       }}
-      metaSegments={
-        row.latestBooking
-          ? [
-              { text: phone, emphasize: true },
-              ...(createdLabel ? [{ text: createdLabel, emphasize: false }] : []),
-              { text: "Booking gần nhất", emphasize: false },
-              { text: dayjs(row.latestBooking).format("HH:mm"), emphasize: false },
-              { text: dayjs(row.latestBooking).format("DD/MM/YYYY"), emphasize: false },
-            ]
-          : [
-              { text: phone, emphasize: true },
-              ...(createdLabel ? [{ text: createdLabel, emphasize: false }] : []),
-              { text: "Chưa có booking", emphasize: false },
-            ]
-      }
+      metaSegments={[{ text: latestBookingLabel, emphasize: false }]}
+      metaTrailingSegments={[
+        ...(createdLabel ? [{ text: createdLabel, emphasize: false }] : []),
+        ...(updatedLabel ? [{ text: updatedLabel, emphasize: false }] : []),
+      ]}
       note={row.note?.trim() ? row.note : null}
       onClick={onClick}
       leadingSlot={

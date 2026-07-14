@@ -1,7 +1,7 @@
 "use client";
 
 import dayjs from "dayjs";
-import { Button, Drawer, Group, Modal, Select, Stack, Text } from "@mantine/core";
+import { Button, Drawer, Group, Select, Stack, Text } from "@mantine/core";
 import { BookingCompactCard } from "@/components/booking-management/booking-compact-card";
 import { BookingListDateRangeFilter } from "@/components/booking-management/booking-list-date-range-filter";
 import { type DataTableSortStatus } from "mantine-datatable";
@@ -19,6 +19,7 @@ import {
   CustomerCompactCard,
   type CustomerListRow,
 } from "@/components/customers/customer-compact-card";
+import { MergeCustomersModal } from "@/components/customers/merge-customers-modal";
 import { PortalDataTable } from "@/components/portal-data-table";
 import { PortalListSectionDesktop } from "@/components/portal-list/portal-list-section-desktop";
 import {
@@ -26,6 +27,7 @@ import {
   PortalListSectionMobile,
 } from "@/components/portal-list/portal-list-section-mobile";
 import { PortalPageTitle } from "@/components/portal-page";
+import { PortalStandardModal } from "@/components/portal-standard-modal/portal-standard-modal";
 import { useAppContext } from "@/contexts/app-context";
 import { usePortalCompact } from "@/lib/use-portal-compact";
 import { displayCustomerPhone } from "@/lib/booking-meta";
@@ -42,6 +44,8 @@ const CUSTOMER_SORT_OPTIONS = [
   { value: "latestBooking:asc", label: "Booking xa nhất" },
   { value: "createdAt:desc", label: "Mới tạo → Cũ" },
   { value: "createdAt:asc", label: "Cũ → Mới tạo" },
+  { value: "updatedAt:desc", label: "Mới cập nhật → Cũ" },
+  { value: "updatedAt:asc", label: "Cũ → Mới cập nhật" },
   { value: "fullName:asc", label: "Tên A → Z" },
   { value: "fullName:desc", label: "Tên Z → A" },
   { value: "bookingCount:desc", label: "Nhiều booking nhất" },
@@ -64,6 +68,7 @@ function parseCustomerSortValue(
   if (
     (columnAccessor !== "latestBooking" &&
       columnAccessor !== "createdAt" &&
+      columnAccessor !== "updatedAt" &&
       columnAccessor !== "fullName" &&
       columnAccessor !== "bookingCount" &&
       columnAccessor !== "phone") ||
@@ -93,6 +98,7 @@ export default function CustomersPage() {
     filteredBranchIds,
     currentUser,
     deleteCustomers,
+    mergeCustomers,
     purgeCustomersWithRelatedData,
     purgeDataInDateRange,
     canEditActiveBranch,
@@ -110,11 +116,13 @@ export default function CustomersPage() {
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerListRow | null>(null);
   const [selectedCustomers, setSelectedCustomers] = useState<CustomerListRow[]>([]);
   const [dateRangeModalOpen, setDateRangeModalOpen] = useState(false);
+  const [mergeModalOpen, setMergeModalOpen] = useState(false);
   const [purgeRangeStart, setPurgeRangeStart] = useState(() =>
     dayjs().subtract(30, "day").format("YYYY-MM-DD")
   );
   const [purgeRangeEnd, setPurgeRangeEnd] = useState(() => dayjs().format("YYYY-MM-DD"));
   const [isPurging, setIsPurging] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
 
   const canPurgeCustomerData =
     currentUser?.role === "general_manager" || currentUser?.role === "admin";
@@ -144,6 +152,7 @@ export default function CustomersPage() {
           bookingCount: bookings.length,
           latestBooking: bookings[0]?.bookingAt,
           createdAt: customer.createdAt,
+          updatedAt: customer.updatedAt,
         };
       }),
     [filteredBranchIds, state.bookings, state.customers]
@@ -192,6 +201,11 @@ export default function CustomersPage() {
         if (accessor === "createdAt") {
           const av = a.createdAt ? dayjs(a.createdAt).valueOf() : 0;
           const bv = b.createdAt ? dayjs(b.createdAt).valueOf() : 0;
+          return dir * (av - bv);
+        }
+        if (accessor === "updatedAt") {
+          const av = a.updatedAt ? dayjs(a.updatedAt).valueOf() : 0;
+          const bv = b.updatedAt ? dayjs(b.updatedAt).valueOf() : 0;
           return dir * (av - bv);
         }
         if (accessor === "latestBooking") {
@@ -443,13 +457,25 @@ export default function CustomersPage() {
       w={isCompact ? "100%" : undefined}
       style={isCompact ? undefined : { flexShrink: 0 }}
     >
+      {canEditActiveBranch ? (
+        <Button
+          color="orange"
+          variant="light"
+          size={isCompact ? "md" : "sm"}
+          disabled={selectedCustomers.length < 2 || isPurging || isMerging}
+          onClick={() => setMergeModalOpen(true)}
+          style={equalWidthButtonStyle}
+        >
+          Gộp khách ({selectedCustomers.length})
+        </Button>
+      ) : null}
       {canPurgeCustomerData ? (
         <Button
           color="red"
           variant="outline"
           size={isCompact ? "md" : "sm"}
           onClick={() => setDateRangeModalOpen(true)}
-          disabled={isPurging}
+          disabled={isPurging || isMerging}
           style={equalWidthButtonStyle}
         >
           Xóa theo thời gian
@@ -460,7 +486,7 @@ export default function CustomersPage() {
           color="red"
           variant="light"
           size={isCompact ? "md" : "sm"}
-          disabled={selectedCustomers.length === 0 || isPurging}
+          disabled={selectedCustomers.length === 0 || isPurging || isMerging}
           onClick={() => void handleDeleteSelected()}
           style={equalWidthButtonStyle}
         >
@@ -521,7 +547,7 @@ export default function CustomersPage() {
                 variant="default"
                 size={isCompact ? "md" : "sm"}
                 onClick={selectCurrentPageCustomers}
-                disabled={pagedCustomerRows.length === 0 || isPurging}
+                disabled={pagedCustomerRows.length === 0 || isPurging || isMerging}
                 style={equalWidthButtonStyle}
               >
                 Chọn trang ({pagedCustomerRows.length})
@@ -530,7 +556,7 @@ export default function CustomersPage() {
                 variant="default"
                 size={isCompact ? "md" : "sm"}
                 onClick={() => setSelectedCustomers([])}
-                disabled={selectedCustomers.length === 0 || isPurging}
+                disabled={selectedCustomers.length === 0 || isPurging || isMerging}
                 style={equalWidthButtonStyle}
               >
                 Bỏ chọn
@@ -574,7 +600,7 @@ export default function CustomersPage() {
               ? (selected) => setCustomerSelected(row, selected)
               : undefined
           }
-          selectionDisabled={isPurging}
+          selectionDisabled={isPurging || isMerging}
           onClick={() => openCustomerDetail(row)}
         />
       )}
@@ -593,6 +619,13 @@ export default function CustomersPage() {
           sortable: true,
           render: (row) =>
             row.createdAt ? dayjs(row.createdAt).format("DD/MM/YYYY HH:mm") : "—",
+        },
+        {
+          accessor: "updatedAt",
+          title: "Ngày cập nhật",
+          sortable: true,
+          render: (row) =>
+            row.updatedAt ? dayjs(row.updatedAt).format("DD/MM/YYYY HH:mm") : "—",
         },
         {
           accessor: "latestBooking",
@@ -658,7 +691,7 @@ export default function CustomersPage() {
                     ? (selected) => setCustomerSelected(row, selected)
                     : undefined
                 }
-                selectionDisabled={isPurging}
+                selectionDisabled={isPurging || isMerging}
                 onClick={() => openCustomerDetail(row)}
               />
             ))
@@ -698,6 +731,12 @@ export default function CustomersPage() {
             Ngày tạo:{" "}
             {selectedCustomer?.createdAt
               ? dayjs(selectedCustomer.createdAt).format("DD/MM/YYYY HH:mm")
+              : "—"}
+          </Text>
+          <Text size="sm" c="dimmed">
+            Ngày cập nhật:{" "}
+            {selectedCustomer?.updatedAt
+              ? dayjs(selectedCustomer.updatedAt).format("DD/MM/YYYY HH:mm")
               : "—"}
           </Text>
           <Text size="sm" c="dimmed">
@@ -782,15 +821,36 @@ export default function CustomersPage() {
         </Stack>
       </Drawer>
 
-      <Modal
+      <PortalStandardModal
         opened={dateRangeModalOpen}
         onClose={() => {
           if (!isPurging) {
             setDateRangeModalOpen(false);
           }
         }}
+        closeOnClickOutside={!isPurging}
+        closeOnEscape={!isPurging}
         title="Xóa dữ liệu theo khoảng thời gian"
-        centered
+        size="md"
+        footer={
+          <Group justify="flex-end" gap="sm" wrap="nowrap">
+            <Button
+              variant="default"
+              disabled={isPurging}
+              onClick={() => setDateRangeModalOpen(false)}
+            >
+              Hủy
+            </Button>
+            <Button
+              color="red"
+              loading={isPurging}
+              disabled={rangePreview.bookingCount === 0}
+              onClick={() => void handlePurgeDateRange()}
+            >
+              Xóa theo khoảng
+            </Button>
+          </Group>
+        }
       >
         <Stack gap="md">
           <Text size="sm" c="dimmed">
@@ -815,25 +875,42 @@ export default function CustomersPage() {
             </Text>{" "}
             khách hàng sẽ bị xóa hết.
           </Text>
-          <Group justify="flex-end" gap="sm">
-            <Button
-              variant="default"
-              disabled={isPurging}
-              onClick={() => setDateRangeModalOpen(false)}
-            >
-              Hủy
-            </Button>
-            <Button
-              color="red"
-              loading={isPurging}
-              disabled={rangePreview.bookingCount === 0}
-              onClick={() => void handlePurgeDateRange()}
-            >
-              Xóa theo khoảng
-            </Button>
-          </Group>
         </Stack>
-      </Modal>
+      </PortalStandardModal>
+
+      <MergeCustomersModal
+        opened={mergeModalOpen}
+        customers={selectedCustomers}
+        onClose={() => {
+          if (!isMerging) {
+            setMergeModalOpen(false);
+          }
+        }}
+        onConfirm={async (input) => {
+          setIsMerging(true);
+          try {
+            const result = await mergeCustomers(input);
+            if (!result.ok) {
+              return result;
+            }
+            openPortalAlertModal({
+              title: "Đã gộp khách",
+              message: result.message,
+            });
+            const deletedIds = selectedCustomers
+              .map((row) => row.id)
+              .filter((id) => id !== result.survivorId);
+            setSelectedCustomers([]);
+            setSelectedCustomer((prev) =>
+              prev && deletedIds.includes(prev.id) ? null : prev
+            );
+            setMergeModalOpen(false);
+            return result;
+          } finally {
+            setIsMerging(false);
+          }
+        }}
+      />
     </Stack>
   );
 }

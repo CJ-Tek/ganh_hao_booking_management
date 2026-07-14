@@ -174,6 +174,12 @@ export async function deleteCustomersInSupabase(customerIds: string[]): Promise<
   return callStore("deleteCustomers", customerIds);
 }
 
+export async function mergeCustomersInSupabase(
+  input: import("./supabase-store-server").MergeCustomersInput
+): Promise<import("./supabase-store-server").MergeCustomersResult> {
+  return callStore("mergeCustomers", input);
+}
+
 export async function purgeCustomersWithRelatedDataInSupabase(
   customerIds: string[]
 ): Promise<import("./supabase-store-server").PurgeDataResult> {

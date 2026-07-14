@@ -1123,6 +1123,7 @@ export async function fetchSnapshot(options?: {
         phone: item.phone,
         note: item.note ?? undefined,
         createdAt: item.created_at ?? undefined,
+        updatedAt: item.updated_at ?? undefined,
       })) ?? [],
     bookings,
     mergeGroups,
@@ -1317,6 +1318,7 @@ export async function fetchFloorMapDayBookingsInSupabase(
         phone: item.phone,
         note: item.note ?? undefined,
         createdAt: item.created_at ?? undefined,
+        updatedAt: item.updated_at ?? undefined,
       })) ?? [];
   }
 
@@ -2664,6 +2666,109 @@ export async function deleteCustomersInSupabase(customerIds: string[]): Promise<
     return { ok: false, message: error.message };
   }
   return { ok: true, message: "Đã xóa khách hàng." };
+}
+
+export type MergeCustomersInput = {
+  survivorId: string;
+  sourceIds: string[];
+  fullName: string;
+  phone: string | null;
+  note: string | null;
+};
+
+export type MergeCustomersResult = Result & {
+  survivorId?: string;
+  mergedBookingCount?: number;
+  deletedCustomerIds?: string[];
+};
+
+function mergeCustomersErrorMessage(raw: string): string {
+  if (raw.includes("MERGE_CUSTOMERS:need_at_least_two")) {
+    return "Cần chọn ít nhất 2 khách hàng để gộp.";
+  }
+  if (raw.includes("MERGE_CUSTOMERS:survivor_not_in_sources")) {
+    return "Hồ sơ giữ lại phải nằm trong danh sách gộp.";
+  }
+  if (raw.includes("MERGE_CUSTOMERS:name_required")) {
+    return "Tên khách không được để trống.";
+  }
+  if (raw.includes("MERGE_CUSTOMERS:missing_customer")) {
+    return "Một hoặc nhiều khách hàng không còn tồn tại. Vui lòng tải lại trang.";
+  }
+  if (raw.includes("MERGE_CUSTOMERS:phone_taken")) {
+    return "Số điện thoại đã được dùng cho khách hàng khác.";
+  }
+  return raw;
+}
+
+export async function mergeCustomersInSupabase(
+  input: MergeCustomersInput
+): Promise<MergeCustomersResult> {
+  const client = ensureClient();
+  const sourceIds = [...new Set(input.sourceIds.map((id) => id.trim()).filter(Boolean))];
+  const survivorId = input.survivorId.trim();
+  const fullName = input.fullName.trim();
+  if (sourceIds.length < 2) {
+    return { ok: false, message: "Cần chọn ít nhất 2 khách hàng để gộp." };
+  }
+  if (!survivorId || !sourceIds.includes(survivorId)) {
+    return { ok: false, message: "Hồ sơ giữ lại phải nằm trong danh sách gộp." };
+  }
+  if (!fullName) {
+    return { ok: false, message: "Tên khách không được để trống." };
+  }
+
+  let phone: string | null = null;
+  if (input.phone != null && input.phone.trim().length > 0) {
+    const normalized = normalizeVietnamPhone(input.phone.trim());
+    if (isSyntheticPhoneValue(normalized) || !isPlausibleVietnamPhone(normalized)) {
+      return {
+        ok: false,
+        message:
+          "Số điện thoại không đúng định dạng Việt Nam (ví dụ 0912345678, +84912345678).",
+      };
+    }
+    phone = normalized;
+  }
+
+  const note =
+    input.note != null && input.note.trim().length > 0 ? input.note.trim() : null;
+
+  const { data, error } = await client.rpc("merge_customers", {
+    p_survivor_id: survivorId,
+    p_source_ids: sourceIds,
+    p_full_name: fullName,
+    p_phone: phone,
+    p_note: note,
+  });
+
+  if (error) {
+    return { ok: false, message: mergeCustomersErrorMessage(error.message) };
+  }
+
+  const payload = (data ?? {}) as {
+    survivor_id?: string;
+    deleted_customer_ids?: string[];
+    merged_booking_count?: number;
+    deleted_customer_count?: number;
+  };
+  const deletedCustomerIds = Array.isArray(payload.deleted_customer_ids)
+    ? payload.deleted_customer_ids.filter((id): id is string => typeof id === "string")
+    : sourceIds.filter((id) => id !== survivorId);
+  const mergedBookingCount =
+    typeof payload.merged_booking_count === "number" ? payload.merged_booking_count : 0;
+  const deletedCount =
+    typeof payload.deleted_customer_count === "number"
+      ? payload.deleted_customer_count
+      : deletedCustomerIds.length;
+
+  return {
+    ok: true,
+    message: `Đã gộp ${deletedCount + 1} khách → 1 hồ sơ (${mergedBookingCount} booking).`,
+    survivorId: typeof payload.survivor_id === "string" ? payload.survivor_id : survivorId,
+    mergedBookingCount,
+    deletedCustomerIds,
+  };
 }
 
 export type PurgeDataResult = Result & {

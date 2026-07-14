@@ -335,6 +335,7 @@ export type Database = {
           id: string
           note: string | null
           phone: string | null
+          updated_at: string
         }
         Insert: {
           created_at?: string
@@ -342,6 +343,7 @@ export type Database = {
           id?: string
           note?: string | null
           phone?: string | null
+          updated_at?: string
         }
         Update: {
           created_at?: string
@@ -349,6 +351,7 @@ export type Database = {
           id?: string
           note?: string | null
           phone?: string | null
+          updated_at?: string
         }
         Relationships: []
       }
@@ -714,6 +717,16 @@ export type Database = {
           start_time: string
           waitlist_id: string
         }[]
+      }
+      merge_customers: {
+        Args: {
+          p_survivor_id: string
+          p_source_ids: string[]
+          p_full_name: string
+          p_phone?: string | null
+          p_note?: string | null
+        }
+        Returns: Json
       }
       create_or_queue_booking: {
         Args: {
