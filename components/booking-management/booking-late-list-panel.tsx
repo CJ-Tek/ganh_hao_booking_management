@@ -142,7 +142,7 @@ export function BookingLateListPanel({
         <Stack gap="xs">
           <EditableNumberInput
             label="Thời gian trễ tối đa (phút)"
-            description="Khách đã xác nhận quá N phút sau giờ đến mà chưa check-in sẽ tự chuyển Trễ. Không đến chỉ áp dụng cuối ngày nếu vẫn Trễ."
+            description="Khách đã xác nhận quá N phút sau giờ đến mà chưa check-in sẽ tự chuyển Trễ. Cuối ngày nếu vẫn Trễ hoặc còn Chờ xếp bàn → Không đến."
             value={draftLateMinutes}
             onChange={(value) => setDraftLateMinutes(value ?? lateGraceMinutes)}
             min={1}
@@ -163,7 +163,8 @@ export function BookingLateListPanel({
       ) : (
         <Alert variant="light" color="orange" title="Quy tắc trễ">
           Khách xác nhận quá <strong>{lateGraceMinutes} phút</strong> sau giờ đến mà chưa check-in
-          → tự chuyển <strong>Trễ</strong>. Cuối ngày nếu vẫn Trễ → <strong>Không đến</strong>.
+          → tự chuyển <strong>Trễ</strong>. Cuối ngày nếu vẫn Trễ hoặc còn Chờ xếp bàn →{" "}
+          <strong>Không đến</strong>.
         </Alert>
       )}
       <PortalDataTable<Booking>
