@@ -45,17 +45,21 @@ export function isLikelySameGuestName(left: string, right: string): boolean {
   if (a === b) {
     return true;
   }
-  if (a.includes(b) || b.includes(a)) {
-    return true;
-  }
   const aTokens = a.split(" ").filter(Boolean);
   const bTokens = b.split(" ").filter(Boolean);
   if (aTokens.length === 0 || bTokens.length === 0) {
     return false;
   }
-  const overlap = aTokens.filter((token) => bTokens.includes(token));
-  return overlap.length >= Math.min(2, Math.max(1, Math.min(aTokens.length, bTokens.length)));
+  // Only treat as the same guest when the shorter name is fully contained in the
+  // longer one at token level (e.g. "Lan" vs "Nguyễn Thị Lan", "Hùng Nguyễn" vs
+  // "Nguyễn Văn Hùng"). Raw substring or partial-token overlap causes false
+  // positives with common Vietnamese surnames/middle names.
+  const [shorter, longer] =
+    aTokens.length <= bTokens.length ? [aTokens, bTokens] : [bTokens, aTokens];
+  return shorter.every((token) => longer.includes(token));
 }
+
+export type BookingDuplicateMatchReason = "phone" | "name";
 
 export type BookingDuplicateInfo = {
   bookingId: string;
@@ -65,7 +69,13 @@ export type BookingDuplicateInfo = {
   receiverUserId?: string;
   customerName?: string;
   tableLabel?: string;
+  /** How the duplicate was detected. Defaults to "phone" when absent. */
+  matchedBy?: BookingDuplicateMatchReason;
 };
+
+export function bookingDuplicatesMatchedByNameOnly(duplicates: BookingDuplicateInfo[]): boolean {
+  return duplicates.length > 0 && duplicates.every((item) => item.matchedBy === "name");
+}
 
 export function formatBookingDuplicateAlertMessage(
   duplicates: BookingDuplicateInfo[],
@@ -84,7 +94,10 @@ export function formatBookingDuplicateAlertMessage(
       : `${at.format("DD/MM/YYYY")} lúc ${at.format("HH:mm")}`;
   const extraCount = duplicates.length - 1;
   const suffix = extraCount > 0 ? ` (+${extraCount} booking cùng khung)` : "";
-  return `Số điện thoại này đã có booking ${slotLabel} - ${first.guestCount} khách - người nhận: ${first.receiverFullName}.${suffix}`;
+  const subject = bookingDuplicatesMatchedByNameOnly(duplicates)
+    ? `Khách tên tương tự${first.customerName ? ` (${first.customerName})` : ""}`
+    : "Số điện thoại này";
+  return `${subject} đã có booking ${slotLabel} - ${first.guestCount} khách - người nhận: ${first.receiverFullName}.${suffix}`;
 }
 
 export const DUPLICATE_BOOKING_CODE = "duplicate_booking" as const;

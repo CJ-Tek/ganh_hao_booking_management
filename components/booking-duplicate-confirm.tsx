@@ -2,7 +2,10 @@
 
 import { Stack, Text } from "@mantine/core";
 import dayjs from "dayjs";
-import { type BookingDuplicateInfo } from "@/lib/booking-duplicate";
+import {
+  type BookingDuplicateInfo,
+  bookingDuplicatesMatchedByNameOnly,
+} from "@/lib/booking-duplicate";
 import { openPortalModalsConfirmModal } from "@/lib/portal-confirm-modal";
 
 export function confirmDuplicateBookingSecond(
@@ -15,12 +18,18 @@ export function confirmDuplicateBookingSecond(
     return;
   }
   const at = dayjs(first.bookingAt);
+  const matchedByNameOnly = bookingDuplicatesMatchedByNameOnly(duplicates);
+  const subject = matchedByNameOnly
+    ? `Khách tên tương tự${first.customerName ? ` (${first.customerName})` : ""}`
+    : "Số điện thoại này";
   openPortalModalsConfirmModal({
-    title: "Phát hiện booking trùng theo SĐT",
+    title: matchedByNameOnly
+      ? "Phát hiện booking trùng theo tên khách"
+      : "Phát hiện booking trùng theo SĐT",
     children: (
       <Stack gap={6}>
         <Text size="sm">
-          Số điện thoại này đã có booking lúc <strong>{at.format("HH:mm DD/MM/YYYY")}</strong> -{" "}
+          {subject} đã có booking lúc <strong>{at.format("HH:mm DD/MM/YYYY")}</strong> -{" "}
           <strong>{first.guestCount}</strong> khách - người nhận:{" "}
           <strong>{first.receiverFullName}</strong>.
         </Text>

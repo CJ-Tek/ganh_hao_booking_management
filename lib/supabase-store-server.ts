@@ -15,6 +15,7 @@ import { createSupabaseAdmin } from "./supabase-admin";
 import {
   bookingSlotKey,
   type BookingDuplicateInfo,
+  type BookingDuplicateMatchReason,
   DUPLICATE_BOOKING_CODE,
   formatBookingDuplicateAlertMessage,
   isPlausibleVietnamPhone,
@@ -441,21 +442,29 @@ async function findBookingDuplicatesByPhoneSlotInSupabase(
       }
       return true;
     })
-    .filter((row) => {
-      const customerJoin = Array.isArray(row.customers) ? row.customers[0] : row.customers;
-      const bookingPhone = customerJoin?.phone ? normalizeVietnamPhone(customerJoin.phone) : "";
-      const phoneMatched = hasValidPhone && bookingPhone === phoneNorm;
-      if (phoneMatched) {
-        return true;
-      }
-      const bookingName = normalizeVietnameseName(customerJoin?.full_name ?? "");
-      if (!bookingName || !targetName) {
-        return false;
-      }
-      return isLikelySameGuestName(bookingName, targetName);
-    })
     .map((row) => {
       const customerJoin = Array.isArray(row.customers) ? row.customers[0] : row.customers;
+      const bookingPhoneRaw = customerJoin?.phone ?? "";
+      const bookingPhone =
+        bookingPhoneRaw && !isSyntheticPhoneValue(bookingPhoneRaw)
+          ? normalizeVietnamPhone(bookingPhoneRaw)
+          : "";
+      const bookingHasValidPhone = Boolean(bookingPhone && isPlausibleVietnamPhone(bookingPhone));
+      // When both sides have a real phone number, the phone is authoritative:
+      // same phone → duplicate, different phone → different guest (never fall
+      // back to fuzzy name matching, which false-positives on common names).
+      let matchedBy: BookingDuplicateMatchReason | null = null;
+      if (hasValidPhone && bookingHasValidPhone) {
+        matchedBy = bookingPhone === phoneNorm ? "phone" : null;
+      } else {
+        const bookingName = normalizeVietnameseName(customerJoin?.full_name ?? "");
+        if (bookingName && targetName && isLikelySameGuestName(bookingName, targetName)) {
+          matchedBy = "name";
+        }
+      }
+      if (!matchedBy) {
+        return null;
+      }
       const creatorJoin = Array.isArray(row.app_users) ? row.app_users[0] : row.app_users;
       return {
         bookingId: row.id,
@@ -465,8 +474,10 @@ async function findBookingDuplicatesByPhoneSlotInSupabase(
         receiverUserId: row.created_by_user_id ?? undefined,
         customerName: customerJoin?.full_name ?? undefined,
         tableLabel: row.table_id ? `Bàn ${row.table_id.slice(0, 8)}` : BOOKING_PENDING_TABLE_LABEL,
+        matchedBy,
       };
-    });
+    })
+    .filter((item): item is Exclude<typeof item, null> => item !== null);
 }
 
 type TableSlotConflictRow = {
