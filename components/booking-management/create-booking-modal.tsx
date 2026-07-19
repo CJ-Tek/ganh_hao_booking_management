@@ -179,6 +179,7 @@ export function CreateBookingModal({
         bookingAt: item.booking.bookingAt,
         guestCount: item.booking.guestCount,
         receiverFullName: item.receiverName,
+        matchedBy: "phone" as const,
       })),
     [duplicateCandidates]
   );
