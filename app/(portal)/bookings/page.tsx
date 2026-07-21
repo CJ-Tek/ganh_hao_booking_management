@@ -805,6 +805,19 @@ function BookingsPageContent() {
     setEditMergeGroupId(booking.mergeGroupId ?? null);
   };
 
+  const handleEditBookingAtChange = (next: string | null) => {
+    setEditBookingAt(next);
+    if (
+      editBooking?.status === "late" &&
+      next &&
+      dayjs(next).toISOString() !== dayjs(editBooking.bookingAt).toISOString()
+    ) {
+      setEditAreaId(null);
+      setEditTableId(null);
+      setEditMergeGroupId(null);
+    }
+  };
+
   const handleSubmitChangeTable = async (target: { areaId: string; tableId: string }) => {
     if (!changeTableBooking) {
       return;
@@ -2202,11 +2215,19 @@ function BookingsPageContent() {
             />
             <BookingDateTimeFields
               value={editBookingAt}
-              onChange={setEditBookingAt}
+              onChange={handleEditBookingAtChange}
               labelDate="Ngày đến"
               labelTime="Giờ đến"
               disabled={isEditSaving}
             />
+            {editBooking.status === "late" &&
+            editBookingAt &&
+            dayjs(editBookingAt).toISOString() !==
+              dayjs(editBooking.bookingAt).toISOString() ? (
+              <Alert color="blue" variant="light" title="Đổi giờ booking trễ">
+                Booking sẽ chuyển về chờ xếp bàn và bỏ bàn cũ đã đặt.
+              </Alert>
+            ) : null}
             {editTableConflictMessage ? (
               <Alert color="red" variant="light" title="Trùng khung giờ trên bàn">
                 {editTableConflictMessage}

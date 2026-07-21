@@ -1898,11 +1898,11 @@ export async function updateBookingOrderInSupabase(input: {
   ) {
     return { ok: false, message: "Manager chỉ được sửa booking thuộc chi nhánh của mình." };
   }
-  if (status !== "pending" && status !== "confirmed") {
+  if (status !== "pending" && status !== "confirmed" && status !== "late") {
     return {
       ok: false,
       message:
-        "Chỉ chỉnh giờ, tên khách, số khách, SĐT và khu/bàn khi booking chờ xếp bàn hoặc đã xác nhận.",
+        "Chỉ chỉnh giờ, tên khách, số khách, SĐT và khu/bàn khi booking chờ xếp bàn, đã xác nhận hoặc trễ.",
     };
   }
 
@@ -2108,6 +2108,19 @@ export async function updateBookingOrderInSupabase(input: {
     refreshTableIds.add(nextTableId);
   }
 
+  const rescheduleLateToPending = status === "late" && timeChanged;
+  if (rescheduleLateToPending || (status === "late" && !hasNextTarget)) {
+    const previousMergeGroupId = (booking.merge_group_id as string | null) ?? null;
+    if (previousMergeGroupId) {
+      for (const memberTableId of await listMergeGroupMemberTableIds(
+        client,
+        previousMergeGroupId
+      )) {
+        refreshTableIds.add(memberTableId);
+      }
+    }
+  }
+
   if (status === "pending" && mergeGroupContext && mergeGroupContext.ok && nextAreaId) {
     const { data: assignData, error: assignErr } = await (client as any).rpc(
       "assign_or_queue_pending_booking",
@@ -2219,9 +2232,26 @@ export async function updateBookingOrderInSupabase(input: {
     ...lastEditedPatch,
   };
 
-  if (!hasNextTarget) {
+  // New arrival time on a late booking → leave Trễ.
+  // No table → Chờ xếp bàn; table kept/reassigned → Đã xác nhận.
+  if (status === "late" && timeChanged) {
+    updatePayload.late_marked_at = null;
+    updatePayload.checked_in_at = null;
+    if (!hasNextTarget) {
+      updatePayload.status = "pending";
+      updatePayload.area_id = null;
+      updatePayload.table_id = null;
+      updatePayload.merge_group_id = null;
+    } else {
+      updatePayload.status = "confirmed";
+      updatePayload.no_show_marked_at = null;
+    }
+  } else if (!hasNextTarget) {
     updatePayload.status = "pending";
     updatePayload.checked_in_at = null;
+    if (status === "late") {
+      updatePayload.late_marked_at = null;
+    }
   } else if (status === "pending") {
     updatePayload.status = "confirmed";
     updatePayload.checked_in_at = null;
@@ -2252,7 +2282,13 @@ export async function updateBookingOrderInSupabase(input: {
     }
   }
 
-  return { ok: true, message: "Đã cập nhật booking." };
+  return {
+    ok: true,
+    message:
+      status === "late" && timeChanged && !hasNextTarget
+        ? "Đã cập nhật giờ đến và chuyển về chờ xếp bàn."
+        : "Đã cập nhật booking.",
+  };
 }
 
 const CHANGE_TABLE_ALLOWED_STATUSES: BookingStatus[] = ["confirmed", "seated", "checked_in"];

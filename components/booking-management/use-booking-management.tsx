@@ -319,6 +319,22 @@ export function useBookingManagement() {
     [state.customers]
   );
 
+  const handleEditBookingAtChange = useCallback(
+    (next: string | null) => {
+      setEditBookingAt(next);
+      if (
+        editBooking?.status === "late" &&
+        next &&
+        dayjs(next).toISOString() !== dayjs(editBooking.bookingAt).toISOString()
+      ) {
+        setEditAreaId(null);
+        setEditTableId(null);
+        setEditMergeGroupId(null);
+      }
+    },
+    [editBooking]
+  );
+
   const closeEditBookingModal = useCallback(() => {
     setEditBooking(null);
     setEditBookingAt(null);
@@ -743,9 +759,17 @@ export function useBookingManagement() {
             />
             <BookingDateTimeFields
               value={editBookingAt}
-              onChange={setEditBookingAt}
+              onChange={handleEditBookingAtChange}
               disabled={isEditSaving}
             />
+            {editBooking.status === "late" &&
+            editBookingAt &&
+            dayjs(editBookingAt).toISOString() !==
+              dayjs(editBooking.bookingAt).toISOString() ? (
+              <Alert color="blue" variant="light" title="Đổi giờ booking trễ">
+                Booking sẽ chuyển về chờ xếp bàn và bỏ bàn cũ đã đặt.
+              </Alert>
+            ) : null}
             {editTableConflictMessage ? (
               <Alert color="red" variant="light" title="Trùng khung giờ trên bàn">
                 {editTableConflictMessage}
