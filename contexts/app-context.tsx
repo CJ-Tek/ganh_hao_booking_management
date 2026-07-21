@@ -1571,6 +1571,11 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
     }
     const existingCustomer = state.customers.find((item) => item.id === booking.customerId);
     const previousCustomerName = existingCustomer?.fullName;
+    const previousStartIso = dayjs(booking.startTime ?? booking.bookingAt).toISOString();
+    const nextStartIso = dayjs(input.bookingAt).toISOString();
+    const timeChanged = previousStartIso !== nextStartIso;
+    const hasNextTarget = Boolean(input.tableId) || Boolean(input.mergeGroupId);
+    const rescheduleLate = booking.status === "late" && timeChanged;
     const revertPatch: Partial<Booking> = {
       bookingAt: booking.bookingAt,
       startTime: booking.startTime,
@@ -1579,6 +1584,9 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
       areaId: booking.areaId,
       tableId: booking.tableId,
       mergeGroupId: booking.mergeGroupId,
+      status: booking.status,
+      lateMarkedAt: booking.lateMarkedAt,
+      checkedInAt: booking.checkedInAt,
     };
     const optimisticPatch: Partial<Booking> = {
       bookingAt: input.bookingAt,
@@ -1587,9 +1595,29 @@ export function AppContextProvider({ children }: { children: React.ReactNode }) 
         typeof input.guestCount === "number" && Number.isFinite(input.guestCount)
           ? Math.max(1, Math.round(input.guestCount))
           : booking.guestCount,
-      areaId: input.areaId,
-      tableId: input.tableId,
-      mergeGroupId: input.mergeGroupId ?? null,
+      ...(rescheduleLate
+        ? hasNextTarget
+          ? {
+              status: "confirmed" as const,
+              areaId: input.areaId,
+              tableId: input.tableId,
+              mergeGroupId: input.mergeGroupId ?? null,
+              lateMarkedAt: null,
+              checkedInAt: undefined,
+            }
+          : {
+              status: "pending" as const,
+              areaId: null,
+              tableId: null,
+              mergeGroupId: null,
+              lateMarkedAt: null,
+              checkedInAt: undefined,
+            }
+        : {
+            areaId: input.areaId,
+            tableId: input.tableId,
+            mergeGroupId: input.mergeGroupId ?? null,
+          }),
     };
 
     setState((prev) => {
